@@ -1,0 +1,3 @@
+#!/bin/sh
+# Tests never open a browser: record the link instead.
+printf '%s\n' "$*" >> "${FAKE_DELTA_STATE:-/tmp}/opened.txt"

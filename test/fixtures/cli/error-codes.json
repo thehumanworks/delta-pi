@@ -1,0 +1,49 @@
+{
+  "authentication_required": {},
+  "wrong_account": {
+    "retryable": false
+  },
+  "not_visible": {
+    "retryable": false
+  },
+  "organization_required": {
+    "retryable": false
+  },
+  "not_shared": {
+    "retryable": false
+  },
+  "invalid_reference": {
+    "retryable": false
+  },
+  "invalid_record": {
+    "retryable": false
+  },
+  "sequence_gap": {
+    "retryable": false
+  },
+  "watch_reset": {
+    "retryable": true
+  },
+  "history_reset": {
+    "retryable": false
+  },
+  "reload_required": {
+    "retryable": false
+  },
+  "checkout_inactive": {
+    "retryable": false
+  },
+  "session_ended": {
+    "retryable": true
+  },
+  "incompatible_app": {
+    "retryable": false
+  },
+  "app_unavailable": {
+    "retryable": true
+  },
+  "invalid_invocation": {
+    "retryable": false
+  },
+  "failed": {}
+}
