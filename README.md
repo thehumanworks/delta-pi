@@ -59,6 +59,10 @@ JSON modes) never open a browser.
 address. `/delta-share ada@example.com` invites them directly. The conversation so far, its whole
 branch, compaction or not, is exported to the thread first; from then on each turn is recorded live.
 
+`/delta link` prints the current thread’s URL in the transcript, clickable in terminals that support
+links. It works over SSH without a clipboard and does not change who can see the thread: a private
+thread stays private. If this session has no link yet, it tells you rather than sharing it automatically.
+
 ### Joining
 
 `/delta-join <link>` mounts the thread's worktrees and switches pi to a new session in the thread's
@@ -106,6 +110,7 @@ menu of these actions.
 | `/delta-org switch <ID>` | Select a different team |
 | `/delta-org invite <email>…` | Invite people to the selected team |
 | `/delta-org manage` | Open the selected team's members page on the dashboard |
+| `/delta link` | Print the current thread's link without changing sharing permissions |
 | `/delta copy` | Copy the thread's link |
 | `/delta resolve` | Choose Fork & Restore or Discard for offline changes Delta refused |
 

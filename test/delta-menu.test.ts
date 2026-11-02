@@ -7,6 +7,7 @@ test("each menu answer becomes the action its dedicated command runs", async () 
     [["Share this session"], "share"],
     [["Set up this repository"], "setup"],
     [["Join a shared session", " https://delta.dev/join/abc "], "join https://delta.dev/join/abc"],
+    [["More actions", "Show thread link"], "link"],
     [["More actions", "Manage your team", "List my teams"], "org list"],
     [["More actions", "Manage your team", "Manage team in browser"], "org manage"],
     [

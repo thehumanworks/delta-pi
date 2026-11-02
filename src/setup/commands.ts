@@ -46,7 +46,7 @@ async function setupCommand(host: Host): Promise<string> {
 
 /** Every `/delta` action, for a session that can't show the menu and for an action it doesn't know. */
 export const DELTA_USAGE =
-  "Usage: /delta share [<email>…] | /delta join <shared-link-or-thread> | /delta setup | /delta update | /delta plugin-update [check | notifications on|off] | /delta org list | /delta org current | /delta org switch <ID> | /delta org invite <email>… | /delta org manage | /delta copy | /delta resolve";
+  "Usage: /delta share [<email>…] | /delta join <shared-link-or-thread> | /delta setup | /delta update | /delta plugin-update [check | notifications on|off] | /delta org list | /delta org current | /delta org switch <ID> | /delta org invite <email>… | /delta org manage | /delta link | /delta copy | /delta resolve";
 /** `/delta-join` typed without its link. */
 export const JOIN_USAGE =
   "Usage: /delta-join <link>. Paste the Delta link someone shared with you, such as /delta-join https://delta.dev/join/…, or a thread ID.";
@@ -70,6 +70,7 @@ export const COMMANDS = [
       "org switch",
       "org invite",
       "org manage",
+      "link",
       "copy",
       "resolve",
     ],
@@ -145,10 +146,12 @@ export function installUpdateHost(host: Host): UpdateHost {
   };
 }
 
+const NO_LINK = "This session has no Delta link yet. Share it with /delta-share first.";
+
 /** Copy the thread's link, which the band shows, to the clipboard. */
 async function copyLink(host: Host): Promise<string> {
   const link = statusLink();
-  if (!link) return "This session has no Delta link yet. Share it with /delta-share first.";
+  if (!link) return NO_LINK;
   return (await host.ui.copy(link)) ? `Copied ${link}` : `Couldn't copy the link; here it is: ${link}`;
 }
 
@@ -189,6 +192,7 @@ export async function runDeltaCommand(
     return pluginUpdateCommand(host, action.slice("plugin-update".length).trim(), replace);
   if (action === "update") return { text: await installationUpdates.update(installUpdateHost(host), form) };
   if (action === "org manage") return { text: await manageOrganization(host) };
+  if (action === "link") return { text: statusLink() ?? NO_LINK };
   if (action === "copy") return { text: await copyLink(host) };
   if (action === "resolve") return { text: await resolveCommand(host) };
   // A share, join, or setup started now would sign in again beside the wait, so it asks about that instead.

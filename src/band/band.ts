@@ -394,7 +394,7 @@ export function bandLines(host: Host, theme: Theme, width: number): string[] {
 }
 
 /** A link a terminal that supports it follows on a click. */
-function linkText(text: string, href: string, theme: Theme): string {
+export function linkText(text: string, href: string, theme: Theme): string {
   const shown = theme.fg("accent", text);
   return getCapabilities().hyperlinks ? hyperlink(shown, href) : shown;
 }

@@ -13,6 +13,7 @@ const SHARE = "Share this session";
 const JOIN = "Join a shared session";
 const SETUP = "Set up this repository";
 const MORE = "More actions";
+const LINK = "Show thread link";
 const TEAM = "Manage your team";
 const PLUGIN_UPDATE = "Update the Delta extension";
 const APP_UPDATE = "Update Delta app and CLI";
@@ -39,7 +40,10 @@ export async function chooseDeltaAction(
       const answer = await interaction.ask("What would you like to do with Delta?", {
         options: [SHARE, JOIN, SETUP, MORE],
         header: HEADER,
-        descriptions: { [JOIN]: "Needs the link someone shared with you", [MORE]: "Manage your team or update Delta" },
+        descriptions: {
+          [JOIN]: "Needs the link someone shared with you",
+          [MORE]: "Show the thread link, manage your team or update Delta",
+        },
       });
       if (answer === SHARE) return "share";
       if (answer === SETUP) return "setup";
@@ -50,9 +54,10 @@ export async function chooseDeltaAction(
     }
     if (step === "more") {
       const answer = await interaction.ask("Which Delta action?", {
-        options: [TEAM, PLUGIN_UPDATE, APP_UPDATE, BACK],
+        options: [LINK, TEAM, PLUGIN_UPDATE, APP_UPDATE, BACK],
         header: HEADER,
       });
+      if (answer === LINK) return "link";
       if (answer === PLUGIN_UPDATE) return "plugin-update";
       if (answer === APP_UPDATE) return "update";
       if (answer === BACK) continue;

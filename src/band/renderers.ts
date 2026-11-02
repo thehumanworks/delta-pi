@@ -6,7 +6,8 @@ import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, Markdown, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { NoteTone } from "../core/host.ts";
 import { fitToolRow, personColor } from "./status.ts";
-import { styled } from "./band.ts";
+import { linkText, styled } from "./band.ts";
+import { conversationWebLink } from "../watch/conversation.ts";
 import type { RemoteDisplay } from "../watch/rows.ts";
 
 /** A note Delta leaves in the transcript for the person, never sent to the model. */
@@ -56,7 +57,10 @@ export function renderRemote(display: RemoteDisplay | undefined, theme: Theme, o
 export function renderNote(note: Note | undefined, theme: Theme) {
   if (!note?.text) return undefined;
   const color = note.tone === "error" ? "error" : note.tone === "warning" ? "warning" : "muted";
-  return new Text(`${theme.fg("accent", "Delta")} ${theme.fg(color, note.text)}`, 1, 0);
+  // A standalone URL, as /delta link answers, stays plain in storage and RPC but is clickable here.
+  const link = conversationWebLink(note.text);
+  const text = link === note.text ? linkText(note.text, link, theme) : theme.fg(color, note.text);
+  return new Text(`${theme.fg("accent", "Delta")} ${text}`, 1, 0);
 }
 
 /**

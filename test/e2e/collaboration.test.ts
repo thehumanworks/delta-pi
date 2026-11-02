@@ -172,6 +172,8 @@ test("/delta-join mounts a shared thread and continues in a pi session in its fo
     () => w.calls().some((call) => call.argv.includes("watch") && call.argv.includes(session)),
     "the joined watch",
   );
+  await pi.command("/delta link");
+  await until(() => pi.notices().includes(url), "the joined thread's link");
   // The thread's conversation so far reaches the model's context.
   await until(async () => JSON.stringify(await pi.messages()).includes("I fixed the parser."), "the thread's history");
   await pi.prompt("hello from the join");
