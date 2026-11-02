@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pi, until, world, type World } from "./harness.ts";
 
@@ -36,14 +36,14 @@ test("the setup offer runs setup, which saves the repository's choice and keeps 
   });
   current = { pi, world: w };
   const settings = join(w.checkout, ".delta", "settings.json");
-  await until(() => existsSync(settings), "the settings to be saved");
+  // The settings file appears before Git's exclude update and the final dialog; wait for the whole wizard.
+  await until(() => pi.notices().some((text) => text.includes("Saved Private sync with Zed")), "setup's outcome");
   expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ threads: { mode: "private", organization: "org-1" } });
   expect(readFileSync(join(w.checkout, ".git", "info", "exclude"), "utf8")).toContain("/.delta/settings.json\n");
   expect(titles[0]).toContain("Set it up now?");
   expect(titles[1]).toContain("Which team should sessions from this repository sync to?");
   expect(titles[2]).toContain("Which sessions should Delta sync?");
   expect(titles[3]).toContain("Sync this session privately too?");
-  await until(() => pi.notices().some((text) => text.includes("Saved Private sync with Zed")), "setup's outcome");
   // The setting applies to new sessions; this one is reminded it doesn't sync.
   await until(() => pi.status()?.includes("Not syncing"), "the band's reminder");
 }, 60_000);
