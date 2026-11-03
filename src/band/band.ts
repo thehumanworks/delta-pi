@@ -10,6 +10,7 @@ import {
   styleTextWithAnsi,
   truncateToWidth,
   visibleWidth,
+  wrapTextWithAnsi,
 } from '@earendil-works/pi-tui'
 import type { Timer } from '../core/clock.ts'
 import type { Host } from '../core/host.ts'
@@ -348,7 +349,8 @@ export function styled(segment: StatusSegment, theme: Theme): string {
   else if (segment.color === 'yellow') text = theme.fg('warning', text)
   else if (segment.color === 'green') text = theme.fg('success', text)
   else if (segment.color) text = styleTextWithAnsi(text, ANSI[segment.color], undefined, {})
-  else if (segment.dim) text = theme.fg('dim', text)
+  if (segment.dim)
+    text = segment.color ? styleTextWithAnsi(text, undefined, undefined, { dim: true }) : theme.fg('dim', text)
   if (segment.bold) text = theme.bold(text)
   if (segment.inverse) text = theme.inverse(text)
   return text
@@ -386,7 +388,7 @@ export function bandLines(host: Host, theme: Theme, width: number): string[] {
         ? ` ${left}${' '.repeat(gap)}${right} `
         : truncateToWidth(` ${left}${right ? `  ${right}` : ''}`, width),
     )
-    if (link && ownRow) lines.push(truncateToWidth(`   ${link}`, width))
+    if (link && ownRow) lines.push(...wrapTextWithAnsi(link, Math.max(1, width - 3)).map((line) => `   ${line}`))
     if (band.detail) lines.push(truncateToWidth(`   ${spans(band.detail, theme)}`, width))
   }
   if (update) lines.push(truncateToWidth(` ${theme.fg('accent', '↑')} ${theme.fg('dim', update)}`, width))
@@ -427,6 +429,7 @@ export function bandText(host: Host): string | undefined {
     band.conflict ? `${band.conflict.fork} ${band.conflict.discard}` : undefined,
     plain(band.right),
     plain(band.detail),
+    pluginUpdateNotice(),
   ]
     .filter(Boolean)
     .join('  ')
