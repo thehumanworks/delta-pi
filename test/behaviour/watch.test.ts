@@ -77,23 +77,25 @@ test('a gone thread pauses sharing with its reason instead of reconnecting', asy
   expect(band(kit)).toContain('not_visible')
 })
 
-for (const code of ['failed', 'incompatible_app'])
-  test(`a non-retryable ${code} watch error pauses participation`, async () => {
-    const kit = await shared()
-    kit.world.endWatch(threadOf(kit), 1, {
-      code,
-      reason: code === 'failed' ? 'storage' : code,
-      message: 'cannot continue',
-      retryable: false,
-    })
-    await kit.until(() => band(kit).includes(code), 'the pause to be shown')
-    const count = watches(kit).length
-    await kit.advance(120_000)
-    expect(watches(kit)).toHaveLength(count)
-    expect(band(kit)).toContain(code)
-    // The pause stops delivery, not pi: the prompt is accepted while the reason stays shown.
-    expect(await kit.pi.prompt('while paused')).toBe('settled')
+/** A watch Delta ends with a non-retryable `code` pauses participation instead of reconnecting. */
+const pausesOn = (code: string) => async () => {
+  const kit = await shared()
+  kit.world.endWatch(threadOf(kit), 1, {
+    code,
+    reason: code === 'failed' ? 'storage' : code,
+    message: 'cannot continue',
+    retryable: false,
   })
+  await kit.until(() => band(kit).includes(code), 'the pause to be shown')
+  const count = watches(kit).length
+  await kit.advance(120_000)
+  expect(watches(kit)).toHaveLength(count)
+  expect(band(kit)).toContain(code)
+  // The pause stops delivery, not pi: the prompt is accepted while the reason stays shown.
+  expect(await kit.pi.prompt('while paused')).toBe('settled')
+}
+test('a non-retryable failed watch error pauses participation', pausesOn('failed'))
+test('a non-retryable incompatible_app watch error pauses participation', pausesOn('incompatible_app'))
 
 test('a retryable failed watch error reconnects like any lost connection', async () => {
   const kit = await shared()
@@ -221,35 +223,37 @@ test('reconnection retries with capped backoff and session end stops the idle ch
   expect(attempts()).toBe(ended)
 })
 
-for (const nth of [1, 2])
-  test(`ending during startup store read ${nth} cannot start the watcher`, async () => {
-    const kit = await shared()
-    await end(kit)
-    const session = kit.pi.session.id
-    // The first read is the session's binding, as activation loads it; the second the ledger of rows
-    // pi's context already holds, as the watch loads it before it starts.
-    const held = nth === 1 ? `session_${session}` : `appended_${session}`
-    const release = kit.disk.hold('read', held)
-    const again = await resume(kit, false)
-    const reads = kit.disk.touched('read').length
-    const starting = again.pi.start()
-    await again.until(
-      () =>
-        kit.disk
-          .touched('read')
-          .slice(reads)
-          .some((path) => path.includes(held)),
-      'the held store read',
-    )
-    const ending = again.whileTimePasses(again.pi.shutdown('quit'))
-    await again.settle()
-    release()
-    await ending
-    await starting
-    await again.advance(60_000)
-    expect(watches(again)).toEqual([])
-    expect(again.running()).toEqual([])
-  })
+/** Ending the session while startup's `nth` store read waits starts no watch for it. */
+const endsDuringRead = (nth: 1 | 2) => async () => {
+  const kit = await shared()
+  await end(kit)
+  const session = kit.pi.session.id
+  // The first read is the session's binding, as activation loads it; the second the ledger of rows
+  // pi's context already holds, as the watch loads it before it starts.
+  const held = nth === 1 ? `session_${session}` : `appended_${session}`
+  const release = kit.disk.hold('read', held)
+  const again = await resume(kit, false)
+  const reads = kit.disk.touched('read').length
+  const starting = again.pi.start()
+  await again.until(
+    () =>
+      kit.disk
+        .touched('read')
+        .slice(reads)
+        .some((path) => path.includes(held)),
+    'the held store read',
+  )
+  const ending = again.whileTimePasses(again.pi.shutdown('quit'))
+  await again.settle()
+  release()
+  await ending
+  await starting
+  await again.advance(60_000)
+  expect(watches(again)).toEqual([])
+  expect(again.running()).toEqual([])
+}
+test('ending during startup store read 1 cannot start the watcher', endsDuringRead(1))
+test('ending during startup store read 2 cannot start the watcher', endsDuringRead(2))
 
 test('ending during watch CLI resolution never spawns the obsolete command', async () => {
   const kit = await shared()
@@ -359,6 +363,9 @@ test('unavailable inspection pauses participation and preserves binding and pend
   kit.pi.model = () => new Promise((resolve) => (answer = (text) => resolve({ text })))
   const turn = kit.pi.submit('inspect')
   await kit.until(() => records(kit).some((record) => record.update.state === 'running'), 'the turn to start')
+  // What the turn recorded so far has reached Delta before its checkout becomes unreadable.
+  await kit.until(async () => (await binding(kit)).pending.length === 0, 'the turn so far to be delivered')
+  await kit.until(() => !kit.running().some((args) => args[1] === 'status'), 'no status read in flight')
   const original = await binding(kit)
   const delivered = records(kit).length
   kit.world.patchStatus({
@@ -453,30 +460,32 @@ test('readiness processes turns and items while initial status is pending', asyn
   expect(setupCommands(again)).toEqual([])
 })
 
-for (const failure of [false, true])
-  test(`a stopped observer's late status ${failure ? 'error' : 'result'} cannot replace a restarted binding`, async () => {
-    const kit = await shared()
-    await end(kit)
-    const saved = await binding(kit)
-    // A resume clears the end marker, so it is not part of the preserved binding.
-    delete saved.endedAt
-    const release = kit.world.hold('thread status', { times: 1 })
-    const first = await resume(kit, false)
-    const starting = first.pi.start()
-    await first.until(() => first.running().some((args) => args[1] === 'status'), 'the inspection to wait')
-    await end(first)
-    await starting
-    const second = await resume(kit)
-    await second.until(() => band(second).startsWith(LIVE), 'the restarted watch to be live')
-    // The old inspection answers only now, after its observer stopped and a new one took over.
-    if (failure) kit.world.fail('thread status', { code: 'unavailable', retryable: false })
-    else kit.world.patchStatus({ url: 'https://delta.dev/join/old_inspection' })
-    release()
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    kit.world.stopFailing('thread status')
-    kit.world.patchStatus(undefined)
-    await second.settle()
-    expect(await binding(second)).toEqual(saved)
-    expect(band(second).startsWith(LIVE)).toBe(true)
-    expect(await second.pi.prompt('after inspection restart')).toBe('settled')
-  })
+/** A stopped observer's inspection that answers late, with a `failure` or a result, changes nothing. */
+const lateInspection = (failure: boolean) => async () => {
+  const kit = await shared()
+  await end(kit)
+  const saved = await binding(kit)
+  // A resume clears the end marker, so it is not part of the preserved binding.
+  delete saved.endedAt
+  const release = kit.world.hold('thread status', { times: 1 })
+  const first = await resume(kit, false)
+  const starting = first.pi.start()
+  await first.until(() => first.running().some((args) => args[1] === 'status'), 'the inspection to wait')
+  await end(first)
+  await starting
+  const second = await resume(kit)
+  await second.until(() => band(second).startsWith(LIVE), 'the restarted watch to be live')
+  // The old inspection answers only now, after its observer stopped and a new one took over.
+  if (failure) kit.world.fail('thread status', { code: 'unavailable', retryable: false })
+  else kit.world.patchStatus({ url: 'https://delta.dev/join/old_inspection' })
+  release()
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  kit.world.stopFailing('thread status')
+  kit.world.patchStatus(undefined)
+  await second.settle()
+  expect(await binding(second)).toEqual(saved)
+  expect(band(second).startsWith(LIVE)).toBe(true)
+  expect(await second.pi.prompt('after inspection restart')).toBe('settled')
+}
+test("a stopped observer's late status result cannot replace a restarted binding", lateInspection(false))
+test("a stopped observer's late status error cannot replace a restarted binding", lateInspection(true))

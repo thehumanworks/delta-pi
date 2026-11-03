@@ -98,30 +98,30 @@ test('a drawn row shows the item as it is now while the watch holds its thread, 
     thread: 't',
   }
   // Before the watch is back, as after a restart, and for another thread, the row draws what it saved.
-  expect(liveDisplay(saved).display).toBe(saved)
+  expect(liveDisplay(saved).display()).toBe(saved)
   const view = new RemoteView('other', { thread: 'other', items: {} })
   feed.view = view
-  expect(liveDisplay(saved).display).toBe(saved)
+  expect(liveDisplay(saved).display()).toBe(saved)
   feed.view = new RemoteView('t', { thread: 't', items: {} })
   const live = feed.view
   // While the snapshot arrives, an item it has not reported yet still draws as saved.
-  expect(liveDisplay(saved).display).toBe(saved)
+  expect(liveDisplay(saved).display()).toBe(saved)
   live.upsert(remote('Edited since'))
-  expect(liveDisplay(saved).display).toMatchObject({ kind: 'message', markdown: 'Edited since' })
+  expect(liveDisplay(saved).display()).toMatchObject({ kind: 'message', markdown: 'Edited since' })
   const { sources } = liveDisplay(saved)
   expect(liveDisplay(saved).sources).toEqual(sources)
   // Emptied, as an agent message whose only block became a comment reply, it draws nothing.
   live.upsert(remote('', { kind: 'agent_message' }))
-  expect(liveDisplay(saved).display).toBe('gone')
+  expect(liveDisplay(saved).display()).toBe('gone')
   live.remove('a')
-  expect(liveDisplay(saved).display).toBe('gone')
+  expect(liveDisplay(saved).display()).toBe('gone')
   // Missing from a complete snapshot, as when it was removed while pi was not running, it draws nothing.
   feed.view = new RemoteView('t', { thread: 't', items: {} })
   feed.view.endSnapshot()
-  expect(liveDisplay(saved).display).toBe('gone')
+  expect(liveDisplay(saved).display()).toBe('gone')
   // A row saved before rows carried their item draws as it was saved.
   const { id: _id, thread: _thread, ...old } = saved
-  expect(liveDisplay(old).display).toBe(old)
+  expect(liveDisplay(old).display()).toBe(old)
 })
 
 test("a resumed session's ledger keeps only what its session holds a row for", () => {

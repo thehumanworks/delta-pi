@@ -307,7 +307,7 @@ test("the command output row draws its author and the item's own markdown", asyn
   expect(drawn(kit, 'r')!.join('\n')).toContain('Reply')
 })
 
-test('a drawn row redraws a teammate’s edit, and its quote fits the terminal’s width', async () => {
+test("a drawn row redraws a teammate's edit, and its quote fits the terminal's width", async () => {
   const kit = await shared()
   const line = `${'Lead-in words before it. '.repeat(6)}Look at the parser here. ${'And words after it. '.repeat(6)}`
   kit.world.remote(

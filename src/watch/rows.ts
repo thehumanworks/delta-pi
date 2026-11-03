@@ -147,27 +147,29 @@ function commentDisplay(view: RemoteView, comment: WatchComment): RemoteDisplay 
  * What a drawn row shows now. While the watch holds the row's thread, that is the item or comment as
  * it is now, nothing (`gone`) once it was removed, emptied, or is missing from a complete snapshot,
  * and what was saved while its snapshot is still arriving. Otherwise, as after a restart before the
- * watch is back, it is what was saved. `sources` are the objects the answer was made from, so a
- * renderer redraws only when one of them is replaced.
+ * watch is back, it is what was saved. `sources` are the objects the answer is made from, so a
+ * renderer works it out again, with `display`, only when one of them was replaced.
  */
-export function liveDisplay(saved: RemoteDisplay): { display: RemoteDisplay | 'gone'; sources: unknown[] } {
+export function liveDisplay(saved: RemoteDisplay): { sources: unknown[]; display: () => RemoteDisplay | 'gone' } {
   const view = feed.view
-  if (!view || saved.id === undefined || saved.thread !== view.thread) return { display: saved, sources: [saved] }
-  if (view.wasRemoved(saved.id)) return { display: 'gone', sources: [view, 'removed'] }
+  const asSaved = { sources: [saved], display: () => saved }
+  const gone = (...sources: unknown[]) => ({ sources, display: () => 'gone' as const })
+  if (!view || saved.id === undefined || saved.thread !== view.thread) return asSaved
+  if (view.wasRemoved(saved.id)) return gone(view, 'removed')
   const commentId = keyedComment(saved.id)
   if (commentId !== undefined) {
     const comment = view.comments.get(commentId)
-    if (!comment) return view.snapshotDone ? { display: 'gone', sources: [view] } : { display: saved, sources: [saved] }
+    if (!comment) return view.snapshotDone ? gone(view) : asSaved
     const target = view.commentTarget(comment)
     const quoted = target?.kind === 'transcript' && target.item_id !== null ? view.items.get(target.item_id) : undefined
     return {
-      display: commentDisplay(view, comment),
       sources: [comment, view.commentParent(comment), view.comments.get(comment.chain), quoted],
+      display: () => commentDisplay(view, comment),
     }
   }
   const item = view.items.get(saved.id)
-  if (!item) return view.snapshotDone ? { display: 'gone', sources: [view] } : { display: saved, sources: [saved] }
-  return { display: itemDisplay(item, view.thread) ?? 'gone', sources: [item] }
+  if (!item) return view.snapshotDone ? gone(view) : asSaved
+  return { sources: [item], display: () => itemDisplay(item, view.thread) ?? 'gone' }
 }
 
 /**

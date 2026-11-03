@@ -38,9 +38,10 @@ class RemoteRow implements Component {
   ) {}
 
   render(width: number): string[] {
-    const { display, sources } = liveDisplay(this.saved)
+    const { display: current, sources } = liveDisplay(this.saved)
     const drawn = this.drawn
     if (drawn && drawn.width === width && sameSources(drawn.sources, sources)) return drawn.lines
+    const display = current()
     const lines =
       display === 'gone' || display.kind === 'context'
         ? []
