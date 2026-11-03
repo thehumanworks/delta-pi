@@ -97,3 +97,31 @@ test('marks recorded live Claude messages and tool activity', async () => {
   const calls = live.filter((record: any) => record.update.sessionUpdate === 'tool_call_update')
   expect(new Set(calls.map((record: any) => record.update.toolCallId)).size).toBe(1)
 })
+
+test("two writes to one file in a reply record the second's change against the first's", async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  // pi prepares both calls before running either, and runs writes to one file in order.
+  expect(pi.toolExecution).toBe('parallel')
+  pi.model = (messages) =>
+    messages.at(-1)?.role === 'toolResult'
+      ? { text: 'Written twice.' }
+      : {
+          calls: [
+            { name: 'write', arguments: { path: 'twice.txt', content: 'one\n' } },
+            { name: 'write', arguments: { path: 'twice.txt', content: 'two\n' } },
+            { name: 'write', arguments: { path: 'twice.txt', content: 'three\n' } },
+          ],
+        }
+  await pi.prompt('write it three times')
+  const diffs = await delta.until(() => {
+    const records: any[] = delta!.thread()?.records ?? []
+    const found = records.flatMap((record) => (record.update.content ?? []).filter((item: any) => item.type === 'diff'))
+    return found.length === 3 && found
+  }, 'the three writes to reach Delta')
+  expect(diffs.map((diff: any) => diff.changes[0].operation)).toEqual(['add', 'modify', 'modify'])
+  expect(diffs[0].patch.text).toContain('+one\n')
+  expect(diffs[1].patch.text).toContain('-one\n+two\n')
+  expect(diffs[2].patch.text).toContain('-two\n+three\n')
+})

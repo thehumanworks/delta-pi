@@ -370,8 +370,8 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   pi.on('tool_call', async (event, ctx) => {
     context = ctx
     // A call another tool made has no result in the transcript, so its record would never be released.
-    if (event.toolName === 'write' && event.parentToolCallId === undefined)
-      await rememberPriorFile(host, event.toolCallId, event.input)
+    if ((event.toolName === 'write' || event.toolName === 'edit') && event.parentToolCallId === undefined)
+      await rememberPriorFile(host, event.toolCallId, event.input, event.toolName)
   })
 
   pi.on('agent_settled', async (event, ctx) => {

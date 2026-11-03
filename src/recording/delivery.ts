@@ -99,6 +99,14 @@ let resolving = false
 /** The arguments of each recorded tool call and the file each write replaced, until its result is recorded. */
 const toolInputs = new Map<string, unknown>()
 const priorFiles = new Map<string, PriorFile>()
+/**
+ * The last write or edit to each file whose result is not yet recorded. pi prepares a reply's calls
+ * before running any and runs writes to one file in order, so a later write replaces what this one
+ * leaves, not what is on disk while the calls are prepared.
+ */
+const pendingWrites = new Map<string, { call: string; content?: string }>()
+/** The earlier call each later write's prior contents were taken from, should that call fail. */
+const writtenAfter = new Map<string, string>()
 /** Builds a unified patch between two texts; `index.ts` supplies pi's own, which its edit tool uses. */
 let unifiedPatch: Translation['patch']
 /** A write replacing a file larger than this records which file it changed, without its patch. */
@@ -848,6 +856,8 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
   // Every call of the run has its result by now; what was kept for one that never reported is dropped.
   toolInputs.clear()
   priorFiles.clear()
+  pendingWrites.clear()
+  writtenAfter.clear()
   stopChildTurn()
   if (sequence !== undefined) {
     try {
@@ -865,13 +875,31 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
   }
 }
 
-/** Remember what a write call replaces, so its record carries the change as a patch. */
-export async function rememberPriorFile(host: Host, toolCallId: string, input: unknown) {
+/**
+ * Remember what a write call replaces, so its record carries the change as a patch, and which file an
+ * edit call changes, so a write after it in the same reply does not take the file from before it.
+ */
+export async function rememberPriorFile(host: Host, toolCallId: string, input: unknown, tool = 'write') {
   const path = isJsonObject(input) && typeof input.path === 'string' ? input.path : undefined
   if (!path) return
   const binding = stateFor(host.session.id()).binding
   if (!binding?.snapshot) return
   const absolute = absolutePath(path, host.session.cwd())
+  const earlier = pendingWrites.get(absolute)
+  const content = isJsonObject(input) && typeof input.content === 'string' ? input.content : undefined
+  pendingWrites.set(absolute, { call: toolCallId, ...(tool === 'write' && content !== undefined ? { content } : {}) })
+  if (tool !== 'write') return
+  if (earlier) {
+    // What an earlier write leaves is its content; what an earlier edit leaves is not known here.
+    writtenAfter.set(toolCallId, earlier.call)
+    priorFiles.set(
+      toolCallId,
+      earlier.content !== undefined && earlier.content.length <= PRIOR_FILE_LIMIT
+        ? { existed: true, text: earlier.content }
+        : { existed: true },
+    )
+    return
+  }
   try {
     if (!(await exists(absolute))) {
       priorFiles.set(toolCallId, { existed: false })
@@ -886,6 +914,24 @@ export async function rememberPriorFile(host: Host, toolCallId: string, input: u
   } catch {
     priorFiles.set(toolCallId, { existed: true })
   }
+}
+
+/**
+ * Forget what was kept for a call whose result is recorded. A write that failed left the file as it
+ * found it, so a later write to the file replaced that instead.
+ */
+function settleToolCall(toolCallId: string, failed: boolean) {
+  const prior = priorFiles.get(toolCallId)
+  for (const [later, earlier] of writtenAfter)
+    if (earlier === toolCallId) {
+      writtenAfter.delete(later)
+      if (failed && prior) priorFiles.set(later, prior)
+      else if (failed) priorFiles.delete(later)
+    }
+  writtenAfter.delete(toolCallId)
+  for (const [path, pending] of pendingWrites) if (pending.call === toolCallId) pendingWrites.delete(path)
+  toolInputs.delete(toolCallId)
+  priorFiles.delete(toolCallId)
 }
 
 /** The translation context for a binding's records. */
@@ -969,11 +1015,8 @@ export async function recordMessage(host: Host, message: AgentMessage, id: strin
     if (tool && !runtime.toolTurns.has(tool)) runtime.toolTurns.set(tool, turnSequence)
     await persistUpdates(host, session, [update], tool ? runtime.toolTurns.get(tool) : turnSequence)
   }
-  if (recorded.role === 'toolResult') {
-    toolInputs.delete(recorded.toolCallId)
-    priorFiles.delete(recorded.toolCallId)
-    runtime.toolTurns.delete(recorded.toolCallId)
-  }
+  if (recorded.role === 'toolResult') settleToolCall(recorded.toolCallId, recorded.isError)
+  if (recorded.role === 'toolResult') runtime.toolTurns.delete(recorded.toolCallId)
   if (!runtime.captureFailure && runtime.binding.thread)
     void drain(host, session).catch((error: unknown) => report(host, error))
 }
