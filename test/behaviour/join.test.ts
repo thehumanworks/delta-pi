@@ -737,7 +737,7 @@ test('terminal: repeated join aliases preserve the existing producer and pending
   expect(binding.lastTurnSequence).toBeGreaterThan(0)
   // A teammate's message the model has already read.
   const item = remoteItem('Already handed off', 'known')
-  const ledger = { thread, items: { known: await itemFingerprint(item.item as never) } }
+  const ledger = { thread, items: { known: await itemFingerprint(item.item) } }
   await kit.store.set(`appended:${session}`, ledger)
   kit.world.remote(thread, item)
   kit.world.endWatch(thread)
