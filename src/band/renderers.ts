@@ -7,8 +7,8 @@ import { Box, type Component, Markdown, Text, truncateToWidth } from '@earendil-
 import type { NoteTone } from '../core/host.ts'
 import { fitToolRow, personColor } from './status.ts'
 import { linkText, styled } from './band.ts'
-import { conversationWebLink } from '../watch/conversation.ts'
-import type { RemoteDisplay } from '../watch/rows.ts'
+import { conversationWebLink, fitQuotedLine } from '../watch/conversation.ts'
+import { liveDisplay, type RemoteDisplay } from '../watch/rows.ts'
 
 /** A note Delta leaves in the transcript for the person, never sent to the model. */
 export type Note = { text: string; tone?: NoteTone }
@@ -17,9 +17,54 @@ function author(name: string, person: string, theme: Theme): string {
   return styled({ text: name, color: personColor(person), bold: true }, theme)
 }
 
-/** A remote item as the person reads it: under its author, in that person's color. */
+/**
+ * A remote item as the person reads it: under its author, in that person's color. The row draws the
+ * item as it is now each time pi draws it, so a teammate's edit or removal redraws it, and fits its
+ * quoted context to the terminal's width.
+ */
 export function renderRemote(display: RemoteDisplay | undefined, theme: Theme, outputPad: number) {
   if (!display || display.kind === 'context') return undefined
+  return new RemoteRow(display, theme, outputPad)
+}
+
+/** A drawn remote row, rebuilt only when what it shows or the width it is drawn at changes. */
+class RemoteRow implements Component {
+  private drawn?: { sources: unknown[]; width: number; lines: string[] }
+
+  constructor(
+    private readonly saved: RemoteDisplay,
+    private readonly theme: Theme,
+    private readonly outputPad: number,
+  ) {}
+
+  render(width: number): string[] {
+    const { display: current, sources } = liveDisplay(this.saved)
+    const drawn = this.drawn
+    if (drawn && drawn.width === width && sameSources(drawn.sources, sources)) return drawn.lines
+    const display = current()
+    const lines =
+      display === 'gone' || display.kind === 'context'
+        ? []
+        : remoteBox(display, this.theme, this.outputPad, width).render(width)
+    this.drawn = { sources, width, lines }
+    return lines
+  }
+
+  invalidate() {
+    this.drawn = undefined
+  }
+}
+
+function sameSources(a: unknown[], b: unknown[]): boolean {
+  return a.length === b.length && a.every((source, index) => source === b[index])
+}
+
+function remoteBox(
+  display: Exclude<RemoteDisplay, { kind: 'context' }>,
+  theme: Theme,
+  outputPad: number,
+  width: number,
+) {
   const box = new Box(outputPad, 0)
   if (display.kind === 'tool') {
     box.addChild(new ToolLine(display, theme))
@@ -32,11 +77,14 @@ export function renderRemote(display: RemoteDisplay | undefined, theme: Theme, o
   }
   if (display.kind === 'comment') {
     const heading = `${display.reply ? theme.fg('dim', '↳ ') : ''}${author(display.author, display.person, theme)}${theme.fg('dim', ` ${display.action}${display.routed ? ' · sent to a subthread' : ''}`)}`
-    box.addChild(new Text(heading, 0, 0))
-    for (const line of display.quote) {
+    box.addChild(new TruncatedLine(heading))
+    // Quoted context is earlier material: dim, behind a gutter, and elided to the row rather than wrapped.
+    const room = Math.max(1, width - 2 * outputPad - 2)
+    for (const quoted of display.quote) {
+      const line = fitQuotedLine(quoted, room)
       const marked = line.emphasis && (line.before || line.after) ? theme.underline(line.marked) : line.marked
       box.addChild(
-        new Text(theme.fg('dim', `│ ${line.before}`) + theme.fg('dim', marked) + theme.fg('dim', line.after), 0, 0),
+        new TruncatedLine(theme.fg('dim', `│ ${line.before}`) + theme.fg('dim', marked) + theme.fg('dim', line.after)),
       )
     }
     box.addChild(new Markdown(display.markdown, 0, 0, getMarkdownTheme()))
@@ -51,6 +99,17 @@ export function renderRemote(display: RemoteDisplay | undefined, theme: Theme, o
   )
   box.addChild(new Markdown(display.markdown, 0, 0, getMarkdownTheme()))
   return box
+}
+
+/** One line, cut at the row's end rather than wrapped. */
+class TruncatedLine implements Component {
+  constructor(private readonly text: string) {}
+
+  render(width: number): string[] {
+    return [truncateToWidth(this.text, width)]
+  }
+
+  invalidate() {}
 }
 
 /** A note for the person, marked as Delta's and colored by how it reads. */

@@ -40,7 +40,7 @@ export const KILL_GRACE_MS = 2_000
 const STOP_WAIT_MS = 6_000
 /**
  * How long a program asked to stop with `terminate` has before it is killed: longer than a pi
- * subagent's own shutdown budget (`SUBAGENT_SHUTDOWN_MS` in index.ts), which flushes its records.
+ * subagent's own end (`SUBAGENT_SHUTDOWN_MS` in src/subagents/subagents.ts), which flushes its records.
  */
 export const TERMINATE_GRACE_MS = 20_000
 

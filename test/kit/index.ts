@@ -13,14 +13,14 @@ import { expect, vi } from 'vitest'
 import type { Platform } from '../../src/core/host.ts'
 import { FAKE_BIN, until, world, type World } from '../world.ts'
 import { flush, MockClock } from './clock.ts'
-import { type Answer, FakePi, type FakeSession } from './pi.ts'
+import { type Answer, FakePi, type FakeSession, type Mode } from './pi.ts'
 import { fileStore } from '../../src/core/store.ts'
 import { disk } from './disk.ts'
-import { type Environment, type FakeProgram, type FakeStream, kitProcesses } from './processes.ts'
+import { type Environment, type FakeProgram, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
-export { echoModel, FakeSession, type Model, type Reply } from './pi.ts'
-export type { FakeProgram, FakeStream } from './processes.ts'
+export { echoModel, FAKE_THEME, FakeSession, type Model, type Reply, themeColor } from './pi.ts'
+export type { FakeProgram } from './processes.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
 
@@ -28,7 +28,7 @@ export type Kit = Awaited<ReturnType<typeof startDelta>>
 export async function startDelta(
   options: {
     policy?: Record<string, unknown>
-    mode?: 'rpc' | 'print'
+    mode?: Mode
     answers?: Answer[]
     env?: Environment
     /** A world to start in, such as another kit's, for a second pi on the same machine. */
@@ -58,8 +58,7 @@ export async function startDelta(
     ...options.env,
   }
   const programs = new Map<string, FakeProgram>()
-  const streams = new Map<string, FakeStream>()
-  const processes = kitProcesses(() => env, programs, streams)
+  const processes = kitProcesses(() => env, programs)
   const stderr: string[] = []
   const copied: string[] = []
   const platform: Platform = {
@@ -100,12 +99,19 @@ export async function startDelta(
      * Every other program runs for real.
      */
     programs,
-    /** Long-running programs other than `delta` a test stands in for, by name, such as a subagent's `pi`. */
-    streams,
     /** The other programs the extension ran, as full argument lists. */
     others: () => processes.others.map((call) => call.argv),
+    /** How many one-shot Delta commands the extension started are still running. */
+    busy: () => processes.busy(),
     /** The delta commands the extension ran, as argument lists without the program. */
     commands: () => processes.ran.map((call) => call.argv.slice(1).filter((arg) => arg !== '--json')),
+    /**
+     * The delta commands the extension ran as it ran them: the program and every argument, with the time
+     * it gave each to finish, or whether it read the command as it streamed.
+     */
+    runs: () => processes.ran.map(({ argv, timeoutMs, spawned }) => ({ argv, timeoutMs, spawned: !!spawned })),
+    /** The long-running delta commands still running, such as a mount or a sign-in's wait, without the program. */
+    running: () => processes.running().map((argv) => argv.filter((arg) => arg !== '--json')),
     /** The fake CLI's one top-level thread, once it exists. */
     thread: () => Object.values(w.delta().threads).find((thread) => !thread.parent),
     /** Wait until `read` holds, while the extension's work runs. */

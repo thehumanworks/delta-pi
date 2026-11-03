@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 /** One record a producer appended, as the fake keeps it. */
@@ -46,8 +46,13 @@ export type FakeThread = {
 export type FakeWorktree = {
   reference: string
   worktree_id: string
-  /** Where the worktree is checked out, and, for a thread mount's folder, how many mount commands hold it. */
-  directories: { directory: string; state: 'waiting' | 'mounted'; holders?: number }[]
+  /** What Delta calls the worktree: the folder it was created from. */
+  name?: string
+  /**
+   * Where the worktree is checked out, and, for a thread mount's folder, how many mount commands hold it.
+   * `restoring` is a checkout whose mount ended while Delta still finishes its final upload.
+   */
+  directories: { directory: string; state: 'waiting' | 'mounted' | 'restoring'; holders?: number }[]
 }
 /** Everything the fake Delta holds, in `$FAKE_DELTA_STATE/state.json`. */
 export type FakeState = {
@@ -58,6 +63,18 @@ export type FakeState = {
   counter: number
   shares: Record<string, unknown>
   forked?: string[]
+}
+
+/**
+ * Delta's background upload of an automatic session's thread, as a test sets it (`world().upload`):
+ * `queued` before Delta registers the thread, `uploading` once it has a link, then `uploaded` or
+ * `failed` with `error`. `reportsOrganization: false` answers status without the organization, as
+ * some CLIs have.
+ */
+export type FakeUpload = {
+  state: 'queued' | 'uploading' | 'uploaded' | 'failed'
+  error?: string
+  reportsOrganization?: boolean
 }
 
 /** How one run of the fake reaches its caller. */
@@ -76,9 +93,17 @@ export type FakeIo = {
 /**
  * What a test makes a command answer instead of its own answer (`world().answer`): exactly this output
  * and exit code, after the command has run when `run` is set, so its effects happen and its answer is
- * lost, as when Delta did the work and the reply never arrived.
+ * lost, as when Delta did the work and the reply never arrived. With `patch`, the command runs and
+ * answers as usual, with these fields replacing those of its JSON answer, as a receipt or a status
+ * naming something else would.
  */
-export type FakeAnswer = { stdout?: string; stderr?: string; exitCode?: number; run?: boolean }
+export type FakeAnswer = {
+  stdout?: string
+  stderr?: string
+  exitCode?: number
+  run?: boolean
+  patch?: Record<string, unknown>
+}
 type AnswerSwitch = FakeAnswer & { after: number; times: number }
 
 /** The answer a test set for this run of `args`, counting its runs down; undefined to run as usual. */
@@ -105,6 +130,13 @@ function takeAnswer(args: string[], io: FakeIo): FakeAnswer | undefined {
 export function actorOf(external: string | undefined): string | null {
   return external ? `actor-${external}` : null
 }
+/** The install helper a Windows `delta update --download-only` hands back, before the version it installs. */
+export const UPDATE_HELPER_ARGV = [
+  'C:\\Updates\\cli-update-1\\delta-update-helper.exe',
+  '--internal-windows-update-install',
+  'C:\\Delta\\delta-app.exe',
+  'C:\\Updates\\cli-update-1',
+]
 
 /** Ends a run of the fake with an exit code. */
 class Exit extends Error {
@@ -119,6 +151,13 @@ class Exit extends Error {
 export async function fakeDelta(args: string[], io: FakeIo): Promise<number> {
   const answer = takeAnswer(args, io)
   if (!answer) return runToExit(args, io)
+  if (answer.patch) {
+    let stdout = ''
+    const write: FakeIo['write'] = (stream, text) => (stream === 'stdout' ? (stdout += text) : io.write(stream, text))
+    const code = await runToExit(args, { ...io, write })
+    io.write('stdout', stdout.trim() ? `${JSON.stringify({ ...JSON.parse(stdout), ...answer.patch })}\n` : stdout)
+    return code
+  }
   if (answer.run) await runToExit(args, { ...io, write: () => {}, hold: async () => {} })
   if (answer.stdout) io.write('stdout', answer.stdout)
   if (answer.stderr) io.write('stderr', answer.stderr)
@@ -201,8 +240,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   function out(value: unknown) {
     io.write('stdout', JSON.stringify(value) + '\n')
   }
-  function fail(code: string, message: string, retryable = false): never {
-    out({ error: { code, message, retryable } })
+  function fail(code: string, message: string, retryable = false, reason?: string): never {
+    out({ error: { code, ...(reason ? { reason } : {}), message, retryable } })
     throw new Exit(1)
   }
   function option(args: string[], name: string): string | undefined {
@@ -226,8 +265,18 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   function required(value: string | undefined, what: string): string {
     return value ?? fail('invalid_arguments', `missing ${what}`)
   }
+  /** The turns of the producer `external` that a test fenced (`world().fence`). */
+  function fencedTurns(external: string | undefined): (number | undefined)[] {
+    const path = join(root, 'fences.json')
+    const fences = existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, number[]>) : {}
+    return fences[external ?? ''] ?? []
+  }
   function producerKey(source: string | undefined, external: string | undefined) {
     return `${source}:${external}`
+  }
+  /** What Delta calls a worktree: the folder it was created from, or `repo` for one the fake never created. */
+  function worktreeName(state: FakeState, reference: string) {
+    return state.worktrees.find((tree) => tree.reference === reference)?.name ?? 'repo'
   }
 
   const argv = args.filter((arg) => arg !== '--json')
@@ -244,11 +293,20 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     fail('authentication_required', 'Sign in to Delta')
   /** Switches a test flips in the state folder: a file per switch. */
   const flag = (name: string) => existsSync(join(root, name))
+  /** The account's organizations, as a test set them (`world().organizations`) and `org create` added to them. */
+  const organizationsPath = join(root, 'organizations.json')
+  const organizations = (): { id: string; name: string; current: boolean; personal?: boolean }[] =>
+    existsSync(organizationsPath)
+      ? JSON.parse(readFileSync(organizationsPath, 'utf8'))
+      : [
+          { id: 'org-1', name: 'Zed', current: true },
+          { id: 'org-personal', name: "ada's Organization", current: false, personal: true },
+        ]
   // A test holds runs of a command while `hold-<command>` exists, and makes runs fail while
   // `fail-<command>` counts down, each after letting `after` runs through: see world() in test/world.ts.
   const switchName = words.replaceAll(' ', '-')
   /** Whether this run is past the runs the switch lets through; counts them down meanwhile. */
-  type Switch = { after: number; times?: number; code?: string; retryable?: boolean }
+  type Switch = { after: number; times?: number; code?: string; retryable?: boolean; reason?: string }
   const reached = (path: string): Switch | undefined => {
     if (!existsSync(path)) return
     const value = JSON.parse(readFileSync(path, 'utf8')) as Switch
@@ -257,14 +315,31 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     return undefined
   }
   const holding = join(root, `hold-${switchName}`)
-  if (reached(holding)) while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+  const held = reached(holding)
+  // A hold with `times` holds only that many runs; the runs after it pass.
+  if (held && (held.times === undefined || held.times > 0)) {
+    if (held.times !== undefined) writeFileSync(holding, JSON.stringify({ ...held, times: held.times - 1 }))
+    while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+    // An answer set while the run was held is its answer, as a sign-in the person cancels ends the wait.
+    const late = takeAnswer(args, io)
+    if (late) {
+      if (late.stdout) io.write('stdout', late.stdout)
+      if (late.stderr) io.write('stderr', late.stderr)
+      throw new Exit(late.exitCode ?? 1)
+    }
+  }
   const failing = join(root, `fail-${switchName}`)
   const failure = reached(failing)
   if (failure) {
     const left = (failure.times ?? 1) - 1
     if (left <= 0) rmSync(failing, { force: true })
     else writeFileSync(failing, JSON.stringify({ ...failure, after: 0, times: left }))
-    fail(failure.code ?? 'process_failed', `${words} failed as the test asked`, failure.retryable ?? true)
+    fail(
+      failure.code ?? 'process_failed',
+      `${words} failed as the test asked`,
+      failure.retryable ?? true,
+      failure.reason,
+    )
   }
 
   switch (words) {
@@ -301,9 +376,13 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     case 'org switch':
       io.write('stdout', `Switched to ${rest.at(-1)}\n`)
       break
-    case 'org create':
-      out({ operation: 'created', organization: { id: 'org-new', name: rest.at(-1), current: false } })
+    case 'org create': {
+      // The new team is listed from now on, unselected, as Delta lists a team the account created.
+      const organization = { id: 'org-new', name: rest.at(-1) ?? '', current: false }
+      writeFileSync(organizationsPath, JSON.stringify([...organizations(), organization]))
+      out({ operation: 'created', organization })
       break
+    }
     case 'org invite':
       if (!json) {
         io.write('stdout', `Invited ${rest.slice(rest.indexOf('--') + 1).join(', ')}\n`)
@@ -329,25 +408,59 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         io.write('stdout', '* org-1  Zed\n')
         break
       }
-      out({
-        organizations: [
-          { id: 'org-1', name: 'Zed', current: true },
-          { id: 'org-personal', name: "ada's Organization", current: false, personal: true },
-        ],
-      })
+      out({ organizations: organizations() })
       break
     case 'update --check':
     case 'update':
-      out({
-        schema_version: 1,
-        status: 'up_to_date',
-        current_version: '0.23.0',
-        latest_version: '0.23.0',
-        channel: 'stable',
-        message: '',
-        can_install: false,
-      })
+    case 'update --download-only': {
+      // Delta 0.23.0 is installed; a test offers a newer release with `world.release`.
+      const releasePath = join(root, 'release.json')
+      const latest = existsSync(releasePath) ? (JSON.parse(readFileSync(releasePath, 'utf8')) as string) : undefined
+      const result = (status: string) =>
+        out({
+          schema_version: 1,
+          status,
+          current_version: '0.23.0',
+          latest_version: latest ?? '0.23.0',
+          channel: 'stable',
+          message: '',
+          can_install: latest !== undefined,
+          ...(status === 'install_ready' ? { install_argv: [...UPDATE_HELPER_ARGV, latest] } : {}),
+        })
+      if (command === '--check') {
+        result(latest ? 'update_available' : 'up_to_date')
+        break
+      }
+      // An update reports each step on stderr as it goes, an event sometimes in pieces.
+      const progress = (fields: Record<string, unknown>) =>
+        `${JSON.stringify({ schema_version: 1, type: 'progress', ...fields })}\n`
+      io.write('stderr', progress({ phase: 'checking' }))
+      if (!latest) {
+        result('up_to_date')
+        break
+      }
+      const downloading = progress({ phase: 'downloading', version: latest, percent: 25 })
+      io.write('stderr', downloading.slice(0, 20))
+      io.write('stderr', downloading.slice(20))
+      io.write('stderr', progress({ phase: 'downloading', version: latest, percent: 45 }))
+      // `world.hold('update install')` holds it here, mid-download; stopped meanwhile, it changes nothing.
+      const holdingInstall = join(root, 'hold-update-install')
+      if (reached(holdingInstall)) {
+        let stopped = false
+        const released = (async () => {
+          while (existsSync(holdingInstall) && !stopped) await new Promise((resolve) => setTimeout(resolve, 20))
+        })()
+        await io.hold(() => (stopped = true), undefined, released)
+        if (stopped) throw new Exit(143)
+      }
+      // Windows leaves installing to the helper it hands back; elsewhere the CLI installs the release.
+      if (command === '--download-only') result('install_ready')
+      else {
+        rmSync(releasePath, { force: true })
+        result('updated')
+      }
       break
+    }
     case 'thread create': {
       const source = option(rest, '--source')
       const external = option(rest, '--external-id')
@@ -410,14 +523,31 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const thread = known(state, locator)
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       const producer = state.producers[producerKey(source, external)]
+      // Delta's background upload of a thread created with an upload organization, as a test sets it in
+      // `upload.json` (`world().upload`); uploaded otherwise. Until Delta registers it, it has no link.
+      const upload: FakeUpload =
+        thread.organization && existsSync(join(root, 'upload.json'))
+          ? JSON.parse(readFileSync(join(root, 'upload.json'), 'utf8'))
+          : { state: 'uploaded' }
+      const registered = upload.state !== 'queued'
+      // A test changes fields of the answer, as a thread whose inventory cannot be read reports it.
+      const patch = existsSync(join(root, 'status-patch.json'))
+        ? (JSON.parse(readFileSync(join(root, 'status-patch.json'), 'utf8')) as Record<string, unknown>)
+        : {}
       out({
         operation: 'status',
         thread_id: thread.thread_id,
         title: thread.title,
-        url: thread.url,
-        visibility: thread.visibility,
-        upload: thread.visibility ? { state: 'uploaded', organization_id: thread.organization, error: null } : null,
-        access: { state: 'granted', is_owner: true },
+        url: registered ? thread.url : null,
+        visibility: registered ? thread.visibility : null,
+        upload: thread.visibility
+          ? {
+              state: upload.state,
+              organization_id: upload.reportsOrganization === false ? null : thread.organization,
+              error: upload.error ? { code: 'upload_failed', reason: 'upload_failed', message: upload.error } : null,
+            }
+          : null,
+        access: registered ? { state: 'granted', is_owner: true } : { state: 'local_only', is_owner: null },
         worktrees: {
           status: 'available',
           items: thread.worktrees.map((reference) => ({
@@ -440,6 +570,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
           next_sequence: producer?.thread === thread.thread_id ? producer.next : 1,
           turn: null,
         },
+        ...patch,
       })
       break
     }
@@ -464,12 +595,20 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         thread.url = `https://delta.dev/join/${thread.share_id}`
         thread.visibility ??= 'private'
         thread.invited = [...(thread.invited ?? []), ...emails]
+        // Addresses a test made Delta refuse (`world().inviteFailures`), each with its reason.
+        const failures: Record<string, string> = existsSync(join(root, 'invite-failures.json'))
+          ? JSON.parse(readFileSync(join(root, 'invite-failures.json'), 'utf8'))
+          : {}
         return {
           operation: 'invited',
           thread_id: thread.thread_id,
           share_id: thread.share_id,
           url: thread.url,
-          results: emails.map((email) => ({ status: 'invited', email })),
+          results: emails.map((email) =>
+            failures[email]
+              ? { status: 'failed', email, reason: 'already_member', message: failures[email] }
+              : { status: 'invited', email },
+          ),
         }
       })
       out(result)
@@ -504,6 +643,18 @@ async function run(args: string[], io: FakeIo): Promise<void> {
             }
           if (record.sequence !== producer.next) return { gap: true }
           producer.next++
+          // A turn someone took over in Delta takes no more records from this producer (`world().fence`).
+          if (fencedTurns(external).includes(record.turnSequence))
+            return {
+              operation: 'appended',
+              thread_id: thread.thread_id,
+              sequence: record.sequence,
+              next_sequence: producer.next,
+              duplicate: false,
+              disposition: 'fenced',
+              turn_sequence: record.turnSequence ?? null,
+              version: 'v1',
+            }
           thread.records.push({
             producer: external,
             acknowledge: option(rest, '--acknowledge') ?? 'server',
@@ -563,7 +714,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         const end = fresh.lastIndexOf('\n')
         if (end < 0) return
         for (const line of fresh.slice(0, end + 1).split(/(?<=\n)/)) {
-          const control = /^\{"fake_watch_exit":(\d+)\}\n$/.exec(line)
+          const control = /^\{"fake_watch_exit":(\d+)(?:,"error":(.*))?\}\n$/.exec(line)
           if (!control) {
             io.write('stdout', line)
             offset += line.length
@@ -572,6 +723,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
           // The control line ends this watch only: the next one replays what came before it, not it.
           const current = readFileSync(eventsPath, 'utf8')
           writeFileSync(eventsPath, current.slice(0, offset) + current.slice(offset + line.length))
+          // A watch that fails says why on its last line, as Delta's error envelope.
+          if (control[2]) io.write('stdout', `{"error":${control[2]}}\n`)
           exitCode = Number(control[1])
           ended()
           return
@@ -581,51 +734,87 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       flush()
       out({ type: 'live' })
       out({ type: 'presence', users: [] })
-      out({ type: 'worktrees', worktrees: thread.worktrees.map((reference) => ({ reference, name: 'repo' })) })
+      out({
+        type: 'worktrees',
+        worktrees: thread.worktrees.map((reference) => ({ reference, name: worktreeName(state, reference) })),
+      })
       await io.hold(undefined, flush, ending)
       if (exitCode !== undefined) throw new Exit(exitCode)
       break
     }
     case 'thread mount': {
       const [locator] = rest
-      const owner = option(rest, '--owner')
+      const owner = required(option(rest, '--owner'), '--owner')
       let thread: FakeThread | undefined
-      const directory = update((state) => {
+      // A test can have Delta place mounts as it does on Windows, under `windows-mounts.json`'s `base`:
+      // each worktree at `<base>\<owner>\<name>`, which `thread status` then reports with its last
+      // separator a slash, as Delta mixes them.
+      const windows = existsSync(join(root, 'windows-mounts.json'))
+        ? (JSON.parse(readFileSync(join(root, 'windows-mounts.json'), 'utf8')) as { base: string })
+        : undefined
+      // Otherwise the thread's first worktree is checked out in the owner's folder, and each other one beside
+      // it; a thread of one worktree is worked in at its checkout, one of several in a folder of its own.
+      const placed = update((state) => {
         thread = known(state, locator)
-        const folder = join(root, 'mounts', thread.thread_id, required(owner, '--owner'))
-        mkdirSync(folder, { recursive: true })
-        for (const reference of thread.worktrees) {
+        const first = join(root, 'mounts', thread.thread_id, owner)
+        const worktrees = thread.worktrees.map((reference, index) => {
+          const name = worktreeName(state, reference)
+          const directory = windows ? `${windows.base}\\${owner}\\${name}` : index === 0 ? first : `${first}-${name}`
+          return { reference, name, directory, checkout: windows ? `${windows.base}\\${owner}/${name}` : directory }
+        })
+        const directory =
+          worktrees.length === 1
+            ? worktrees[0]!.directory
+            : windows
+              ? `${windows.base}\\${owner}`
+              : join(root, 'folders', thread.thread_id, owner)
+        if (!windows)
+          for (const folder of [directory, ...worktrees.map((tree) => tree.directory)])
+            mkdirSync(folder, { recursive: true })
+        for (const { reference, checkout } of worktrees) {
           let tree = state.worktrees.find((entry) => entry.reference === reference)
           if (!tree) state.worktrees.push((tree = { reference, worktree_id: reference, directories: [] }))
-          const entry = tree.directories.find((candidate) => candidate.directory === folder)
+          const entry = tree.directories.find((candidate) => candidate.directory === checkout)
           if (entry) {
             entry.state = 'mounted'
             entry.holders = (entry.holders ?? 0) + 1
-          } else tree.directories.push({ directory: folder, state: 'mounted', holders: 1 })
+          } else tree.directories.push({ directory: checkout, state: 'mounted', holders: 1 })
         }
-        return folder
+        return { directory, worktrees }
       })
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       out({
         operation: 'mounted',
         thread_id: thread.thread_id,
         owner,
-        directory,
-        worktrees: thread.worktrees.map((reference) => ({ reference, name: 'repo', directory, state: 'mounted' })),
+        directory: placed.directory,
+        worktrees: placed.worktrees.map(({ reference, name, directory }) => ({
+          reference,
+          name,
+          directory,
+          state: 'mounted',
+        })),
       })
       // Delta releases an owner's directories once no mount command for them runs; mounting again under
       // the same owner replaces the process and keeps them mounted.
+      const checkouts = placed.worktrees.map((tree) => tree.checkout)
       await io.hold(() =>
         update((state) => {
           for (const tree of state.worktrees)
             for (const entry of tree.directories)
-              if (entry.directory === directory && (entry.holders = (entry.holders ?? 1) - 1) <= 0)
+              if (checkouts.includes(entry.directory) && (entry.holders = (entry.holders ?? 1) - 1) <= 0)
                 entry.state = 'waiting'
         }),
       )
       break
     }
     case 'worktree list': {
+      // Delta finishes a checkout whose mount ended once a test stops holding its release.
+      if (!flag('hold-release'))
+        update((state) => {
+          for (const tree of state.worktrees)
+            for (const entry of tree.directories) if (entry.state === 'restoring') entry.state = 'waiting'
+        })
       const state = read()
       out({
         operation: 'listed',
@@ -641,7 +830,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const directory = required(rest[0], 'the directory')
       const id = randomUUID()
       update((state) => {
-        state.worktrees.push({ reference: id, worktree_id: id, directories: [{ directory, state: 'waiting' }] })
+        state.worktrees.push({
+          reference: id,
+          worktree_id: id,
+          name: basename(directory),
+          directories: [{ directory, state: 'waiting' }],
+        })
       })
       out({ operation: 'created', worktree_id: id, reference: id })
       break
@@ -657,16 +851,28 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       out(result)
       break
     }
+    case 'worktree detach': {
+      const reference = required(rest[0], 'the worktree')
+      const locator = option(rest, '--thread')
+      const result = update((state) => {
+        const thread = known(state, locator)
+        thread.worktrees = thread.worktrees.filter((attached) => attached !== reference)
+        return { operation: 'detached', reference, thread_id: thread.thread_id }
+      })
+      out(result)
+      break
+    }
     case 'worktree mount': {
       const [reference, directory] = rest
-      const mark = (value: 'waiting' | 'mounted') =>
+      const mark = (value: 'waiting' | 'mounted' | 'restoring') =>
         update((state) => {
           const tree = state.worktrees.find((entry) => entry.reference === reference)
           for (const entry of tree?.directories ?? []) if (entry.directory === directory) entry.state = value
         })
       mark('mounted')
       out({ operation: 'mounted', reference, directory })
-      await io.hold(() => mark('waiting'))
+      // Delta still syncs a checkout for a moment after its mount ends; a test can hold that moment.
+      await io.hold(() => mark(flag('hold-release') ? 'restoring' : 'waiting'))
       break
     }
     default:

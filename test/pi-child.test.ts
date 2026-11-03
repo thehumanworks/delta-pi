@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { allowsTool, isSessionId, jsonRecords, keptArguments } from '../src/subagents/pi-child.ts'
+import { SUBAGENT_SHUTDOWN_MS } from '../src/subagents/subagents.ts'
+import { TERMINATE_GRACE_MS } from '../src/core/process.ts'
 
 describe('starting a pi for a Delta thread', () => {
   test("a thread's pi keeps its parent's extensions and restrictions, with their paths made absolute", async () => {
@@ -54,5 +56,9 @@ describe('starting a pi for a Delta thread', () => {
     const read = jsonRecords()
     expect(read('{"type":"agent_start"}\n{"type":"message_end","text":"a b"')).toEqual([{ type: 'agent_start' }])
     expect(read('}\r\nnot json\n')).toEqual([{ type: 'message_end', text: 'a b' }])
+  })
+
+  test("a thread's pi asked to stop has time to finish its own end before it is killed", () => {
+    expect(SUBAGENT_SHUTDOWN_MS).toBeLessThan(TERMINATE_GRACE_MS)
   })
 })

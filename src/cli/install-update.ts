@@ -183,8 +183,9 @@ export class InstallationUpdates {
         return 'Delta was not updated because it is running agent work, such as a turn or a terminal. Nothing was stopped. Retry /delta-update once that work finishes.'
       return `Delta installation update failed: ${errorText(error)}`
     } finally {
-      host.progress(undefined)
+      // Released first, so the band drawn without the update's line shows what the update hid.
       release()
+      host.progress(undefined)
     }
   }
 

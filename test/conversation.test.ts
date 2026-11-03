@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   addRows,
+  announceThought,
   commentAction,
   commentDisplay,
   commentFingerprint,
@@ -32,6 +33,7 @@ import {
   SNAPSHOT_TAIL,
 } from '../src/watch/conversation.ts'
 import type { WatchComment, WatchCommentTarget, WatchItem } from '../src/cli/thread-commands.ts'
+import { cliFixture } from './cli-fixtures.ts'
 
 describe('conversation', () => {
   test('a message row names its author, kind and item and carries the whole text', () => {
@@ -877,3 +879,12 @@ function comment(text: string, fields: Partial<WatchComment> = {}): WatchComment
 function quoted(before: string, marked: string, after: string): QuotedLine {
   return { before, marked, after, emphasis: true }
 }
+
+// Upstream's watch/row-delivery.test.ts; the decision moved to conversation.ts with the rows it gates.
+test('a live thought is announced on completion, not while streaming or on re-send', () => {
+  const open = { ...cliFixture('item').item, kind: 'agent_thought', open: true } as WatchItem
+  const complete = { ...open, open: false }
+  expect(announceThought(undefined, open, true)).toBe(false)
+  expect(announceThought(open, complete, true)).toBe(true)
+  expect(announceThought(complete, complete, true)).toBe(false)
+})

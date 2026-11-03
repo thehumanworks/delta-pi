@@ -22,6 +22,7 @@ import {
   loadOrganizationDirectory,
   organizationName,
 } from '../setup/organizations.ts'
+import { OFFLINE_REFUSAL } from '../recording/delivery.ts'
 import { pluginUpdateNotice } from '../updates/updates.ts'
 import { conversationWebLink, THOUGHT_KIND, toolCallParts } from '../watch/conversation.ts'
 import { feed, presence, type RemoteTurn, watchedSession, watchStatus } from '../watch/watch.ts'
@@ -236,7 +237,8 @@ function statusView(host: Host, animate = true): StatusState {
     connection: watch.connection,
     reconnecting: watch.reconnecting,
     ...(watch.error ? { error: watch.error } : {}),
-    deliveryPause: refused ? undefined : (state?.pauses.get('delivery') ?? state?.pauses.get('verification')),
+    // A refused offline thread names the refusal; its choice, not the pause's advice, says what to do.
+    deliveryPause: refused ? OFFLINE_REFUSAL : (state?.pauses.get('delivery') ?? state?.pauses.get('verification')),
     retryReason: state?.retryTimer ? state.retryReason : undefined,
     progress: currentProgress(),
     spinner: animate ? bandState.spinner : undefined,
@@ -360,9 +362,15 @@ function spans(segments: readonly StatusSegment[], theme: Theme): string {
   return segments.map((segment) => styled(segment, theme)).join('')
 }
 
+/** The extension's update notice, which gives way while a turn, a share or a join runs. */
+function updateNotice(host: Host): string | undefined {
+  if (!host.session.idle() || requests.share || requests.join) return
+  return pluginUpdateNotice()
+}
+
 /** The band's lines for a terminal `width` columns wide: empty when Delta has nothing to say. */
 export function bandLines(host: Host, theme: Theme, width: number): string[] {
-  const update = pluginUpdateNotice()
+  const update = updateNotice(host)
   if (!statusShown() && !update) return []
   const lines: string[] = []
   if (statusShown()) {
@@ -417,7 +425,7 @@ export class BandWidget implements Component {
 
 /** The band as one plain line, for a client that shows a status line but no widgets, which it does not animate. */
 export function bandText(host: Host): string | undefined {
-  if (!statusShown()) return pluginUpdateNotice()
+  if (!statusShown()) return updateNotice(host)
   const band = renderBand(statusView(host, false), { columns: 200, terminal: true, rows: 1 })
   const plain = (segments: readonly StatusSegment[] | undefined) =>
     (segments ?? []).map((segment) => segment.text).join('')
@@ -429,7 +437,7 @@ export function bandText(host: Host): string | undefined {
     band.conflict ? `${band.conflict.fork} ${band.conflict.discard}` : undefined,
     plain(band.right),
     plain(band.detail),
-    pluginUpdateNotice(),
+    updateNotice(host),
   ]
     .filter(Boolean)
     .join('  ')

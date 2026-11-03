@@ -3,7 +3,7 @@
  * CLI's state (test/fake-delta), shared by the end-to-end tests and the in-process kit.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,7 +17,8 @@ export type Event = Record<string, any>
 
 /** A temporary world: a checkout with a remote, a pi agent directory, and the fake CLI's state. */
 export function world(options: { policy?: Record<string, unknown> } = {}) {
-  const base = mkdtempSync(join(tmpdir(), 'pi-delta-e2e-'))
+  // Resolved, as pi's working directory and Git's answers are: macOS's temporary folder is a symlink.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'pi-delta-e2e-')))
   const checkout = join(base, 'repo')
   const agentDir = join(base, 'agent')
   const state = join(base, 'delta')
@@ -94,10 +95,19 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
      * Make `times` runs of `command`, such as `worktree list`, fail with Delta's error `code`, transient
      * unless `retryable` is false, after letting `after` runs through.
      */
-    fail(command: string, { times = 1, after = 0, code = 'process_failed', retryable = true } = {}) {
+    fail(
+      command: string,
+      {
+        times = 1,
+        after = 0,
+        code = 'process_failed',
+        retryable = true,
+        reason,
+      }: { times?: number; after?: number; code?: string; retryable?: boolean; reason?: string } = {},
+    ) {
       writeFileSync(
         join(state, `fail-${command.replaceAll(' ', '-')}`),
-        JSON.stringify({ after, times, code, retryable }),
+        JSON.stringify({ after, times, code, retryable, ...(reason ? { reason } : {}) }),
       )
     },
     /** Let `command` run normally again after `fail`. */
@@ -109,32 +119,131 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
       const path = join(state, `events-${thread}.jsonl`)
       writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text)
     },
-    /** End the running `thread watch` of `thread` with `code` once it has reported what came before. */
-    endWatch(thread: string, code = 1) {
+    /**
+     * End the running `thread watch` of `thread` with `code` once it has reported what came before, after
+     * a last line with Delta's `error` envelope when given, as a watch Delta stops does.
+     */
+    endWatch(thread: string, code = 1, error?: { code: string; message: string; retryable: boolean; reason?: string }) {
       const path = join(state, `events-${thread}.jsonl`)
-      writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + `{"fake_watch_exit":${code}}\n`)
+      const control = error
+        ? `{"fake_watch_exit":${code},"error":${JSON.stringify(error)}}`
+        : `{"fake_watch_exit":${code}}`
+      writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + `${control}\n`)
+    },
+    /** Make `thread status` answer with `patch`'s fields over its own, or as usual again when undefined. */
+    patchStatus(patch: Record<string, unknown> | undefined) {
+      const path = join(state, 'status-patch.json')
+      if (patch) writeFileSync(path, JSON.stringify(patch))
+      else rmSync(path, { force: true })
     },
     /**
      * Make `times` runs of `command`, after letting `after` through, answer `stdout` and `stderr` with
      * `exitCode` (1 unless given) instead of their own answer: a crash, an old CLI's usage text, a
-     * malformed reply. With `run`, the command does its work first and only its answer is lost.
+     * malformed reply. With `run`, the command does its work first and only its answer is lost. With
+     * `patch`, the command runs and answers as usual, with `patch`'s fields replacing its answer's, such
+     * as a receipt naming another thread or a status reporting other access.
      */
     answer(
       command: string,
-      answer: { stdout?: string; stderr?: string; exitCode?: number; run?: boolean },
+      answer: { stdout?: string; stderr?: string; exitCode?: number; run?: boolean; patch?: Record<string, unknown> },
       { times = 1, after = 0 } = {},
     ) {
       writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
+    },
+    /** Make `org list` answer these organizations, `{ id, name, current, personal? }`, as the account's. */
+    organizations(organizations: { id: string; name: string; current: boolean; personal?: boolean }[]) {
+      writeFileSync(join(state, 'organizations.json'), JSON.stringify(organizations))
+    },
+    /**
+     * Set where Delta's background upload of an automatic session's thread is (`FakeUpload` in
+     * test/fake-delta/cli.ts): `queued` before Delta registers it and gives it a link, `uploading`, then
+     * `uploaded` or `failed` with `error`. Every thread with an upload organization reports it.
+     */
+    upload(upload: {
+      state: 'queued' | 'uploading' | 'uploaded' | 'failed'
+      error?: string
+      reportsOrganization?: boolean
+    }) {
+      writeFileSync(join(state, 'upload.json'), JSON.stringify(upload))
+    },
+    /** Let `command` answer for itself again after `answer`. */
+    stopAnswering(command: string) {
+      rmSync(join(state, `answer-${command.replaceAll(' ', '-')}`), { force: true })
+    },
+    /** Offer Delta `version` as a newer release: `update --check` reports it, and `update` installs it. */
+    release(version: string) {
+      writeFileSync(join(state, 'release.json'), JSON.stringify(version))
+    },
+    /** Make `thread mount` place worktrees as Delta does on Windows, under `base` (see test/fake-delta). */
+    windowsMounts(base: string) {
+      writeFileSync(join(state, 'windows-mounts.json'), JSON.stringify({ base }))
     },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
-    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
-    hold(command: string, { after = 0 } = {}): () => void {
-      const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
-      writeFileSync(path, JSON.stringify({ after }))
+    /**
+     * Take `turn` over in Delta for the producer `external` (a pi session's ID): its appends of that
+     * turn's records are answered `fenced`, as Delta answers a turn someone superseded.
+     */
+    fence(external: string, turn: number) {
+      const path = join(state, 'fences.json')
+      const fences = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+      writeFileSync(path, JSON.stringify({ ...fences, [external]: [...(fences[external] ?? []), turn] }))
+    },
+    /**
+     * Keep each checkout whose `worktree mount` ends `restoring`, as Delta does while it finishes the
+     * final upload, until the returned function releases them.
+     */
+    holdRelease(): () => void {
+      const path = join(state, 'hold-release')
+      writeFileSync(path, '')
       return () => rmSync(path, { force: true })
+    },
+    /**
+     * Hold the runs of `command` after the first `after` until the returned function releases them. An
+     * `answer` set before the release answers a held run instead, as a sign-in that ends another way does.
+     * `update install` holds an explicit `update` mid-download, once it has reported its progress. With
+     * `times`, only that many runs are held.
+     */
+    hold(command: string, { after = 0, times }: { after?: number; times?: number } = {}): () => void {
+      const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
+      writeFileSync(path, JSON.stringify({ after, ...(times === undefined ? {} : { times }) }))
+      return () => rmSync(path, { force: true })
+    },
+    /** Make `thread invite` refuse these addresses, each with Delta's message for why. */
+    inviteFailures(failures: Record<string, string>) {
+      writeFileSync(join(state, 'invite-failures.json'), JSON.stringify(failures))
+    },
+    /** Forget what `thread watch` reported for `thread`, so the next watch starts afresh, as after a one-off bad line. */
+    forgetRemote(thread: string) {
+      rmSync(join(state, `events-${thread}.jsonl`), { force: true })
+    },
+    /**
+     * Mark the checkout at `directory` mounted or waiting, as Delta reports it, while its mount command
+     * runs on: a worktree that stops being mounted, or comes back.
+     */
+    markCheckout(directory: string, mounted: boolean) {
+      const path = join(state, 'state.json')
+      const lock = join(state, 'state.lock')
+      for (let attempt = 0; ; attempt++) {
+        try {
+          mkdirSync(lock)
+          break
+        } catch (error) {
+          if (attempt > 2000) throw error
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5)
+        }
+      }
+      try {
+        const current = JSON.parse(readFileSync(path, 'utf8'))
+        for (const tree of current.worktrees)
+          for (const entry of tree.directories)
+            if (entry.directory === directory) entry.state = mounted ? 'mounted' : 'waiting'
+        writeFileSync(path, JSON.stringify(current, null, 2))
+      } finally {
+        rmSync(lock, { recursive: true, force: true })
+      }
     },
     cleanup() {
       rmSync(base, { recursive: true, force: true })

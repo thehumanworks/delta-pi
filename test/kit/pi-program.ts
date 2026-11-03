@@ -33,9 +33,9 @@ export function piProgram(parent: Kit): PiProgram {
     starts: [],
     child: async (index) => until(() => ready[index], `pi start ${index}`),
   }
-  parent.streams.set('pi', (init) => {
+  parent.programs.set('pi', (argv, init) => {
     const index = program.starts.length
-    program.starts.push({ argv: init.argv, stdin: init.stdin, cwd: init.cwd })
+    program.starts.push({ argv, stdin: init.stdin, cwd: init.cwd })
     ready.push(new Promise((resolve) => (started[index] = resolve)))
     const queue: Output[] = []
     let exit: Exit | undefined
@@ -73,8 +73,8 @@ export function piProgram(parent: Kit): PiProgram {
         return end(behaviour.code)
       }
       const option = (name: string) => {
-        const at = init.argv.indexOf(name)
-        return at < 0 ? undefined : init.argv[at + 1]
+        const at = argv.indexOf(name)
+        return at < 0 ? undefined : argv[at + 1]
       }
       const file = option('--session')
       const id = option('--session-id')

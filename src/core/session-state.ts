@@ -79,8 +79,11 @@ export type Binding = {
 
 /** Where a subagent session's thread hangs: its parent's thread, and who sends its prompts. */
 export type ChildOf = {
-  /** The parent thread's reference, which `thread create --parent` takes. */
-  parent: string
+  /**
+   * The parent thread's reference, which `thread create --parent` takes; absent while the parent, a
+   * subagent itself, has no thread yet, whose creation then reads it from the parent's binding.
+   */
+  parent?: string
   /** The external ID of the parent's producer, which its prompts are attributed to. */
   sender: string
   /** The child thread's own reference, from its creation receipt; later commands use it. */
@@ -92,6 +95,11 @@ export type ChildOf = {
   sharesParentCheckout: boolean
   /** The directory the child's paths are shown relative to: the parent's checkout it works in, or its own. */
   root: string
+  /**
+   * Where the child works: the directories of the parent it shares, or its own. A subagent it starts
+   * shares its worktrees when it works in one of them.
+   */
+  directories?: string[]
   /**
    * The thread was Delta's before this session ran it, as a thread its parent runs with `delta_thread`:
    * its thread exists already, so none is created and no checkout is attached for it.

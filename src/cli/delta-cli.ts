@@ -22,6 +22,7 @@ import {
 import { threadInvitationsFrom } from '../sharing/share-audience.ts'
 import { DeltaCli } from './cli.ts'
 import {
+  checkoutStillSyncing,
   checkResult,
   type CreationReceipt,
   localWorktreesAt,
@@ -624,6 +625,11 @@ export async function worktreeList(host: Host, directory: string, check?: () => 
   return localWorktreesAt(await command(host, ['worktree', 'list'], 'worktree list', { check }), directory)
 }
 
+/** Whether Delta still syncs the checkout `directory`, from a `worktree list` answered within `timeoutMs`. */
+export async function checkoutSyncing(host: Host, directory: string, timeoutMs: number): Promise<boolean> {
+  return checkoutStillSyncing(await command(host, ['worktree', 'list'], 'worktree list', { timeoutMs }), directory)
+}
+
 /** Create a local worktree for the checkout `directory`; nothing is attached or mounted yet. */
 export async function worktreeCreate(
   host: Host,
@@ -680,6 +686,14 @@ export async function worktreeMount(
   const process = mounts.ready.get(key)
   if (process) process.reference = mounted.reference
   return mounted
+}
+
+/** Stop `session`'s `worktree mount` of `directory`, ready or still preparing; resolves whether one ran. */
+export async function stopWorktreeMount(session: string, directory: string): Promise<boolean> {
+  const key = `worktree:${session}:${directory}`
+  const processes = [...mounts.live].filter((process) => process.key === key)
+  await Promise.all(processes.map(stopMountProcess))
+  return processes.length > 0
 }
 
 /** Whether `session` has a ready `worktree mount` for the checkout `directory`. */

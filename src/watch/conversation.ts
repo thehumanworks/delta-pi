@@ -449,6 +449,11 @@ function plainLine(text: string): QuotedLine {
   return { before: '', marked: text, after: '', emphasis: false }
 }
 
+/** `line` within `width` characters: the context around its passage elided as `commentQuote` elides it. */
+export function fitQuotedLine(line: QuotedLine, width: number): QuotedLine {
+  return line.emphasis && (line.before || line.after) ? around(line.before, line.marked, line.after, width) : line
+}
+
 /** The side after the passage gets the first half of the room, since a sentence reads forward. */
 function around(before: string, marked: string, after: string, width: number): QuotedLine {
   if (marked.length >= width) return { before: '', marked, after: '', emphasis: true }

@@ -12,10 +12,11 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { promisify } from 'node:util'
+import { promisify, stripVTControlCharacters } from 'node:util'
 import { vi } from 'vitest'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { type ExtensionAPI, initTheme, type Theme } from '@earendil-works/pi-coding-agent'
+import type { Component } from '@earendil-works/pi-tui'
 import type { Platform } from '../../src/core/host.ts'
 
 /** What the model answers: text, tool calls, and how its reply ended. */
@@ -26,7 +27,7 @@ export type Reply = {
   stopReason?: 'stop' | 'length' | 'error'
 }
 /** The model answers the conversation so far; `signal` is aborted when the run is. */
-export type Model = (messages: AgentMessage[], signal: AbortSignal) => Reply | Promise<Reply>
+export type Model = (messages: AgentMessage[], signal?: AbortSignal) => Reply | Promise<Reply>
 
 /** The end-to-end tests' faux model: `run <command>` runs it, `write <path> <text>` writes, anything else is echoed. */
 export const echoModel: Model = (messages) => {
@@ -40,10 +41,19 @@ export const echoModel: Model = (messages) => {
   return { text: `Echo: ${text}` }
 }
 
+/**
+ * How pi runs: its terminal (`tui`) or an RPC client, both of which show dialogs, or print mode, as
+ * text (`print`) or JSON events (`json`), where nobody can answer one.
+ */
+export type Mode = 'tui' | 'rpc' | 'print' | 'json'
+
 /** A dialog the extension opened. */
 export type Dialog = { method: 'select' | 'input'; title: string; options?: string[] }
-/** How a dialog is answered: a value, a function of the dialog, or undefined to dismiss it. */
-export type Answer = string | undefined | ((dialog: Dialog) => string | undefined)
+/**
+ * How a dialog is answered: a value, a function of the dialog, or undefined to dismiss it. A function
+ * may answer later, with a promise, to hold the dialog open while the test goes on.
+ */
+export type Answer = string | undefined | ((dialog: Dialog) => string | undefined | Promise<string | undefined>)
 
 type Entry = { type: string; id: string; parentId: string | null; timestamp: string; [field: string]: unknown }
 type Handler = (event: Record<string, unknown>, ctx: unknown) => unknown
@@ -61,6 +71,34 @@ type Tool = {
     ctx: unknown,
   ): Promise<ToolResult>
 }
+/** What pi's TUI gives a widget's factory and a renderer: a redraw, and the invalidation that rebuilds rows. */
+type FakeTui = { requestRender(): void; invalidate(): void }
+type WidgetFactory = (tui: FakeTui, theme: Theme) => Component
+type MessageRenderer = (
+  message: { customType: string; content: unknown; display: boolean; details: unknown },
+  options: { expanded: boolean; outputPad: number },
+  theme: Theme,
+) => Component | undefined
+
+/** The 256-color code `FAKE_THEME` draws each of pi's theme colors in: distinct, so a test can tell them apart. */
+const THEME_COLORS: Record<string, number> = { error: 1, success: 2, warning: 3, accent: 4, muted: 8, dim: 7 }
+/** The escape that starts text `FAKE_THEME` draws in pi's theme color `color`. */
+export function themeColor(color: string): string {
+  return `\x1b[38;5;${THEME_COLORS[color] ?? 15}m`
+}
+/**
+ * A theme drawing pi's colors and attributes as real escapes, so the extension's layout measures and
+ * truncates its text as it does in pi's terminal, and a test can still tell the colors apart.
+ */
+export const FAKE_THEME = {
+  fg: (color: string, text: string) => `${themeColor(color)}${text}\x1b[39m`,
+  bg: (_color: string, text: string) => text,
+  bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+  italic: (text: string) => `\x1b[3m${text}\x1b[23m`,
+  underline: (text: string) => `\x1b[4m${text}\x1b[24m`,
+  inverse: (text: string) => `\x1b[7m${text}\x1b[27m`,
+  strikethrough: (text: string) => `\x1b[9m${text}\x1b[29m`,
+} as unknown as Theme
 
 /** A pi session: its ID, file, working directory and the entries pi committed. */
 export class FakeSession {
@@ -91,13 +129,40 @@ class Runtime {
 export class FakePi {
   /** Notes and notices the extension showed, in order. */
   readonly notices: { text: string; tone: string }[] = []
+  /**
+   * How many times the extension asked pi's terminal to redraw, and to invalidate, which rebuilds every
+   * drawn row through its renderer. Only pi's terminal (`tui` mode) gives the extension its TUI.
+   */
+  renders = 0
+  invalidations = 0
+  private readonly tui: FakeTui = {
+    requestRender: () => this.renders++,
+    invalidate: () => {
+      this.invalidations++
+      this.built.clear()
+    },
+  }
+  /** The components pi built from the widgets the extension set in its terminal, by key. */
+  private readonly widgets = new Map<string, Component>()
+  /** The renderers the extension registered for its custom messages, and the rows pi built with them, by entry. */
+  private readonly messageRenderers = new Map<string, MessageRenderer>()
+  private readonly built = new Map<string, Component | undefined>()
   readonly statuses = new Map<string, string | undefined>()
   readonly dialogs: Dialog[] = []
   readonly answers: Answer[] = []
+  /** How a dialog no queued answer is left for is answered, as a person who always answers alike would. */
+  respond: Answer = undefined
   /** What the extension's handlers threw, which pi reports and carries on from. */
   readonly errors: unknown[] = []
   /** Text in the editor, where a refused prompt goes back. */
   editor = ''
+  /** How many times the extension stopped a running turn. */
+  aborts = 0
+  /**
+   * How many of the next custom messages pi fails to add, as when its session cannot take them: pi
+   * reports such a failure on its own error channel, never to the extension.
+   */
+  failMessages = 0
   model: Model = echoModel
   /** The tools declared to the model, as `getActiveTools` reports them. */
   activeTools: string[] = ['read', 'bash', 'edit', 'write']
@@ -124,7 +189,7 @@ export class FakePi {
   constructor(
     readonly platform: Platform,
     cwd: string,
-    readonly mode: 'rpc' | 'print' = 'rpc',
+    readonly mode: Mode = 'rpc',
     session?: FakeSession,
   ) {
     this.session = session ?? this.newSession(cwd)
@@ -217,18 +282,29 @@ export class FakePi {
 
   /**
    * How the next switch a command asks for goes: pi's own refusal before it starts, a failure before it
-   * shuts the session down, or, unset, a switch.
+   * shuts the session down, a switch that opens the session in another directory (`{ cwd }`, as pi's
+   * terminal does when the session's own directory is missing and the person continues where pi is), or,
+   * unset, a switch.
    */
-  nextSwitch: 'cancel' | Error | undefined
+  nextSwitch: 'cancel' | Error | { cwd: string } | undefined
+
+  /**
+   * How the next reload a command asks for goes: held until a promise settles, refused as pi's terminal
+   * refuses one while it compacts (a warning, and no reload), a failure, or, unset, a reload.
+   */
+  nextReload: Promise<void> | 'refuse' | Error | undefined
+  /** How many reloads commands asked for and pi carried out. */
+  reloads = 0
 
   /** Switch to the session saved in `file`, as `/resume` or a command's `switchSession` does. */
   async switchTo(file: string, reason: 'resume' | 'new' | 'fork' = 'resume') {
     const outcome = this.nextSwitch
     this.nextSwitch = undefined
     if (outcome === 'cancel') return { cancelled: true }
-    if (outcome) throw outcome
+    if (outcome instanceof Error) throw outcome
     await this.shutdown(reason, file)
-    this.session = this.sessions.get(file) ?? this.sessionFromFile(file)
+    const session = this.sessions.get(file) ?? this.sessionFromFile(file)
+    this.session = outcome ? new FakeSession(session.id, outcome.cwd, file) : session
     await this.start(reason)
     return { cancelled: false }
   }
@@ -241,9 +317,60 @@ export class FakePi {
     await this.start('new')
   }
 
-  /** The texts of the notes and notices shown. */
+  /**
+   * The texts of the notes and notices shown. In pi's terminal, a note is an entry the extension left in
+   * the transcript, which it draws itself; those are read here too.
+   */
   noticeTexts(): string[] {
-    return this.notices.map((notice) => notice.text)
+    const notes =
+      this.mode === 'tui'
+        ? this.session.entries.flatMap((entry) =>
+            entry.type === 'custom' && isObject(entry.data) && typeof entry.data.text === 'string'
+              ? [entry.data.text]
+              : [],
+          )
+        : []
+    return [...this.notices.map((notice) => notice.text), ...notes]
+  }
+
+  /**
+   * What the widget `key` draws `width` columns wide in pi's terminal, its escapes removed unless `raw`.
+   * Like pi, the widget's component is built when the extension sets it, and rendered on every draw.
+   */
+  widget(key: string, width = 120, raw = false): string[] {
+    const lines = this.widgets.get(key)?.render(width) ?? []
+    return raw ? lines : lines.map((line) => stripVTControlCharacters(line))
+  }
+
+  /**
+   * The custom messages pi shows the person, each as its renderer draws it `width` columns wide, escapes
+   * removed unless `raw`; undefined where the renderer drew nothing of its own, so pi draws the content.
+   * Like pi, a row is built once and drawn again on every render, until the extension invalidates the TUI.
+   */
+  drawnRows(width = 100, raw = false): { content: unknown; details: unknown; lines: string[] | undefined }[] {
+    // pi's terminal loads its theme, which markdown draws in, before it draws anything.
+    initTheme('dark')
+    return this.session.entries.flatMap((entry) => {
+      if (entry.type !== 'custom_message' || !entry.display) return []
+      const renderer = this.messageRenderers.get(String(entry.customType))
+      if (!this.built.has(entry.id)) {
+        const message = {
+          customType: String(entry.customType),
+          content: entry.content,
+          display: true,
+          details: entry.details,
+        }
+        this.built.set(entry.id, renderer?.(message, { expanded: false, outputPad: 1 }, FAKE_THEME))
+      }
+      const lines = this.built.get(entry.id)?.render(width)
+      return [
+        {
+          content: entry.content,
+          details: entry.details,
+          lines: raw ? lines : lines?.map((line) => stripVTControlCharacters(line)),
+        },
+      ]
+    })
   }
 
   /** The messages pi committed to the session, in order. */
@@ -461,11 +588,17 @@ export class FakePi {
       input: async (title: string) => this.ask({ method: 'input', title }),
       notify: (text: string, tone = 'info') => this.notices.push({ text, tone }),
       setStatus: (key: string, text: string | undefined) => this.statuses.set(key, text),
-      setWidget: () => {},
+      setWidget: (key: string, content: unknown) => {
+        if (typeof content === 'function') this.widgets.set(key, (content as WidgetFactory)(this.tui, FAKE_THEME))
+        else this.widgets.delete(key)
+      },
       getEditorText: () => this.editor,
       setEditorText: (text: string) => (this.editor = text),
     }
-    const abort = () => this.abort()
+    const abort = () => {
+      this.aborts++
+      this.abort()
+    }
     const controller = () => this.controller
     return {
       model: { provider: 'faux', id: 'faux-1' },
@@ -479,7 +612,7 @@ export class FakePi {
       },
       get hasUI() {
         active()
-        return mode() === 'rpc'
+        return mode() === 'rpc' || mode() === 'tui'
       },
       get mode() {
         active()
@@ -495,6 +628,7 @@ export class FakePi {
           getSessionId: () => session.id,
           getSessionFile: () => session.file,
           getEntries: () => [...session.entries],
+          getLeafEntry: () => session.entries.at(-1),
           getBranch: () => [...session.entries],
           getHeader: () => ({ type: 'session', id: session.id, cwd: session.cwd, timestamp: '' }),
           getCwd: () => session.cwd,
@@ -525,8 +659,14 @@ export class FakePi {
       reload: {
         value: async () => {
           runtime?.assertActive()
+          const outcome = this.nextReload
+          this.nextReload = undefined
+          if (outcome instanceof Promise) await outcome
+          else if (outcome === 'refuse') return
+          else if (outcome) throw outcome
           await this.shutdown('reload')
           await this.start('startup')
+          this.reloads++
         },
       },
     })
@@ -534,7 +674,7 @@ export class FakePi {
 
   private async ask(dialog: Dialog): Promise<string | undefined> {
     this.dialogs.push(dialog)
-    const answer = this.answers.shift()
+    const answer = this.answers.length ? this.answers.shift() : this.respond
     return typeof answer === 'function' ? answer(dialog) : answer
   }
 
@@ -549,7 +689,11 @@ export class FakePi {
         runtime.assertActive()
         runtime.commands.set(name, command)
       },
-      registerMessageRenderer: () => runtime.assertActive(),
+      registerMessageRenderer: (customType: string, renderer: MessageRenderer) => {
+        runtime.assertActive()
+        this.messageRenderers.set(customType, renderer)
+        this.built.clear()
+      },
       registerEntryRenderer: () => runtime.assertActive(),
       appendEntry: (customType: string, data: unknown) => {
         runtime.assertActive()
@@ -564,7 +708,8 @@ export class FakePi {
           display: message.display,
           details: message.details,
         }
-        if (this.streaming) this.pendingCustom.push(entry)
+        if (this.failMessages > 0) this.failMessages--
+        else if (this.streaming) this.pendingCustom.push(entry)
         else this.append(entry)
       },
       getSessionName: () => {

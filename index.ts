@@ -59,7 +59,13 @@ import {
 } from './src/recording/delivery.ts'
 import { admitPrompt } from './src/recording/prompt.ts'
 import { recordTitle } from './src/recording/title.ts'
-import { beginSession, forgetSessionStart, settleActivation, useDataDirectory } from './src/setup/activation.ts'
+import {
+  beginSession,
+  forgetSessionStart,
+  recordUnderParent,
+  settleActivation,
+  useDataDirectory,
+} from './src/setup/activation.ts'
 import {
   COMMANDS,
   DELTA_USAGE,
@@ -72,7 +78,14 @@ import {
 } from './src/setup/commands.ts'
 import { TYPE_SOMETHING } from './src/setup/setup.ts'
 import { releaseOnEnd } from './src/sharing/join.ts'
-import { stopChildTurn, withdrawParent } from './src/subagents/subagents.ts'
+import {
+  releaseChildCheckout,
+  stopChildTurn,
+  SUBAGENT_ACTIVATION_MS,
+  SUBAGENT_DELIVERY_MS,
+  SUBAGENT_SETTLE_MS,
+  withdrawParent,
+} from './src/subagents/subagents.ts'
 import { THREAD_TOOL } from './src/subagents/delta-threads.ts'
 import {
   canRunThreads,
@@ -88,13 +101,6 @@ import { stopWatching } from './src/watch/watch.ts'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { name: string; version: string }
-/**
- * How long a subagent's pi, asked to stop, waits for its stopped run to settle, and for an automatic
- * activation, at its end; with its records' bounded delivery (5 s) it stays well inside the time the
- * session that stops it gives it (`TERMINATE_GRACE_MS`, 20 s).
- */
-const SUBAGENT_SETTLE_MS = 3_000
-const SUBAGENT_ACTIVATION_MS = 2_000
 /** The custom entry type of the notes Delta leaves for the person. */
 const NOTE_ENTRY = 'delta-note'
 /** The debug log moves aside to `debug.log.1` past this size. */
@@ -181,9 +187,10 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       debug(`The note could not be added to the session: ${errorText(error)}`)
     }
     // A client without pi's terminal draws no entries, so it hears each note as a notification. Print
-    // mode has no client at all: its notes go where pi reports everything but the model's answer.
+    // and JSON modes have no client at all: their notes go where pi reports everything but the model's
+    // answer or its stream of events.
     if (context.hasUI && context.mode !== 'tui') context.ui.notify(text, tone)
-    else if (context.mode === 'print') platform.stderr(`${text}\n`)
+    else if (!context.hasUI) platform.stderr(`${text}\n`)
   }
   const host: Host = {
     pi,
@@ -207,6 +214,16 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       committed: () =>
         (context?.sessionManager.getEntries() ?? []).flatMap((entry) =>
           entry.type === 'message' ? [{ id: entry.id, message: entry.message }] : [],
+        ),
+      holds: (details) => {
+        const entry = context?.sessionManager.getLeafEntry()
+        return entry?.type === 'custom_message' && entry.details === details
+      },
+      customMessages: (customType) =>
+        (context?.sessionManager.getEntries() ?? []).flatMap((entry) =>
+          entry.type === 'custom_message' && entry.customType === customType
+            ? [{ content: entry.content, details: entry.details }]
+            : [],
         ),
       turns: () =>
         (context?.sessionManager.getBranch() ?? []).filter(
@@ -454,8 +471,17 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     context = ctx
     // Shell commands run between turns belong before the turn that starts now.
     await recordCommitted(host)
+    await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
     runStart = host.session.committed().length
     await startTurn(host)
+    // The band's update notice gives way while the run goes on.
+    host.ui.invalidate()
+  })
+
+  // A subagent whose parent is shared while it runs records from its next turn's end.
+  pi.on('turn_end', async (_event, ctx) => {
+    context = ctx
+    await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
   })
 
   pi.on('tool_call', async (event, ctx) => {
@@ -469,6 +495,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     context = ctx
     const session = ctx.sessionManager.getSessionId()
     await recordCommitted(host)
+    await recordUnderParent(host, session, runStart)
     // Why the run's last reply ended, as pi committed it, after every extension's message_end.
     const reply = host.session
       .committed()
@@ -476,6 +503,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       .findLast(({ message }) => message.role === 'assistant')?.message
     const stop = turnStopReason(event.aborted, reply?.role === 'assistant' ? reply.stopReason : undefined)
     await completeTurn(host, stop)
+    host.ui.invalidate()
     // pi may have switched sessions meanwhile, which makes ctx stale; the title is the session's own.
     if (context === ctx) await recordTitle(host, session)
     for (const resolve of settled.splice(0)) resolve()
@@ -508,18 +536,21 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       await flushUnsaved(host, session).catch((error: unknown) =>
         debug(`Delta records not yet saved were lost with the session: ${errorText(error)}`),
       )
-      await deliverWithin(host, session, 5_000).catch(() => {})
+      await deliverWithin(host, session, child ? SUBAGENT_DELIVERY_MS : 5_000).catch(() => {})
     }
     await forgetSessionStart(host, session)
     cancelRequestsOf(session, event.targetSessionFile)
     withdrawParent(host)
     const runtime = stateFor(session)
+    const binding = runtime.binding
     endActivationOf(session)
     resetRuntime(runtime)
     await stopWatching(session)
     forgetContract(session)
     clearProgress(host)
     if (event.reason !== 'reload') await markEnded(host, session)
+    // A subagent's own checkout is released before its pi exits, so whatever started it may remove it.
+    if (event.reason !== 'reload') await releaseChildCheckout(host, binding)
     await releaseOnEnd(host, session, event.reason)
     sessions.delete(session)
     tui = undefined

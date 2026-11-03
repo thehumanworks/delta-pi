@@ -270,7 +270,7 @@ describe('Delta threads as subagents', () => {
     listed(kit, root, notes_, 'inactive')
     await kit.until(() => notes(kit).length, 'the threads note')
     // The thread's run is inside a long call, so only its watch can see a takeover.
-    program.model = (_history, signal) => new Promise((resolve) => signal.addEventListener('abort', () => resolve({})))
+    program.model = (_history, signal) => new Promise((resolve) => signal!.addEventListener('abort', () => resolve({})))
     kit.pi.model = messages('Release notes', 'Inspect the parser')
     const sending = kit.pi.prompt('delegate')
     const child = await program.child(0)
@@ -283,7 +283,13 @@ describe('Delta threads as subagents', () => {
       () => child.commands().some((args) => args[1] === 'watch' && args.includes(producer)),
       "the run's turn to be followed",
     )
-    const recorded = recordsOf(kit, notes_.thread_id, producer).length
+    // Everything the run recorded before the takeover has reached Delta: its start and its prompt.
+    const recorded = (
+      await kit.until(() => {
+        const before = recordsOf(kit, notes_.thread_id, producer)
+        return before.some((record: any) => record.update.sessionUpdate === 'user_message') && before
+      }, "the run's prompt")
+    ).length
     kit.world.remote(notes_.thread_id, { type: 'producer.turn', sequence: running.sequence, status: 'superseded' })
     await sending
     expect(reply(kit)).toBe(
@@ -322,7 +328,7 @@ describe('Delta threads as subagents', () => {
     const notes_ = teammateThread(kit, root)
     listed(kit, root, notes_, 'inactive')
     await kit.until(() => notes(kit).length, 'the threads note')
-    program.model = (_history, signal) => new Promise((resolve) => signal.addEventListener('abort', () => resolve({})))
+    program.model = (_history, signal) => new Promise((resolve) => signal!.addEventListener('abort', () => resolve({})))
     kit.pi.model = messages('Release notes', 'Inspect the parser')
     const sending = kit.pi.prompt('delegate')
     const child = await program.child(0)
