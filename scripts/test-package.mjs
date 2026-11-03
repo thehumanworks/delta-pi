@@ -45,6 +45,18 @@ try {
   if (run.status !== 0 || !run.stderr.includes('* org-1  Zed'))
     throw new Error(`pi did not run the installed extension's command.\nstdout: ${run.stdout}\nstderr: ${run.stderr}`)
   console.log('pi installed the packed release, loaded it, and ran /delta-org list through it.')
+
+  // A Delta thread's pi is started with `-e <the extension's own folder>`; pi must not load the
+  // installed package a second time for it.
+  const again = spawnSync(
+    pi,
+    ['-p', '-e', join(extracted, 'package'), '-e', faux, '--provider', 'faux', '--model', 'faux-1', '/delta-org list'],
+    { cwd: project, env, encoding: 'utf8', timeout: 60_000 },
+  )
+  const listed = again.stderr.split('* org-1  Zed').length - 1
+  if (again.status !== 0 || listed !== 1 || /conflict|already registered|Extension error/i.test(again.stderr))
+    throw new Error(`pi loaded the installed extension again for -e.\nstdout: ${again.stdout}\nstderr: ${again.stderr}`)
+  console.log('pi loaded the installed release once when it was also named with -e.')
 } finally {
   rmSync(base, { recursive: true, force: true })
 }
