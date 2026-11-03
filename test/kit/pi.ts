@@ -189,6 +189,14 @@ export class FakePi {
    */
   nextSwitch: 'cancel' | Error | undefined
 
+  /**
+   * How the next reload a command asks for goes: held until a promise settles, refused as pi's terminal
+   * refuses one while it compacts (a warning, and no reload), a failure, or, unset, a reload.
+   */
+  nextReload: Promise<void> | 'refuse' | Error | undefined
+  /** How many reloads commands asked for and pi carried out. */
+  reloads = 0
+
   /** Switch to the session saved in `file`, as `/resume` or a command's `switchSession` does. */
   async switchTo(file: string, reason: 'resume' | 'new' | 'fork' = 'resume') {
     const outcome = this.nextSwitch
@@ -440,8 +448,14 @@ export class FakePi {
       reload: {
         value: async () => {
           runtime?.assertActive()
+          const outcome = this.nextReload
+          this.nextReload = undefined
+          if (outcome instanceof Promise) await outcome
+          else if (outcome === 'refuse') return
+          else if (outcome) throw outcome
           await this.shutdown('reload')
           await this.start('startup')
+          this.reloads++
         },
       },
     })
