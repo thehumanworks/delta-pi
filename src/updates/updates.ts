@@ -20,11 +20,11 @@ const USAGE =
 /** Where pi installed the extension from: an npm package source, by name. */
 type Source = { source: string; name: string }
 /** What the last check found, shared through the store. */
-type Check = { checkedAt: number; name: string; latest: string }
+type Check = { checkedAt: number; root: string; cwd: string; source?: Source; latest?: string }
 
 /** The newer release the band offers, once a check found one. */
 let available: string | undefined
-let timer: { cancel(): void } | undefined
+let observer: { timer?: { cancel(): void } } | undefined
 
 /** `x.y.z`; anything else is not compared. */
 function versionParts(version: string): number[] | undefined {
@@ -75,15 +75,40 @@ async function latestVersion(name: string): Promise<string> {
   return manifest.version
 }
 
-/** Check for a newer release, reusing a check another process made within the hour unless `force`. */
+/** Validate shared state before letting it suppress discovery or supply a release. */
+function checkFrom(value: unknown): Check | undefined {
+  if (
+    !isJsonObject(value) ||
+    typeof value.checkedAt !== 'number' ||
+    !Number.isFinite(value.checkedAt) ||
+    typeof value.root !== 'string' ||
+    typeof value.cwd !== 'string' ||
+    (value.latest !== undefined && (typeof value.latest !== 'string' || !versionParts(value.latest)))
+  )
+    return
+  const source = value.source
+  if (
+    source !== undefined &&
+    (!isJsonObject(source) || typeof source.source !== 'string' || typeof source.name !== 'string')
+  )
+    return
+  return value as Check
+}
+
+/** Attempts, including failures, wait an hour; a failure retains the last known release. */
 async function check(host: Host, force = false): Promise<{ source?: Source; latest?: string }> {
+  const now = host.clock.now()
+  const root = host.plugin.root,
+    cwd = host.session.cwd()
+  const saved = checkFrom(await host.store.get(CHECK))
+  const previous = saved && samePath(saved.root, root) && samePath(saved.cwd, cwd) ? saved : undefined
+  if (!force && previous && now >= previous.checkedAt && now - previous.checkedAt < CHECK_INTERVAL_MS) return previous
+  await host.store.set(CHECK, { ...previous, checkedAt: now, root, cwd } satisfies Check)
   const source = await installedSource(host)
-  if (!source) return {}
-  const saved = (await host.store.get(CHECK)) as Check | undefined
-  const fresh = !force && saved?.name === source.name && host.clock.now() - saved.checkedAt < CHECK_INTERVAL_MS
-  const latest = fresh ? saved.latest : await latestVersion(source.name)
-  if (!fresh) await host.store.set(CHECK, { checkedAt: host.clock.now(), name: source.name, latest } satisfies Check)
-  return { source, latest }
+  const latest = source ? await latestVersion(source.name) : undefined
+  const found = { checkedAt: now, root, cwd, source, latest } satisfies Check
+  await host.store.set(CHECK, found)
+  return found
 }
 
 async function notificationsOn(host: Host): Promise<boolean> {
@@ -92,19 +117,26 @@ async function notificationsOn(host: Host): Promise<boolean> {
 
 /** Check in the background now and hourly; a failed check only reaches the debug log. */
 export function startPluginUpdates(host: Host) {
-  if (timer || process.env.PI_OFFLINE || !host.session.interactive()) return
+  if (observer || process.env.PI_OFFLINE || !host.session.interactive()) return
+  const current = {}
+  observer = current
   const run = async () => {
     try {
-      if (!(await notificationsOn(host))) return
+      const enabled = await notificationsOn(host)
+      if (observer !== current) return
+      if (!enabled) return stopPluginUpdates()
       const { latest } = await check(host)
+      const stillEnabled = await notificationsOn(host)
+      if (observer !== current || !stillEnabled || installation) return
       available = latest && compareVersions(latest, host.plugin.version) === 1 ? latest : undefined
       host.ui.invalidate()
     } catch (error) {
-      host.ui.debug(`Delta extension update check: ${errorText(error)}`)
+      if (observer === current) host.ui.debug(`Delta extension update check: ${errorText(error)}`)
     }
   }
   const schedule = (delay: number) => {
-    timer = host.clock.after(delay, async () => {
+    if (observer !== current) return
+    observer.timer = host.clock.after(delay, async () => {
       await run()
       schedule(CHECK_INTERVAL_MS)
     })
@@ -113,8 +145,9 @@ export function startPluginUpdates(host: Host) {
 }
 
 export function stopPluginUpdates() {
-  timer?.cancel()
-  timer = undefined
+  observer?.timer?.cancel()
+  observer = undefined
+  available = undefined
 }
 
 /** Reloading pi's extensions, which only a command handler may do. */
@@ -124,7 +157,8 @@ export type Reload = { reload?(): Promise<void> }
 export async function pluginUpdateCommand(host: Host, args: string, command?: Reload): Promise<{ text?: string }> {
   if (args === 'notifications on' || args === 'notifications off') {
     await host.store.set(NOTIFICATIONS, args === 'notifications on')
-    if (args === 'notifications off') available = undefined
+    stopPluginUpdates()
+    if (args === 'notifications on') startPluginUpdates(host)
     host.ui.invalidate()
     return { text: `Delta extension update notifications are ${args === 'notifications on' ? 'on' : 'off'}.` }
   }
@@ -141,8 +175,10 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
       text: `This copy of the Delta extension (${host.plugin.root}) wasn't installed from npm, so pi leaves it as it is.`,
     }
   const newer = compareVersions(latest, host.plugin.version) === 1
-  available = newer ? latest : undefined
-  host.ui.invalidate()
+  if (args !== 'check' && (await notificationsOn(host))) {
+    available = newer ? latest : undefined
+    host.ui.invalidate()
+  }
   if (!newer) return { text: `The Delta extension ${host.plugin.version} is up to date.` }
   if (args === 'check')
     return {
