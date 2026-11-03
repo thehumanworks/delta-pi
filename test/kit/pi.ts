@@ -58,10 +58,18 @@ export class FakeSession {
   ) {}
 }
 
+/** What pi says when an extension uses a runtime it replaced (pi's ExtensionRunner.invalidate). */
+const STALE = 'This extension ctx is stale after session replacement or reload.'
+
 /** One loaded copy of the extension, as pi loads one per session. */
 class Runtime {
   readonly handlers = new Map<string, Handler[]>()
   readonly commands = new Map<string, Command>()
+  /** pi invalidates a runtime once its session_shutdown has run: its API and contexts then throw. */
+  stale = false
+  assertActive() {
+    if (this.stale) throw new Error(STALE)
+  }
 }
 
 export class FakePi {
@@ -168,9 +176,10 @@ export class FakePi {
     }
   }
 
-  /** End the session as pi does when it quits or replaces the session. */
+  /** End the session as pi does when it quits or replaces the session, then invalidate its runtime. */
   async shutdown(reason: 'quit' | 'reload' | 'new' | 'resume' | 'fork' = 'quit', target?: string) {
     await this.emit('session_shutdown', { reason, ...(target ? { targetSessionFile: target } : {}) })
+    if (this.runtime) this.runtime.stale = true
     this.runtime = undefined
   }
 
@@ -360,44 +369,82 @@ export class FakePi {
     return result
   }
 
-  private context() {
+  /** The context pi hands `runtime`'s handlers; like pi's, it throws once that runtime is replaced. */
+  private context(runtime = this.runtime) {
     const session = this.session
+    const active = () => {
+      if (!runtime || runtime.stale) throw new Error(STALE)
+    }
+    const mode = () => this.mode
+    const streaming = () => this.streaming
+    const ui = {
+      select: async (title: string, options: string[]) => this.ask({ method: 'select', title, options }),
+      input: async (title: string) => this.ask({ method: 'input', title }),
+      notify: (text: string, tone = 'info') => this.notices.push({ text, tone }),
+      setStatus: (key: string, text: string | undefined) => this.statuses.set(key, text),
+      setWidget: () => {},
+      getEditorText: () => this.editor,
+      setEditorText: (text: string) => (this.editor = text),
+    }
+    const abort = () => (this.aborted = true)
     return {
-      cwd: session.cwd,
-      hasUI: this.mode === 'rpc',
-      mode: this.mode,
-      ui: {
-        select: async (title: string, options: string[]) => this.ask({ method: 'select', title, options }),
-        input: async (title: string) => this.ask({ method: 'input', title }),
-        notify: (text: string, tone = 'info') => this.notices.push({ text, tone }),
-        setStatus: (key: string, text: string | undefined) => this.statuses.set(key, text),
-        setWidget: () => {},
-        getEditorText: () => this.editor,
-        setEditorText: (text: string) => (this.editor = text),
+      get cwd() {
+        active()
+        return session.cwd
       },
-      sessionManager: {
-        getSessionId: () => session.id,
-        getSessionFile: () => session.file,
-        getEntries: () => [...session.entries],
-        getBranch: () => [...session.entries],
-        getHeader: () => ({ type: 'session', id: session.id, cwd: session.cwd, timestamp: '' }),
-        getCwd: () => session.cwd,
-        getSessionName: () => session.name,
+      get hasUI() {
+        active()
+        return mode() === 'rpc'
       },
-      isIdle: () => !this.streaming,
-      abort: () => (this.aborted = true),
+      get mode() {
+        active()
+        return mode()
+      },
+      get ui() {
+        active()
+        return ui
+      },
+      get sessionManager() {
+        active()
+        return {
+          getSessionId: () => session.id,
+          getSessionFile: () => session.file,
+          getEntries: () => [...session.entries],
+          getBranch: () => [...session.entries],
+          getHeader: () => ({ type: 'session', id: session.id, cwd: session.cwd, timestamp: '' }),
+          getCwd: () => session.cwd,
+          getSessionName: () => session.name,
+        }
+      },
+      isIdle: () => {
+        active()
+        return !streaming()
+      },
+      abort: () => {
+        active()
+        abort()
+      },
     }
   }
 
   private commandContext() {
-    return {
-      ...this.context(),
-      switchSession: (file: string) => this.switchTo(file),
-      reload: async () => {
-        await this.shutdown('reload')
-        await this.start('startup')
+    const runtime = this.runtime
+    const context = this.context(runtime)
+    return Object.defineProperties(context, {
+      switchSession: {
+        value: (file: string) => {
+          runtime?.assertActive()
+          return this.switchTo(file)
+        },
       },
-    }
+      reload: {
+        value: async () => {
+          runtime?.assertActive()
+          await this.shutdown('reload')
+          await this.start('startup')
+        },
+      },
+    })
   }
 
   private async ask(dialog: Dialog): Promise<string | undefined> {
@@ -406,16 +453,25 @@ export class FakePi {
     return typeof answer === 'function' ? answer(dialog) : answer
   }
 
+  /** The API pi hands the extension; like pi's, it throws once the runtime is replaced. */
   private api(runtime: Runtime): ExtensionAPI {
     const api = {
       on: (event: string, handler: Handler) => {
+        runtime.assertActive()
         runtime.handlers.set(event, [...(runtime.handlers.get(event) ?? []), handler])
       },
-      registerCommand: (name: string, command: Command) => runtime.commands.set(name, command),
-      registerMessageRenderer: () => {},
-      registerEntryRenderer: () => {},
-      appendEntry: (customType: string, data: unknown) => this.append({ type: 'custom', customType, data }),
+      registerCommand: (name: string, command: Command) => {
+        runtime.assertActive()
+        runtime.commands.set(name, command)
+      },
+      registerMessageRenderer: () => runtime.assertActive(),
+      registerEntryRenderer: () => runtime.assertActive(),
+      appendEntry: (customType: string, data: unknown) => {
+        runtime.assertActive()
+        this.append({ type: 'custom', customType, data })
+      },
       sendMessage: (message: { customType: string; content: unknown; display: boolean; details?: unknown }) => {
+        runtime.assertActive()
         const entry = {
           type: 'custom_message',
           customType: message.customType,
@@ -426,7 +482,10 @@ export class FakePi {
         if (this.streaming) this.pendingCustom.push(entry)
         else this.append(entry)
       },
-      getSessionName: () => this.session.name,
+      getSessionName: () => {
+        runtime.assertActive()
+        return this.session.name
+      },
     }
     return api as unknown as ExtensionAPI
   }

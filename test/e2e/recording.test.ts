@@ -107,18 +107,21 @@ test("Delta records what the session keeps: a later extension's redaction, and t
   await pi.prompt('my password is hunter2')
   const shell = await pi.send({ type: 'bash', command: 'echo from the shell' })
   expect(shell.success).toBe(true)
-  await pi.prompt('thanks')
+  await pi.prompt('thanks [cut]')
   const thread = await until(() => {
     const found = Object.values(w.delta().threads)[0]
     return found?.records.some((record: any) => JSON.stringify(record.update).includes('Echo: thanks')) && found
   }, 'the second turn to reach Delta')
+  // The extension cut the second reply at its length limit after Delta saw it; the finish says what pi kept.
+  const finishes = thread.records.filter((record: any) => record.update.state === 'idle')
+  expect(finishes.map((record: any) => record.update.stopReason)).toEqual(['end_turn', undefined])
   const recorded = JSON.stringify(thread.records)
   expect(recorded).not.toContain('hunter2')
   const prompts = thread.records.filter((record: any) => record.update.sessionUpdate === 'user_message')
   expect(prompts.map((record: any) => record.update.content[0].text)).toEqual([
     'my password is [redacted]',
     'Ran `echo from the shell`\n\n```\nfrom the shell\n```',
-    'thanks',
+    'thanks [cut]',
   ])
 }, 60_000)
 

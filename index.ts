@@ -322,6 +322,8 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   /** Say why a prompt was not submitted, and give the person their text back to send again. */
   const refuse = (ctx: ExtensionContext, text: string, reason: string, tone: NoteTone) => {
     note(reason, tone)
+    // pi replaces a session's context when it switches; a refusal that outlived its session puts nothing back.
+    if (context !== ctx) return
     if (ctx.mode === 'tui' && !ctx.ui.getEditorText().trim()) ctx.ui.setEditorText(text)
   }
   pi.on('input', async (event, ctx) => {
@@ -355,17 +357,14 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   // Before each model request, which follows the prompt or tool results it answers.
   pi.on('context', recordFrom)
 
+  /** How many messages the session held when the run in progress started. */
+  let runStart = 0
   pi.on('agent_start', async (_event, ctx) => {
     context = ctx
     // Shell commands run between turns belong before the turn that starts now.
     await recordCommitted(host)
+    runStart = host.session.committed().length
     await startTurn(host)
-  })
-
-  /** Why the turn's last reply ended, for its finish record. */
-  let lastStop: string | undefined
-  pi.on('message_end', (event) => {
-    if (event.message.role === 'assistant') lastStop = event.message.stopReason
   })
 
   pi.on('tool_call', async (event, ctx) => {
@@ -377,11 +376,17 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
 
   pi.on('agent_settled', async (event, ctx) => {
     context = ctx
+    const session = ctx.sessionManager.getSessionId()
     await recordCommitted(host)
-    const stop = turnStopReason(event.aborted, lastStop)
-    lastStop = undefined
+    // Why the run's last reply ended, as pi committed it, after every extension's message_end.
+    const reply = host.session
+      .committed()
+      .slice(runStart)
+      .findLast(({ message }) => message.role === 'assistant')?.message
+    const stop = turnStopReason(event.aborted, reply?.role === 'assistant' ? reply.stopReason : undefined)
     await completeTurn(host, stop)
-    await recordTitle(host, ctx.sessionManager.getSessionId())
+    // pi may have switched sessions meanwhile, which makes ctx stale; the title is the session's own.
+    if (context === ctx) await recordTitle(host, session)
   })
 
   pi.on('session_shutdown', async (event, ctx) => {
