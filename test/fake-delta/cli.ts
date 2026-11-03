@@ -590,19 +590,32 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const [locator] = rest
       const owner = required(option(rest, '--owner'), '--owner')
       let thread: FakeThread | undefined
-      // The thread's first worktree is checked out in the owner's folder, and each other one beside it;
-      // a thread of one worktree is worked in at its checkout, one of several in a folder of its own.
+      // A test can have Delta place mounts as it does on Windows, under `windows-mounts.json`'s `base`:
+      // each worktree at `<base>\<owner>\<name>`, which `thread status` then reports with its last
+      // separator a slash, as Delta mixes them.
+      const windows = existsSync(join(root, 'windows-mounts.json'))
+        ? (JSON.parse(readFileSync(join(root, 'windows-mounts.json'), 'utf8')) as { base: string })
+        : undefined
+      // Otherwise the thread's first worktree is checked out in the owner's folder, and each other one beside
+      // it; a thread of one worktree is worked in at its checkout, one of several in a folder of its own.
       const placed = update((state) => {
         thread = known(state, locator)
         const first = join(root, 'mounts', thread.thread_id, owner)
         const worktrees = thread.worktrees.map((reference, index) => {
           const name = worktreeName(state, reference)
-          return { reference, name, directory: index === 0 ? first : `${first}-${name}` }
+          const directory = windows ? `${windows.base}\\${owner}\\${name}` : index === 0 ? first : `${first}-${name}`
+          return { reference, name, directory, checkout: windows ? `${windows.base}\\${owner}/${name}` : directory }
         })
-        const directory = worktrees.length > 1 ? join(root, 'folders', thread.thread_id, owner) : first
-        mkdirSync(directory, { recursive: true })
-        for (const { reference, directory: checkout } of worktrees) {
-          mkdirSync(checkout, { recursive: true })
+        const directory =
+          worktrees.length === 1
+            ? worktrees[0]!.directory
+            : windows
+              ? `${windows.base}\\${owner}`
+              : join(root, 'folders', thread.thread_id, owner)
+        if (!windows)
+          for (const folder of [directory, ...worktrees.map((tree) => tree.directory)])
+            mkdirSync(folder, { recursive: true })
+        for (const { reference, checkout } of worktrees) {
           let tree = state.worktrees.find((entry) => entry.reference === reference)
           if (!tree) state.worktrees.push((tree = { reference, worktree_id: reference, directories: [] }))
           const entry = tree.directories.find((candidate) => candidate.directory === checkout)
@@ -619,11 +632,16 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         thread_id: thread.thread_id,
         owner,
         directory: placed.directory,
-        worktrees: placed.worktrees.map((tree) => ({ ...tree, state: 'mounted' })),
+        worktrees: placed.worktrees.map(({ reference, name, directory }) => ({
+          reference,
+          name,
+          directory,
+          state: 'mounted',
+        })),
       })
       // Delta releases an owner's directories once no mount command for them runs; mounting again under
       // the same owner replaces the process and keeps them mounted.
-      const checkouts = placed.worktrees.map((tree) => tree.directory)
+      const checkouts = placed.worktrees.map((tree) => tree.checkout)
       await io.hold(() =>
         update((state) => {
           for (const tree of state.worktrees)

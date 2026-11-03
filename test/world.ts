@@ -126,6 +126,10 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     ) {
       writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
     },
+    /** Make `thread mount` place worktrees as Delta does on Windows, under `base` (see test/fake-delta). */
+    windowsMounts(base: string) {
+      writeFileSync(join(state, 'windows-mounts.json'), JSON.stringify({ base }))
+    },
     /** Let `command` give its own answer again after `answer`. */
     stopAnswering(command: string) {
       rmSync(join(state, `answer-${command.replaceAll(' ', '-')}`), { force: true })

@@ -1,10 +1,23 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { FakeSession, type Kit, startDelta } from '../kit/index.ts'
 import { FAKE_BIN, type World } from '../world.ts'
 import { itemFingerprint } from '../../src/watch/conversation.ts'
+
+// pi on Windows keeps a `C:\` folder as a new session's directory; on this machine it would resolve the
+// folder against the current one, so a session made for a Windows folder names it as Windows does.
+vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
+  const pi = await importOriginal<typeof import('@earendil-works/pi-coding-agent')>()
+  const create: typeof pi.SessionManager.create = (cwd, sessionDir, options) => {
+    const manager = pi.SessionManager.create(cwd, sessionDir, options)
+    if (!/^[a-z]:\\/i.test(cwd)) return manager
+    const header = manager.getHeader()
+    return Object.assign(manager, { getHeader: () => header && { ...header, cwd } })
+  }
+  return { ...pi, SessionManager: Object.assign(Object.create(pi.SessionManager), { create }) }
+})
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -902,4 +915,44 @@ test('a worktree added during a turn waits for the turn to end before telling Cl
   await kit.until(() => worktreeNotes(kit).length === 1, 'the model to be told once the turn ended')
   // pi stays in its directory, as it keeps one per session.
   expect(kit.pi.session.cwd).toBe(own)
+})
+
+test('Windows mixed separators join and allow subdirectories but not sibling checkouts', async () => {
+  // Paths are compared by how they are spelled, whatever the machine: only finding Delta differs on Windows.
+  delta = await joiner()
+  const { url } = sharedThread(delta.world)
+  // Delta mounts under a Windows folder, and reports the checkout with mixed separators.
+  const base = String.raw`C:\Workspace\zed\delta\.delta\worktrees\rn4eercbxvfw`
+  delta.world.windowsMounts(base)
+  await delta.pi.command('delta-join', url)
+  await delta.until(() => joined(delta!), 'the join to finish')
+  const session = delta.pi.session
+  const directory = `${base}\\${session.id}\\other`
+  expect(await bindingOf(delta, session.id)).toMatchObject({ joined: true, snapshot: true, directory })
+  expect(session.cwd).toBe(directory)
+  expect(await delta.pi.prompt('in the checkout')).toBe('settled')
+  await delta.whileTimePasses(delta.pi.shutdown('quit'))
+  await delta.crash()
+  // pi's directory is the session's for its life, so a resume is how pi comes to work in another one.
+  const resumeIn = async (cwd: string) => {
+    const kit = await startDelta({
+      world: delta!.world,
+      session: new FakeSession(session.id, cwd, session.file),
+    })
+    try {
+      await kit.until(
+        () => band(kit).includes('Restored 1 worktree') || shown(kit).includes("couldn't restore"),
+        'the restore',
+      )
+      const outcome = await kit.pi.prompt(`from ${cwd}`)
+      kit.expectClean()
+      return { outcome, shown: shown(kit) }
+    } finally {
+      await kit.stop()
+    }
+  }
+  expect((await resumeIn(`${directory}\\src`)).outcome).toBe('settled')
+  const outside = await resumeIn(`${directory}-other`)
+  expect(outside.outcome).toBe('handled')
+  expect(outside.shown).toContain(`pi is working in ${directory}-other, outside this session's folder ${directory}`)
 })
