@@ -815,6 +815,9 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
   runtime.promptEntering = false
   const sequence = turnId === undefined ? undefined : runtime.nativeTurns.get(turnId)
   if (turnId !== undefined) runtime.nativeTurns.delete(turnId)
+  // Every call of the run has its result by now; what was kept for one that never reported is dropped.
+  toolInputs.clear()
+  priorFiles.clear()
   stopChildTurn()
   if (sequence !== undefined) {
     try {
@@ -864,6 +867,55 @@ export function translationFor(host: Host, binding: Binding | undefined): Transl
     priorFiles,
     patch: unifiedPatch,
   }
+}
+
+/** How many of the session's committed messages recording has looked at; later ones are new. */
+let seenMessages = 0
+/** The recording of committed messages in progress, so each call records after the one before it. */
+let recording: Promise<void> = Promise.resolve()
+
+/**
+ * Leave what the session held when this runtime started to its earlier recording, or to the export a
+ * share makes, and record only what pi commits from now on.
+ */
+export function recordFromNow(host: Host) {
+  seenMessages = host.session.committed().length
+}
+
+/**
+ * Record, in order, each message pi committed to the session since the last call. Pi commits a message
+ * once every extension's `message_end` has run, so this records what the session keeps, as any
+ * extension redacted or replaced it, and the shell commands the person ran, which have no `message_end`.
+ */
+export function recordCommitted(host: Host): Promise<void> {
+  const step = recording.then(async () => {
+    const committed = host.session.committed()
+    const fresh = committed.slice(seenMessages)
+    // A session pi no longer reports never rewinds what was seen.
+    seenMessages = Math.max(seenMessages, committed.length)
+    for (const { id, message } of fresh)
+      try {
+        // Entry IDs are unique only within their session.
+        await recordMessage(host, message, `${host.session.id()}:${id}`)
+      } catch (error) {
+        host.ui.debug(`Recording a message failed: ${errorText(error)}`)
+      }
+  })
+  recording = step.catch(() => {})
+  return step
+}
+
+/**
+ * How a settled run ended, for its finish record: only a reply that stopped normally is `end_turn`, and a
+ * finish pi does not name, such as a reply cut at its length limit, is left unspecified.
+ */
+export function turnStopReason(
+  aborted: boolean,
+  lastStop: string | undefined,
+): 'end_turn' | 'cancelled' | 'error' | undefined {
+  if (aborted || lastStop === 'aborted') return 'cancelled'
+  if (lastStop === 'error') return 'error'
+  return lastStop === 'stop' ? 'end_turn' : undefined
 }
 
 /** A message pi finished is recorded under the turn it belongs to. */

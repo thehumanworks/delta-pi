@@ -45,6 +45,11 @@ export type Host = {
     terminal(): boolean
     /** The current branch's conversation, as pi sends it to the model, for a share's snapshot. */
     messages(): AgentMessage[]
+    /**
+     * Every message pi has committed to the session, on any branch, in the order pi appended them, with
+     * its entry's ID. Pi commits a message once every extension's `message_end` has run, so it is final.
+     */
+    committed(): { id: string; message: AgentMessage }[]
     /** How many prompts and replies the current branch holds: none means a new session. */
     turns(): number
     name(): string | undefined

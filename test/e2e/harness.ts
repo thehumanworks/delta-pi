@@ -12,6 +12,7 @@ const REPO = join(import.meta.dirname, '..', '..')
 export const FAKE_BIN = join(import.meta.dirname, 'bin')
 export const EXTENSION = join(REPO, 'index.ts')
 export const FAUX_MODEL = join(import.meta.dirname, 'faux-model.ts')
+export const REDACTOR = join(import.meta.dirname, 'redactor.ts')
 /**
  * The pi the tests run: the one `package.json` pins, never whichever `pi` is on the PATH. CI swaps in
  * another version by installing it over the pinned one.

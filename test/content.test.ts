@@ -5,7 +5,6 @@ import { generateUnifiedPatch } from '@earendil-works/pi-coding-agent'
 import { resolveToCwd } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js'
 import {
   absolutePath,
-  isOwnContext,
   messageUpdates,
   recordedMessage,
   REMOTE_MESSAGE,
@@ -43,8 +42,8 @@ describe('what is recorded', () => {
     ).toBeUndefined()
     for (const role of ['custom', 'compactionSummary', 'branchSummary', 'system'])
       expect(recordedMessage(message({ role, content: 'framing', summary: 's' }))).toBeUndefined()
-    expect(isOwnContext(message({ role: 'custom', customType: REMOTE_MESSAGE, content: 'x' }))).toBe(true)
-    expect(isOwnContext(message({ role: 'custom', customType: 'other', content: 'x' }))).toBe(false)
+    // Nor is the remote activity this extension gives the model.
+    expect(recordedMessage(message({ role: 'custom', customType: REMOTE_MESSAGE, content: 'x' }))).toBeUndefined()
   })
 
   test("a shell command's failure or cancellation is said after its output", () => {

@@ -344,9 +344,3 @@ export function toolCallsOf(message: RecordedMessage): [string, unknown][] {
     block.type === 'toolCall' && typeof block.id === 'string' ? [[block.id, block.arguments] as [string, unknown]] : [],
   )
 }
-
-/** The model-only framing this extension adds itself: remote activity it gave the model. */
-export function isOwnContext(message: AgentMessage): boolean {
-  const value = message as { role?: unknown; customType?: unknown }
-  return value.role === 'custom' && value.customType === REMOTE_MESSAGE
-}

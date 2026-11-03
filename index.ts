@@ -8,7 +8,6 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import {
   copyToClipboard,
   type ExtensionAPI,
@@ -39,13 +38,16 @@ import { errorText } from './src/core/text.ts'
 import { forgetContract } from './src/cli/delta-cli.ts'
 import { BandWidget, bandText, clearProgress } from './src/band/band.ts'
 import { type Note, renderNote, renderRemote } from './src/band/renderers.ts'
-import { isOwnContext, REMOTE_MESSAGE } from './src/recording/content.ts'
+import { REMOTE_MESSAGE } from './src/recording/content.ts'
 import {
   completeTurn,
   deliverWithin,
-  recordMessage,
+  flushUnsaved,
+  recordCommitted,
+  recordFromNow,
   rememberPriorFile,
   startTurn,
+  turnStopReason,
   usePatchBuilder,
 } from './src/recording/delivery.ts'
 import { admitPrompt } from './src/recording/prompt.ts'
@@ -125,6 +127,10 @@ export default function delta(pi: ExtensionAPI) {
       messages: () =>
         (context?.sessionManager.getBranch() ?? []).flatMap((entry) =>
           entry.type === 'message' ? [entry.message] : [],
+        ),
+      committed: () =>
+        (context?.sessionManager.getEntries() ?? []).flatMap((entry) =>
+          entry.type === 'message' ? [{ id: entry.id, message: entry.message }] : [],
         ),
       turns: () =>
         (context?.sessionManager.getBranch() ?? []).filter(
@@ -270,6 +276,7 @@ export default function delta(pi: ExtensionAPI) {
     // Only a person can act on an update notice; subagents and scripted runs never check.
     if (ctx.hasUI) host.clock.after(0, () => installationUpdates.check(installUpdateHost(host)))
     startPluginUpdates(host)
+    recordFromNow(host)
     await beginSession(host, session)
   })
 
@@ -300,33 +307,44 @@ export default function delta(pi: ExtensionAPI) {
     return { action: 'handled' }
   })
 
+  // Delta records what pi committed to the session, read at the next event after pi commits it: each
+  // message once every extension's message_end has run, and the shell commands the person ran, which
+  // pi commits without a message_end.
+  const recordFrom = async (_event: unknown, ctx: ExtensionContext) => {
+    context = ctx
+    await recordCommitted(host)
+  }
+  pi.on('message_start', recordFrom)
+  pi.on('message_end', recordFrom)
+  pi.on('tool_execution_start', recordFrom)
+  pi.on('turn_end', recordFrom)
+  // Before each model request, which follows the prompt or tool results it answers.
+  pi.on('context', recordFrom)
+
   pi.on('agent_start', async (_event, ctx) => {
     context = ctx
+    // Shell commands run between turns belong before the turn that starts now.
+    await recordCommitted(host)
     await startTurn(host)
   })
 
   /** Why the turn's last reply ended, for its finish record. */
   let lastStop: string | undefined
-  pi.on('message_end', async (event, ctx) => {
-    context = ctx
-    const message = event.message as AgentMessage & { role: string; stopReason?: string }
-    if (isOwnContext(message)) return
-    if (message.role === 'assistant') lastStop = message.stopReason
-    try {
-      await recordMessage(host, message, crypto.randomUUID())
-    } catch (error) {
-      debug(`Recording a message failed: ${errorText(error)}`)
-    }
+  pi.on('message_end', (event) => {
+    if (event.message.role === 'assistant') lastStop = event.message.stopReason
   })
 
   pi.on('tool_call', async (event, ctx) => {
     context = ctx
-    if (event.toolName === 'write') await rememberPriorFile(host, event.toolCallId, event.input)
+    // A call another tool made has no result in the transcript, so its record would never be released.
+    if (event.toolName === 'write' && event.parentToolCallId === undefined)
+      await rememberPriorFile(host, event.toolCallId, event.input)
   })
 
   pi.on('agent_settled', async (event, ctx) => {
     context = ctx
-    const stop = event.aborted ? 'cancelled' : lastStop === 'error' ? 'error' : 'end_turn'
+    await recordCommitted(host)
+    const stop = turnStopReason(event.aborted, lastStop)
     lastStop = undefined
     await completeTurn(host, stop)
     await recordTitle(host, ctx.sessionManager.getSessionId())
@@ -335,6 +353,7 @@ export default function delta(pi: ExtensionAPI) {
   pi.on('session_shutdown', async (event, ctx) => {
     context = ctx
     const session = ctx.sessionManager.getSessionId()
+    await recordCommitted(host)
     stopPluginUpdates()
     stopChildTurn()
     // Records still queued get a bounded chance to reach Delta before pi switches or exits, once an
@@ -342,6 +361,10 @@ export default function delta(pi: ExtensionAPI) {
     // left for the session's next activation.
     if (activation.session === session) {
       await settleActivation(host, session, 10_000)
+      // Records a failed write kept in memory go to the outbox first; this runtime ends with the session.
+      await flushUnsaved(host, session).catch((error: unknown) =>
+        debug(`Delta records not yet saved were lost with the session: ${errorText(error)}`),
+      )
       await deliverWithin(host, session, 5_000).catch(() => {})
     }
     await forgetSessionStart(host, session)

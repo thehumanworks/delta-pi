@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { EXTENSION, FAUX_MODEL, PI, Pi, until, world, type World } from './harness.ts'
+import { EXTENSION, FAUX_MODEL, PI, Pi, REDACTOR, until, world, type World } from './harness.ts'
 
 let current: { pi?: Pi; world?: World } = {}
 afterEach(async () => {
@@ -70,15 +70,17 @@ test('a write is recorded as a diff with its patch', async () => {
   await until(() => w.calls().some((call) => call.argv.includes('watch')), 'the thread watch to start')
   await pi.prompt('write notes.txt first line')
   await pi.prompt('write notes.txt second line')
+  // pi's tools drop a leading @ from a path, so this write replaces the same file.
+  await pi.prompt('write @notes.txt third line')
   const thread = await until(() => {
     const found = Object.values(w.delta().threads)[0]
     return (
       found?.records.filter(
         (record: any) =>
           Array.isArray(record.update.content) && record.update.content.some((item: any) => item.type === 'diff'),
-      ).length === 2 && found
+      ).length === 3 && found
     )
-  }, 'both writes to reach Delta')
+  }, 'every write to reach Delta')
   const diffs = thread.records.flatMap((record: any) =>
     Array.isArray(record.update.content) ? record.update.content.filter((item: any) => item.type === 'diff') : [],
   )
@@ -89,6 +91,32 @@ test('a write is recorded as a diff with its patch', async () => {
   expect(diffs[1].patch.text).toContain('--- a/notes.txt\n+++ b/notes.txt\n')
   expect(diffs[1].patch.text).toContain('-first line')
   expect(diffs[1].patch.text).toContain('+second line')
+  expect(diffs[2].changes).toEqual([{ operation: 'modify', path: `${w.checkout}/notes.txt` }])
+  expect(diffs[2].patch.text).toContain('-second line')
+  expect(diffs[2].patch.text).toContain('+third line')
+}, 60_000)
+
+test("Delta records what the session keeps: a later extension's redaction, and the shell commands the person ran", async () => {
+  const w = world({ policy: { mode: 'private', organization: 'org-1' } })
+  const pi = Pi.start(w, { args: ['-e', REDACTOR] })
+  current = { pi, world: w }
+  await until(() => w.calls().some((call) => call.argv.includes('watch')), 'the thread watch to start')
+  await pi.prompt('my password is hunter2')
+  const shell = await pi.send({ type: 'bash', command: 'echo from the shell' })
+  expect(shell.success).toBe(true)
+  await pi.prompt('thanks')
+  const thread = await until(() => {
+    const found = Object.values(w.delta().threads)[0]
+    return found?.records.some((record: any) => JSON.stringify(record.update).includes('Echo: thanks')) && found
+  }, 'the second turn to reach Delta')
+  const recorded = JSON.stringify(thread.records)
+  expect(recorded).not.toContain('hunter2')
+  const prompts = thread.records.filter((record: any) => record.update.sessionUpdate === 'user_message')
+  expect(prompts.map((record: any) => record.update.content[0].text)).toEqual([
+    'my password is [redacted]',
+    'Ran `echo from the shell`\n\n```\nfrom the shell\n```',
+    'thanks',
+  ])
 }, 60_000)
 
 test('a new session records into a thread of its own, and resuming the first carries on its thread', async () => {
