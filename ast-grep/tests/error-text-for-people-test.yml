@@ -1,0 +1,9 @@
+id: error-text-for-people
+valid:
+  - "host.ui.note(`Delta join failed: ${errorText(error)}`, 'error')"
+  - 'host.ui.debug(`Delta mount process did not stop: ${String(error)}`)'
+  - "await host.log(`Delta installation update failed: ${String(error)}`, 'debug')"
+  - 'const label = String(count)'
+invalid:
+  - "host.ui.note(`Delta join failed: ${String(error)}`, 'error')"
+  - 'throw new InteractionDismissedError(String(error))'

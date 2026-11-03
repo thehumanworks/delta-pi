@@ -1,0 +1,6 @@
+# Structural rules for this repository's conventions that lint rules cannot express. Each rule has
+# tests in ast-grep/tests: `npm run lint` scans and tests them.
+ruleDirs:
+  - ast-grep/rules
+testConfigs:
+  - testDir: ast-grep/tests

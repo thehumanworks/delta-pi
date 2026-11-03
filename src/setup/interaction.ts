@@ -5,6 +5,7 @@
 import { readIfExists, writeShared } from '../core/files.ts'
 import { type Host, InteractionUnavailableError } from '../core/host.ts'
 import { activation, stateFor, stillActive } from '../core/session-state.ts'
+import { errorText } from '../core/text.ts'
 import { type AuthenticationHost, type BrowserWait, requireAuthentication } from '../cli/auth.ts'
 import { authStatus, INTEGRATION_ENV, orgInvite, resolveCli, threadContract } from '../cli/delta-cli.ts'
 import { clearProgress, type Progress, reportedProgress, setProgress } from '../band/band.ts'
@@ -145,7 +146,7 @@ export function interaction(host: Host): Interaction {
         answer = await host.ui.ask(question, request)
       } catch (error) {
         if (error instanceof InteractionUnavailableError) throw error
-        throw new InteractionDismissedError(String(error))
+        throw new InteractionDismissedError(errorText(error))
       }
       if (answer === undefined || answer === '') throw new InteractionDismissedError('dismissed')
       return answer

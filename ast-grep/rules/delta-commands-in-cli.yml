@@ -1,0 +1,15 @@
+id: delta-commands-in-cli
+language: TypeScript
+severity: error
+message: Run a Delta command through a src/cli function.
+note: |
+  The functions in src/cli label every Delta command as pi's for Delta's telemetry
+  (DELTA_CLI_INTEGRATION), resolve the selected CLI, and check its answer. A command line built
+  anywhere else skips that.
+rule:
+  pattern: "[$EXECUTABLE, '--json', $$$ARGS]"
+files:
+  - src/**/*.ts
+  - index.ts
+ignores:
+  - src/cli/**

@@ -1,0 +1,6 @@
+id: delta-commands-in-cli
+valid:
+  - 'await threadStatus(host, locator, session)'
+  - "host.process.run(['npm', 'view', name, 'version', '--json'])"
+invalid:
+  - "host.process.run([executable, '--json', 'thread', 'status', locator])"

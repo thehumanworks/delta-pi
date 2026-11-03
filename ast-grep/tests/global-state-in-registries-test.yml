@@ -1,0 +1,6 @@
+id: global-state-in-registries
+valid:
+  - 'const sessions = new Map<string, SessionState>()'
+invalid:
+  - "const cache = ((globalThis as Record<symbol, unknown>)[Symbol.for('pi-delta.cache')] ??= new Map())"
+  - 'globalThis.deltaState = {}'

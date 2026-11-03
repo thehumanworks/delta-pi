@@ -1,6 +1,7 @@
 // @ts-check
 // Lint rules that catch what the type checker does not: promises left floating, untrusted values used as
-// `any`, unchecked switches, and code reaching past the seams the extension is built around (see AGENTS.md).
+// `any`, unchecked switches, and the extension's code reaching past the seams it is built around (see
+// AGENTS.md). Structural rules lint cannot express are in ast-grep/.
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
@@ -42,6 +43,12 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       // Every empty block says why it may be empty.
       'no-empty': ['error', { allowEmptyCatch: false }],
+    },
+  },
+  {
+    // The extension's own code reaches the machine and pi only through its seams, which tests replace.
+    files: ['src/**/*.ts', 'index.ts'],
+    rules: {
       'no-restricted-imports': restrict(boundaries.childProcess, boundaries.fs, boundaries.fsPromises, boundaries.pi),
       'no-restricted-properties': [
         'error',
@@ -62,8 +69,8 @@ export default tseslint.config(
       ],
     },
   },
-  // The files that own a boundary may cross it: index.ts binds Node's platform, and the clock and the
-  // process runner are Node's timers and programs.
+  // The files that own a seam may cross it: index.ts binds Node's platform and pi, the clock and the
+  // process runner are Node's timers and programs, and the renderers draw with pi's own components.
   {
     files: ['index.ts'],
     rules: { 'no-restricted-imports': restrict(boundaries.childProcess), 'no-restricted-properties': 'off' },
@@ -79,7 +86,6 @@ export default tseslint.config(
   { files: ['src/core/clock.ts'], rules: { 'no-restricted-properties': 'off', 'no-restricted-globals': 'off' } },
   { files: ['src/core/files.ts'], rules: { 'no-restricted-imports': restrict(boundaries.childProcess) } },
   {
-    // The band and the transcript's renderers draw with pi's own theme and components.
     files: ['src/band/renderers.ts'],
     rules: { 'no-restricted-imports': restrict(boundaries.childProcess, boundaries.fs, boundaries.fsPromises) },
   },
@@ -94,14 +100,15 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/unbound-method': 'off',
-      'no-restricted-imports': 'off',
-      'no-restricted-properties': 'off',
-      'no-restricted-globals': 'off',
-      'no-restricted-syntax': 'off',
     },
   },
   {
-    files: ['eslint.config.js'],
+    // Plain JavaScript: this config and the scripts, which Node runs as they are.
+    files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      ...tseslint.configs.disableTypeChecked.languageOptions,
+      globals: { process: 'readonly', console: 'readonly' },
+    },
   },
 )

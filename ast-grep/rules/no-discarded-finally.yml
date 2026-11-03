@@ -1,0 +1,15 @@
+id: no-discarded-finally
+language: TypeScript
+severity: error
+message: A discarded finally() raises its promise's rejection unobserved.
+note: |
+  `void task.finally(done)` returns a new promise that rejects whenever `task` does, and nothing
+  observes it, so a failure the caller handles still becomes an unhandled rejection. Use
+  `void task.then(done, done)`, or catch the result.
+rule:
+  pattern: $PROMISE.finally($$$)
+  any:
+    - inside: { kind: expression_statement, stopBy: neighbor }
+    - inside: { pattern: void $_, stopBy: neighbor }
+  not:
+    pattern: $SOURCE.catch($$$).finally($$$)

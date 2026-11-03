@@ -37,10 +37,15 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
+    "lint": "eslint . && node scripts/ast-grep.mjs scan && node scripts/ast-grep.mjs test --skip-snapshot-tests",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
+    "test:behaviour": "vitest run --project behaviour",
     "test:e2e": "vitest run --project e2e",
-    "prepublishOnly": "npm run check && npm test"
+    "verify": "npm run format:check && npm run check && npm run lint && npm test",
+    "prepublishOnly": "npm run verify"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

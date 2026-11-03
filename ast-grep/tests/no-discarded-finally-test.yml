@@ -1,0 +1,10 @@
+id: no-discarded-finally
+valid:
+  - 'void task.then(forget, forget)'
+  - 'void task.catch(report).finally(forget)'
+  - 'runtime.joining = complete().finally(forget)'
+  - 'await task.finally(forget)'
+  - 'return task.finally(forget)'
+invalid:
+  - 'void task.finally(forget)'
+  - 'task.finally(forget)'

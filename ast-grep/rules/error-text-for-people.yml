@@ -1,0 +1,23 @@
+id: error-text-for-people
+language: TypeScript
+severity: error
+message: Show a person errorText(error); String(error) suits debug logs only.
+note: |
+  String(error) puts the error's class name first ("Error: …"). Text a person reads uses
+  errorText(error) from src/core/text.ts; the debug log may keep the class name.
+rule:
+  pattern: String($ERROR)
+  not:
+    inside:
+      any:
+        - pattern: $HOST.ui.debug($$$)
+        - pattern: $HOST.log($_, 'debug')
+      stopBy: end
+constraints:
+  ERROR:
+    regex: ^(error|err|failure|cause)$
+files:
+  - src/**/*.ts
+  - index.ts
+ignores:
+  - src/core/text.ts

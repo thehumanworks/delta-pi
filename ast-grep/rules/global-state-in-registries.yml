@@ -1,0 +1,17 @@
+id: global-state-in-registries
+language: TypeScript
+severity: error
+message: Only the mount registry and the join contracts live on globalThis.
+note: |
+  Pi evaluates the extension's modules afresh for every session runtime, so module state is per
+  session. Only what must outlive a session switch lives on globalThis: the mount processes
+  (src/cli/delta-cli.ts) and a join's verified contract (src/sharing/join.ts). Keep other state in
+  the module that changes it.
+rule:
+  pattern: globalThis
+files:
+  - src/**/*.ts
+  - index.ts
+ignores:
+  - src/cli/delta-cli.ts
+  - src/sharing/join.ts
