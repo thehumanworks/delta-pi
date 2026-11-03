@@ -550,3 +550,74 @@ test('a remote Bash call reaches the receiver once with output (assistant row fi
   view.upsert({ ...item, content: { ...item.content, rawOutput: 'genuinely edited output' } })
   expect((await view.nextRow())!.text).toContain('changed an earlier tool call echo output')
 })
+
+test('execution location follows only an explicit Claude host flag (missing)', async () => {
+  // pi has no flag saying where it runs, so a turn's start never claims a location.
+  delta = await recording()
+  await delta.pi.prompt('where')
+  await delta.until(() => starts(delta!).length === 1, 'the turn to start')
+  expect(records(delta).find((record) => record.sequence === starts(delta!)[0])?.update).toEqual({
+    sessionUpdate: 'state_update',
+    state: 'running',
+    _meta: { delta: { producer_version: version } },
+  })
+})
+
+test('a local prompt takes over a running remote turn, and rows wait for its turn', async () => {
+  delta = await recording()
+  const { pi } = delta
+  const ada = { user_id: 'user-ada', name: 'Ada', actor_id: 'actor-ada' }
+  delta.world.remote(thread(delta), { type: 'turn', state: 'running', turn_id: 'remote-turn', user: ada })
+  await delta.until(() => pi.statuses.get('delta')?.includes("Ada's agent"), "Ada's turn in the band")
+  // The prompt is admitted, and pi has not yet started its run, when a teammate's row arrives: it would
+  // otherwise land in the turn.
+  let start!: () => void
+  pi.entering = () => new Promise((resolve) => (start = resolve))
+  const model = heldModel(delta)
+  const turn = pi.submit('take over')
+  await delta.until(() => start, 'the prompt to be admitted')
+  delta.world.remote(
+    thread(delta),
+    {
+      type: 'item',
+      item: {
+        id: 'late',
+        kind: 'user_message',
+        after_id: null,
+        turn_id: 'remote-turn',
+        author: ada,
+        created_at: null,
+        open: false,
+        content: { text: 'Late remote note' },
+      },
+    },
+    { type: 'presence', users: [{ user_id: 'user-bea', name: 'Bea' }] },
+  )
+  await delta.until(
+    async () => (await delta!.advance(1_000), pi.statuses.get('delta')?.includes('Bea')),
+    'the watch to read the row',
+  )
+  expect(pi.contextMessages()).toEqual([])
+  pi.entering = undefined
+  start()
+  // The start is staged and delivered like any own turn; Delta's arbitration hands it the thread.
+  await delta.until(() => starts(delta!).length === 1 && model.waiting(), 'the turn to start')
+  const [sequence] = starts(delta)
+  expect(records(delta).find((record) => record.sequence === sequence)?.turnSequence).toBe(sequence)
+  const me = { user_id: 'user-me', name: 'Me', actor_id: 'actor-me' }
+  delta.world.remote(
+    thread(delta),
+    { type: 'producer.turn', sequence, status: 'running' },
+    { type: 'turn', state: 'running', turn_id: `producer-turn-${sequence}`, user: me },
+  )
+  await delta.until(() => !pi.statuses.get('delta')?.includes("Ada's agent"), 'the band to show the own turn')
+  expect(pi.aborts).toBe(0)
+  expect(pi.contextMessages()).toEqual([])
+  expect(pi.noticeTexts().filter((text) => text.includes('finished its turn') || text.startsWith('Me'))).toEqual([])
+  await model.reply({ text: 'taken over' })
+  await delta.whileTimePasses(turn)
+  // The turn's end releases the held row to the model.
+  await delta.until(() => JSON.stringify(pi.contextMessages()).includes('Late remote note'), 'the held row')
+  expect(pi.aborts).toBe(0)
+  expect(pi.noticeTexts().filter((text) => text.includes('finished its turn') || text.startsWith('Me'))).toEqual([])
+})

@@ -144,6 +144,7 @@ export class FakePi {
       this.steering.push(text)
       return 'steered'
     }
+    await this.entering?.()
     this.run = this.agentRun(user(text))
     await this.run
     return 'settled'
@@ -277,6 +278,12 @@ export class FakePi {
       timestamp: new Date().toISOString(),
     } as Entry)
   }
+
+  /**
+   * Awaited once the input handlers admitted a prompt and before pi starts its run, where pi checks the
+   * model's credentials: pi is still idle, and its run not yet under way.
+   */
+  entering: (() => Promise<void>) | undefined
 
   /**
    * Awaited as a run starts, before agent_start, where pi runs other extensions' before_agent_start: a

@@ -56,3 +56,44 @@ test('a prompt queued while pi is still starting a run is taken into that run', 
   expect(new Set(prompts.map((record: any) => record.turnSequence)).size).toBe(1)
   expect(pi.noticeTexts()).toEqual([])
 })
+
+test('marks recorded live Claude messages and tool activity', async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  pi.model = (messages) =>
+    messages.at(-1)?.role === 'toolResult'
+      ? { text: 'Changed.' }
+      : {
+          thinking: 'inspect',
+          text: 'I will edit it.',
+          calls: [{ name: 'write', arguments: { path: 'a.txt', content: 'new\n' } }],
+        }
+  await pi.prompt('change it')
+  const live = await delta.until(() => {
+    const records: any[] = delta!.thread()?.records ?? []
+    return (
+      records.some((record) => record.update._meta?.delta?.activity_kind === 'edit') &&
+      records.filter((record) =>
+        ['user_message', 'agent_message', 'agent_thought', 'tool_call_update'].includes(record.update.sessionUpdate),
+      )
+    )
+  }, 'the edit to reach Delta')
+  const origin = { work_origin: 'external_agent', interaction_surface: 'cli' }
+  expect(live.map((record: any) => [record.update.sessionUpdate, record.update._meta])).toEqual([
+    ['user_message', { delta: { ...origin, activity_kind: 'user_message' } }],
+    [
+      'agent_thought',
+      {
+        pi: { block: { type: 'thinking', thinking: 'inspect', thinkingSignature: 'signature' } },
+        delta: { ...origin, activity_kind: 'agent_thought' },
+      },
+    ],
+    ['agent_message', { delta: { ...origin, activity_kind: 'agent_message' } }],
+    ['tool_call_update', { delta: { ...origin, activity_kind: 'tool_call' } }],
+    ['tool_call_update', { delta: { ...origin, activity_kind: 'edit' } }],
+    ['agent_message', { delta: { ...origin, activity_kind: 'agent_message' } }],
+  ])
+  const calls = live.filter((record: any) => record.update.sessionUpdate === 'tool_call_update')
+  expect(new Set(calls.map((record: any) => record.update.toolCallId)).size).toBe(1)
+})
