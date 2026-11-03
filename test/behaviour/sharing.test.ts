@@ -35,3 +35,22 @@ test('/delta share during a turn asks who should see the session once the turn e
   expect(thread.visibility).toBe('organization')
   expect(pi.errors).toEqual([])
 })
+
+test('a shell command run before a share is exported once, not recorded again with the next turn', async () => {
+  delta = await startDelta({ answers: [NOT_NOW] })
+  const { pi } = delta
+  await delta.until(() => pi.dialogs.length === 1, 'the setup offer')
+  await pi.prompt('one')
+  await pi.shell('echo unique-shell')
+  pi.answers.push((dialog) => (dialog.title.includes('Who should see this session?') ? 'Share with Zed' : undefined))
+  await pi.command('delta', 'share')
+  // A prompt waits for the share's result, which comes once the link is published and the watch started.
+  await delta.until(() => pi.noticeTexts().some((text) => text.startsWith('Delta: Shared')), 'the share to finish')
+  await pi.prompt('two')
+  const thread = await delta.until(
+    () => JSON.stringify(delta!.thread()?.records ?? []).includes('Echo: two') && delta!.thread(),
+    'the next turn',
+  )
+  const shells = thread.records.filter((record: any) => JSON.stringify(record.update).includes('unique-shell'))
+  expect(shells).toHaveLength(1)
+})

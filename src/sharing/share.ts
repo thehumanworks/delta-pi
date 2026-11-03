@@ -34,6 +34,7 @@ import { messageUpdates, toolCallsOf } from '../recording/content.ts'
 import {
   drain,
   flushUnsaved,
+  recordFromNow,
   recordsOffline,
   stageRecord,
   translationFor,
@@ -155,6 +156,8 @@ async function share(host: Host, request: ShareRequest): Promise<ShareOutcome> {
   await assertShareSession(host, request)
   if (!binding.snapshot) {
     setProgress(host, 'Exporting earlier messages…', 'active', [2, 5])
+    // What the export holds is not recorded live as well, such as a shell command run since the last turn.
+    recordFromNow(host)
     const snapshot = snapshotMessages(host.session.messages())
     setProgress(host, `Exporting ${snapshot.length} earlier messages…`, 'active', [2, 5])
     // pi records nothing while a share runs: a prompt waits for it, so the snapshot is the whole
