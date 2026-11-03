@@ -449,7 +449,7 @@ export function renderBand(
     children.some((child) => state.childrenStale || !['completed', 'stopped'].includes(child.status)) &&
     (layout.rows ?? Infinity) >= 2 + (detail ? 1 : 0) + (activityLine ? 1 : 0)
   // The URL's own row, wrapped as the terminal wraps it, fits only within the rows the others leave.
-  const linkRows = linkText ? Math.ceil((2 + textWidth(linkText)) / Math.max(1, layout.columns - BAR_PADDING)) : 0
+  const linkRows = linkText ? Math.ceil(textWidth(linkText) / Math.max(1, layout.columns - 3)) : 0
   const roomBelow =
     layout.terminal &&
     (layout.rows ?? Infinity) >= 1 + linkRows + (detail ? 1 : 0) + (activityLine ? 1 : 0) + (childLine ? 1 : 0)
