@@ -46,8 +46,11 @@ export type FakeThread = {
 export type FakeWorktree = {
   reference: string
   worktree_id: string
-  /** Where the worktree is checked out, and, for a thread mount's folder, how many mount commands hold it. */
-  directories: { directory: string; state: 'waiting' | 'mounted'; holders?: number }[]
+  /**
+   * Where the worktree is checked out, and, for a thread mount's folder, how many mount commands hold it.
+   * `restoring` is a checkout whose mount ended while Delta still finishes its final upload.
+   */
+  directories: { directory: string; state: 'waiting' | 'mounted' | 'restoring'; holders?: number }[]
 }
 /** Everything the fake Delta holds, in `$FAKE_DELTA_STATE/state.json`. */
 export type FakeState = {
@@ -217,6 +220,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   /** A positional argument the command requires. */
   function required(value: string | undefined, what: string): string {
     return value ?? fail('invalid_arguments', `missing ${what}`)
+  }
+  /** The turns of the producer `external` that a test fenced (`world().fence`). */
+  function fencedTurns(external: string | undefined): (number | undefined)[] {
+    const path = join(root, 'fences.json')
+    const fences = existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, number[]>) : {}
+    return fences[external ?? ''] ?? []
   }
   function producerKey(source: string | undefined, external: string | undefined) {
     return `${source}:${external}`
@@ -496,6 +505,18 @@ async function run(args: string[], io: FakeIo): Promise<void> {
             }
           if (record.sequence !== producer.next) return { gap: true }
           producer.next++
+          // A turn someone took over in Delta takes no more records from this producer (`world().fence`).
+          if (fencedTurns(external).includes(record.turnSequence))
+            return {
+              operation: 'appended',
+              thread_id: thread.thread_id,
+              sequence: record.sequence,
+              next_sequence: producer.next,
+              duplicate: false,
+              disposition: 'fenced',
+              turn_sequence: record.turnSequence ?? null,
+              version: 'v1',
+            }
           thread.records.push({
             producer: external,
             acknowledge: option(rest, '--acknowledge') ?? 'server',
@@ -612,6 +633,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       break
     }
     case 'worktree list': {
+      // Delta finishes a checkout whose mount ended once a test stops holding its release.
+      if (!flag('hold-release'))
+        update((state) => {
+          for (const tree of state.worktrees)
+            for (const entry of tree.directories) if (entry.state === 'restoring') entry.state = 'waiting'
+        })
       const state = read()
       out({
         operation: 'listed',
@@ -645,14 +672,15 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     }
     case 'worktree mount': {
       const [reference, directory] = rest
-      const mark = (value: 'waiting' | 'mounted') =>
+      const mark = (value: 'waiting' | 'mounted' | 'restoring') =>
         update((state) => {
           const tree = state.worktrees.find((entry) => entry.reference === reference)
           for (const entry of tree?.directories ?? []) if (entry.directory === directory) entry.state = value
         })
       mark('mounted')
       out({ operation: 'mounted', reference, directory })
-      await io.hold(() => mark('waiting'))
+      // Delta still syncs a checkout for a moment after its mount ends; a test can hold that moment.
+      await io.hold(() => mark(flag('hold-release') ? 'restoring' : 'waiting'))
       break
     }
     default:

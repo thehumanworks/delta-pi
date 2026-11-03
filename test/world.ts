@@ -130,6 +130,24 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
+    /**
+     * Take `turn` over in Delta for the producer `external` (a pi session's ID): its appends of that
+     * turn's records are answered `fenced`, as Delta answers a turn someone superseded.
+     */
+    fence(external: string, turn: number) {
+      const path = join(state, 'fences.json')
+      const fences = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+      writeFileSync(path, JSON.stringify({ ...fences, [external]: [...(fences[external] ?? []), turn] }))
+    },
+    /**
+     * Keep each checkout whose `worktree mount` ends `restoring`, as Delta does while it finishes the
+     * final upload, until the returned function releases them.
+     */
+    holdRelease(): () => void {
+      const path = join(state, 'hold-release')
+      writeFileSync(path, '')
+      return () => rmSync(path, { force: true })
+    },
     /** Hold the runs of `command` after the first `after` until the returned function releases them. */
     hold(command: string, { after = 0 } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
