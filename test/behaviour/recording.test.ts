@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, startDelta } from '../kit/index.ts'
 import { RECORDED_TURNS } from '../world.ts'
@@ -124,4 +126,31 @@ test("two writes to one file in a reply record the second's change against the f
   expect(diffs[0].patch.text).toContain('+one\n')
   expect(diffs[1].patch.text).toContain('-one\n+two\n')
   expect(diffs[2].patch.text).toContain('-two\n+three\n')
+})
+
+test('a message Delta cannot translate is logged and skipped, and recording goes on', async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  await pi.prompt('one')
+  // A message holding a value JSON cannot write, committed between turns.
+  pi.session.entries.push({
+    type: 'message',
+    id: 'untranslatable',
+    parentId: pi.session.entries.at(-1)?.id ?? null,
+    timestamp: '',
+    message: { role: 'assistant', content: [{ type: 'custom', value: 1n }], stopReason: 'stop', timestamp: 0 },
+  })
+  await pi.prompt('two')
+  const thread = await delta.until(
+    () => JSON.stringify(delta!.thread()?.records ?? []).includes('Echo: two') && delta!.thread(),
+    'the next turn',
+  )
+  // As the plugin's session.append hook fails open, the message is left out and logged for debugging.
+  expect(thread.records.map((record: any) => record.sequence)).toEqual(
+    thread.records.map((_: unknown, index: number) => index + 1),
+  )
+  const log = readFileSync(join(delta.world.agentDir, 'delta', 'debug.log'), 'utf8')
+  expect(log).toContain('Recording a message failed: Do not know how to serialize a BigInt')
+  expect(pi.noticeTexts()).toEqual([])
 })
