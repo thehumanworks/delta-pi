@@ -117,9 +117,8 @@ export class FakePi {
       this.built.clear()
     },
   }
-  /** The widgets the extension set in pi's terminal, by key, and the components pi built from them. */
-  private readonly widgets = new Map<string, WidgetFactory>()
-  private readonly shownWidgets = new Map<string, Component>()
+  /** The components pi built from the widgets the extension set in its terminal, by key. */
+  private readonly widgets = new Map<string, Component>()
   /** The renderers the extension registered for its custom messages, and the rows pi built with them, by entry. */
   private readonly messageRenderers = new Map<string, MessageRenderer>()
   private readonly built = new Map<string, Component | undefined>()
@@ -277,14 +276,10 @@ export class FakePi {
 
   /**
    * What the widget `key` draws `width` columns wide in pi's terminal, its escapes removed unless `raw`.
-   * Like pi, this builds the widget's component once and renders it on every draw.
+   * Like pi, the widget's component is built when the extension sets it, and rendered on every draw.
    */
   widget(key: string, width = 120, raw = false): string[] {
-    const factory = this.widgets.get(key)
-    if (!factory) return []
-    let component = this.shownWidgets.get(key)
-    if (!component) this.shownWidgets.set(key, (component = factory(this.tui, FAKE_THEME)))
-    const lines = component.render(width)
+    const lines = this.widgets.get(key)?.render(width) ?? []
     return raw ? lines : lines.map((line) => stripVTControlCharacters(line))
   }
 
@@ -488,8 +483,7 @@ export class FakePi {
       notify: (text: string, tone = 'info') => this.notices.push({ text, tone }),
       setStatus: (key: string, text: string | undefined) => this.statuses.set(key, text),
       setWidget: (key: string, content: unknown) => {
-        this.shownWidgets.delete(key)
-        if (typeof content === 'function') this.widgets.set(key, content as WidgetFactory)
+        if (typeof content === 'function') this.widgets.set(key, (content as WidgetFactory)(this.tui, FAKE_THEME))
         else this.widgets.delete(key)
       },
       getEditorText: () => this.editor,
