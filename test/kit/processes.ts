@@ -5,7 +5,15 @@
  */
 import { basename } from 'node:path'
 import type { Host } from '../../src/core/host.ts'
-import { type Exit, type Output, type ProcessStream, run, spawn } from '../../src/core/process.ts'
+import {
+  type Exit,
+  type Output,
+  type ProcessStream,
+  run,
+  type RunInit,
+  type RunResult,
+  spawn,
+} from '../../src/core/process.ts'
 import { fakeDelta, type FakeIo } from '../fake-delta/cli.ts'
 
 export type Environment = Record<string, string | undefined>
@@ -13,10 +21,22 @@ export type Environment = Record<string, string | undefined>
 /** One command the extension ran, as the fake CLI saw it. */
 export type Ran = { argv: string[]; env: Environment }
 
+/**
+ * A program a test stands in for, by its name (`pi`, `npm`, `git`): it answers each run, or, returning
+ * undefined, lets the real program run.
+ */
+export type FakeProgram = (
+  argv: string[],
+  init: RunInit & { env: Record<string, string> },
+) => RunResult | undefined | Promise<RunResult | undefined>
+
 export function kitProcesses(
   environment: () => Environment,
-): Host['process'] & { ran: Ran[]; busy(): number; stopAll(): Promise<void> } {
+  programs: Map<string, FakeProgram> = new Map(),
+): Host['process'] & { ran: Ran[]; others: Ran[]; busy(): number; stopAll(): Promise<void> } {
   const ran: Ran[] = []
+  /** The other programs the extension ran, real or faked. */
+  const others: Ran[] = []
   const live = new Set<ProcessStream>()
   let busy = 0
   const merged = (extra: Record<string, string> | undefined): Record<string, string> =>
@@ -28,11 +48,16 @@ export function kitProcesses(
   const isDelta = (argv: string[]) => argv[0] !== undefined && basename(argv[0]) === 'delta'
   return {
     ran,
+    others,
     /** How many one-shot commands are still running. */
     busy: () => busy,
     async run(argv, init = {}) {
       const env = merged(init.env)
-      if (!isDelta(argv)) return run(argv, { ...init, env })
+      if (!isDelta(argv)) {
+        others.push({ argv, env })
+        const fake = argv[0] === undefined ? undefined : programs.get(basename(argv[0]))
+        return (await fake?.(argv, { ...init, env })) ?? run(argv, { ...init, env })
+      }
       ran.push({ argv, env })
       busy++
       try {
@@ -91,7 +116,7 @@ function deltaStream(args: string[], env: Record<string, string>): ProcessStream
       queue.push({ stream, text })
       wake()
     },
-    hold: (onStop, poll) =>
+    hold: (onStop, poll, until) =>
       new Promise((resolve) => {
         // Stopped before it was ready, the command ends as a killed program does.
         if (exit) {
@@ -104,6 +129,12 @@ function deltaStream(args: string[], env: Record<string, string>): ProcessStream
           onStop?.()
           resolve()
         }
+        // A command that ends by itself stops polling and ends without being stopped.
+        void until?.then(() => {
+          if (timer) clearInterval(timer)
+          stop = undefined
+          resolve()
+        })
       }),
   }
   void fakeDelta(args, io).then(

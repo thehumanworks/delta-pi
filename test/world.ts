@@ -104,6 +104,28 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     stopFailing(command: string) {
       rmSync(join(state, `fail-${command.replaceAll(' ', '-')}`), { force: true })
     },
+    /** Make `thread watch` report `text` for `thread` as it is, such as a malformed or partial line. */
+    remoteRaw(thread: string, text: string) {
+      const path = join(state, `events-${thread}.jsonl`)
+      writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text)
+    },
+    /** End the running `thread watch` of `thread` with `code` once it has reported what came before. */
+    endWatch(thread: string, code = 1) {
+      const path = join(state, `events-${thread}.jsonl`)
+      writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + `{"fake_watch_exit":${code}}\n`)
+    },
+    /**
+     * Make `times` runs of `command`, after letting `after` through, answer `stdout` and `stderr` with
+     * `exitCode` (1 unless given) instead of their own answer: a crash, an old CLI's usage text, a
+     * malformed reply. With `run`, the command does its work first and only its answer is lost.
+     */
+    answer(
+      command: string,
+      answer: { stdout?: string; stderr?: string; exitCode?: number; run?: boolean },
+      { times = 1, after = 0 } = {},
+    ) {
+      writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
+    },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))

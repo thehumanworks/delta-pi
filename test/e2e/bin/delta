@@ -11,8 +11,9 @@ const code = await fakeDelta(process.argv.slice(2), {
   env: process.env,
   stdin: () => readFileSync(0, 'utf8'),
   write: (stream, text) => process[stream].write(text),
-  hold: (onStop, poll) =>
-    new Promise(() => {
+  hold: (onStop, poll, until) =>
+    new Promise((resolve) => {
+      void until?.then(resolve)
       const stop = () => {
         try {
           // A test that already cleaned up its state keeps nothing a late stop could change.

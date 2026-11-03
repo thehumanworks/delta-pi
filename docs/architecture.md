@@ -100,7 +100,11 @@ and what they are doing.
 
 There is one fake Delta CLI, `test/fake-delta/cli.ts`, answering in the shapes of the CLI's own output
 (`test/fixtures/cli`); the kit calls it in process and the end-to-end tests run it as `delta`. Tests can
-make a command fail or hold (`world().fail`, `world().hold`). `RECORDED_TURNS` is asserted of both the real
+make a command fail, hold, or answer something else, such as a lost reply after the work was done
+(`world().fail`, `world().hold`, `world().answer`), and end or garble a watch (`world().endWatch`,
+`world().remoteRaw`). In the kit, the extension's files go through `test/kit/disk.ts`, so a test can fail
+or hold a store or outbox write (`kit.disk`), and `kit.programs` stands in for other programs, such as
+`pi update`. `RECORDED_TURNS` is asserted of both the real
 pi and the fake one, so the fake cannot drift unseen. [PARITY.md](../PARITY.md) maps upstream's tests to
 these.
 

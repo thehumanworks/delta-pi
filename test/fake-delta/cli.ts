@@ -67,9 +67,35 @@ export type FakeIo = {
   write(stream: 'stdout' | 'stderr', text: string): void
   /**
    * Hold a long-running command until it is stopped, calling `poll` every 50 ms meanwhile; `onStop`
-   * runs when it is stopped. Resolves once it is.
+   * runs when it is stopped. Resolves once it is, or, without `onStop`, once `until` settles, as a
+   * command that ends by itself does.
    */
-  hold(onStop?: () => void, poll?: () => void): Promise<void>
+  hold(onStop?: () => void, poll?: () => void, until?: Promise<void>): Promise<void>
+}
+
+/**
+ * What a test makes a command answer instead of its own answer (`world().answer`): exactly this output
+ * and exit code, after the command has run when `run` is set, so its effects happen and its answer is
+ * lost, as when Delta did the work and the reply never arrived.
+ */
+export type FakeAnswer = { stdout?: string; stderr?: string; exitCode?: number; run?: boolean }
+type AnswerSwitch = FakeAnswer & { after: number; times: number }
+
+/** The answer a test set for this run of `args`, counting its runs down; undefined to run as usual. */
+function takeAnswer(args: string[], io: FakeIo): FakeAnswer | undefined {
+  const root = io.env.FAKE_DELTA_STATE
+  if (!root) return undefined
+  const [group, command] = args.filter((arg) => arg !== '--json')
+  const path = join(root, `answer-${`${group} ${command ?? ''}`.trim().replaceAll(' ', '-')}`)
+  if (!existsSync(path)) return undefined
+  const value = JSON.parse(readFileSync(path, 'utf8')) as AnswerSwitch
+  if (value.after > 0) {
+    writeFileSync(path, JSON.stringify({ ...value, after: value.after - 1 }))
+    return undefined
+  }
+  if (value.times <= 1) rmSync(path, { force: true })
+  else writeFileSync(path, JSON.stringify({ ...value, times: value.times - 1 }))
+  return value
 }
 
 /** Ends a run of the fake with an exit code. */
@@ -83,6 +109,15 @@ class Exit extends Error {
 
 /** Run `args` as `delta` would, through `io`; resolves with the exit code. */
 export async function fakeDelta(args: string[], io: FakeIo): Promise<number> {
+  const answer = takeAnswer(args, io)
+  if (!answer) return runToExit(args, io)
+  if (answer.run) await runToExit(args, { ...io, write: () => {}, hold: async () => {} })
+  if (answer.stdout) io.write('stdout', answer.stdout)
+  if (answer.stderr) io.write('stderr', answer.stderr)
+  return answer.exitCode ?? 1
+}
+
+async function runToExit(args: string[], io: FakeIo): Promise<number> {
   try {
     await run(args, io)
     return 0
@@ -503,21 +538,38 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       })
       const eventsPath = join(root, `events-${thread.thread_id}.jsonl`)
       let offset = 0
+      // A test ends the watch with a control line (`world().endWatch`), as a dropped connection does.
+      let exitCode: number | undefined
+      let ended: () => void = () => {}
+      const ending = new Promise<void>((resolve) => (ended = resolve))
       const flush = () => {
-        if (!existsSync(eventsPath)) return
+        if (exitCode !== undefined || !existsSync(eventsPath)) return
         const text = readFileSync(eventsPath, 'utf8')
         const fresh = text.slice(offset)
         const end = fresh.lastIndexOf('\n')
         if (end < 0) return
-        io.write('stdout', fresh.slice(0, end + 1))
-        offset += end + 1
+        for (const line of fresh.slice(0, end + 1).split(/(?<=\n)/)) {
+          const control = /^\{"fake_watch_exit":(\d+)\}\n$/.exec(line)
+          if (!control) {
+            io.write('stdout', line)
+            offset += line.length
+            continue
+          }
+          // The control line ends this watch only: the next one replays what came before it, not it.
+          const current = readFileSync(eventsPath, 'utf8')
+          writeFileSync(eventsPath, current.slice(0, offset) + current.slice(offset + line.length))
+          exitCode = Number(control[1])
+          ended()
+          return
+        }
       }
       // The snapshot: every event written before the watch started, then `live`.
       flush()
       out({ type: 'live' })
       out({ type: 'presence', users: [] })
       out({ type: 'worktrees', worktrees: thread.worktrees.map((reference) => ({ reference, name: 'repo' })) })
-      await io.hold(undefined, flush)
+      await io.hold(undefined, flush, ending)
+      if (exitCode !== undefined) throw new Exit(exitCode)
       break
     }
     case 'thread mount': {

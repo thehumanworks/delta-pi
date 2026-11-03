@@ -14,10 +14,13 @@ import type { Platform } from '../../src/core/host.ts'
 import { FAKE_BIN, until, world, type World } from '../world.ts'
 import { flush, MockClock } from './clock.ts'
 import { type Answer, FakePi, type FakeSession } from './pi.ts'
-import { type Environment, kitProcesses } from './processes.ts'
+import { fileStore } from '../../src/core/store.ts'
+import { disk } from './disk.ts'
+import { type Environment, type FakeProgram, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
 export { echoModel, FakeSession, type Model, type Reply } from './pi.ts'
+export type { FakeProgram } from './processes.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
 
@@ -36,6 +39,8 @@ export async function startDelta(
     session?: FakeSession
     /** Leave the session unstarted, to set the kit up first. */
     start?: boolean
+    /** Whether the machine is Windows, as `Platform.env.windows` tells the extension. */
+    windows?: boolean
   } = {},
 ) {
   const w = options.world ?? world({ ...(options.policy ? { policy: options.policy } : {}) })
@@ -50,7 +55,8 @@ export async function startDelta(
     DELTA_PI_PARENT: undefined,
     ...options.env,
   }
-  const processes = kitProcesses(() => env)
+  const programs = new Map<string, FakeProgram>()
+  const processes = kitProcesses(() => env, programs)
   const stderr: string[] = []
   const copied: string[] = []
   const platform: Platform = {
@@ -58,7 +64,7 @@ export async function startDelta(
     clock,
     process: processes,
     env: {
-      windows: () => false,
+      windows: () => options.windows ?? false,
       get: (name) => env[name],
       set: (name, value) => {
         if (value === undefined) delete env[name]
@@ -80,6 +86,17 @@ export async function startDelta(
     env,
     stderr,
     copied,
+    /** The extension's files on disk, where a test makes a read or write fail or hold (./disk.ts). */
+    disk,
+    /** The extension's store, as every pi process on the machine shares it, to read or seed. */
+    store: fileStore(join(platform.dataDir, 'store')),
+    /**
+     * Programs other than `delta` a test stands in for, by name: `kit.programs.set('pi', (argv) => …)`.
+     * Every other program runs for real.
+     */
+    programs,
+    /** The other programs the extension ran, as full argument lists. */
+    others: () => processes.others.map((call) => call.argv),
     /** The delta commands the extension ran, as argument lists without the program. */
     commands: () => processes.ran.map((call) => call.argv.slice(1).filter((arg) => arg !== '--json')),
     /** The fake CLI's one top-level thread, once it exists. */

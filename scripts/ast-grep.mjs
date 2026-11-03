@@ -25,7 +25,10 @@ function interpreter(file) {
     if (elf.readUInt32LE(header) !== 3) continue
     const offset = Number(elf.readBigUInt64LE(header + 8))
     const length = Number(elf.readBigUInt64LE(header + 32))
-    return elf.subarray(offset, offset + length).toString().replace(/\0+$/, '')
+    return elf
+      .subarray(offset, offset + length)
+      .toString()
+      .replace(/\0+$/, '')
   }
   return undefined
 }

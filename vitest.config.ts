@@ -8,7 +8,12 @@ export default defineConfig({
       },
       {
         // The whole extension in process, on a fake pi and a clock each test moves (test/kit).
-        test: { name: 'behaviour', include: ['test/behaviour/*.test.ts'], testTimeout: 30_000 },
+        test: {
+          name: 'behaviour',
+          include: ['test/behaviour/*.test.ts'],
+          setupFiles: ['test/kit/setup.ts'],
+          testTimeout: 30_000,
+        },
       },
       {
         // Each end-to-end test starts real pi processes; one file at a time keeps their timing honest.
