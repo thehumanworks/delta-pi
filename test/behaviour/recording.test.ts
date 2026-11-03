@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
-import { type Kit, startDelta } from '../kit/index.ts'
+import { type Kit, type Reply, startDelta } from '../kit/index.ts'
 import { RECORDED_TURNS } from '../world.ts'
 
 let delta: Kit | undefined
@@ -153,4 +153,66 @@ test('a message Delta cannot translate is logged and skipped, and recording goes
   const log = readFileSync(join(delta.world.agentDir, 'delta', 'debug.log'), 'utf8')
   expect(log).toContain('Recording a message failed: Do not know how to serialize a BigInt')
   expect(pi.noticeTexts()).toEqual([])
+})
+
+const titles = (kit: Kit): string[] =>
+  (kit.thread()?.records ?? []).flatMap((record: any) =>
+    record.update.sessionUpdate === 'session_info_update' ? [record.update.title] : [],
+  )
+
+test("a shared session records each new title once, a rename over Claude's own", async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  // pi chose no name, so the first prompt names the thread.
+  await pi.prompt('fix the parser\nand its tests')
+  await delta.until(() => titles(delta!).length, 'the title')
+  expect(titles(delta)).toEqual(['fix the parser'])
+  // The same title at a later turn's reply is not recorded again.
+  await pi.prompt('again')
+  await delta.until(
+    async () => !((await delta!.store.get(`session:${pi.session.id}`)) as any).pending.length,
+    'the turn',
+  )
+  expect(titles(delta)).toEqual(['fix the parser'])
+  // Naming the session renames its thread, once.
+  await pi.rename('Parser rewrite')
+  await delta.until(() => titles(delta!).length === 2, 'the rename')
+  await pi.prompt('more')
+  await pi.rename('Parser rewrite')
+  await delta.until(
+    async () => !((await delta!.store.get(`session:${pi.session.id}`)) as any).pending.length,
+    'the turn',
+  )
+  expect(titles(delta)).toEqual(['fix the parser', 'Parser rewrite'])
+  expect(((await delta.store.get(`session:${pi.session.id}`)) as any).title).toBe('Parser rewrite')
+})
+
+test("an automatic session takes Claude's title at its first reply, before its thread exists", async () => {
+  delta = await startDelta({ policy: { mode: 'organization', organization: 'org-1' }, start: false })
+  const { pi } = delta
+  // Attaching the checkout takes a while, so the session records locally until its thread exists.
+  const release = delta.world.hold('worktree attach')
+  await pi.start()
+  await delta.until(
+    () => delta!.commands().some((args) => args[0] === 'worktree' && args[1] === 'attach'),
+    'the attach',
+  )
+  const waiting: ((reply: Reply) => void)[] = []
+  pi.model = () => new Promise((resolve) => waiting.push(resolve))
+  const turn = pi.submit('fix the parser')
+  await delta.until(() => waiting.length, 'the first request')
+  waiting.shift()!({ text: 'On it.', calls: [{ name: 'bash', arguments: { command: 'echo looking' } }] })
+  await delta.until(() => waiting.length, 'the next request')
+  // Staged at the first reply, while the turn runs and before the thread exists.
+  const stored = (await delta.store.get(`session:${pi.session.id}`)) as { thread?: string; title?: string }
+  expect(stored.thread).toBeUndefined()
+  expect(stored.title).toBe('fix the parser')
+  release()
+  waiting.shift()!({ text: 'Done.' })
+  await delta.whileTimePasses(turn)
+  await delta.advance(120_000)
+  await delta.until(() => titles(delta!).length, 'the title to reach Delta')
+  await delta.settle()
+  expect(titles(delta)).toEqual(['fix the parser'])
 })

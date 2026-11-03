@@ -348,7 +348,9 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   // pi commits without a message_end.
   const recordFrom = async (_event: unknown, ctx: ExtensionContext) => {
     context = ctx
-    await recordCommitted(host)
+    // A reply names an untitled session's thread once it is recorded, without waiting for its turn to
+    // end, as the plugin takes the title Claude chose at its first reply.
+    if (await recordCommitted(host)) await recordTitle(host, ctx.sessionManager.getSessionId())
   }
   pi.on('message_start', recordFrom)
   pi.on('message_end', recordFrom)

@@ -962,8 +962,9 @@ export function recordFromNow(host: Host) {
  * Record, in order, each message pi committed to the session since the last call. Pi commits a message
  * once every extension's `message_end` has run, so this records what the session keeps, as any
  * extension redacted or replaced it, and the shell commands the person ran, which have no `message_end`.
+ * Resolves whether a reply was among them.
  */
-export function recordCommitted(host: Host): Promise<void> {
+export function recordCommitted(host: Host): Promise<boolean> {
   const step = recording.then(async () => {
     const committed = host.session.committed()
     const fresh = committed.slice(seenMessages)
@@ -976,8 +977,12 @@ export function recordCommitted(host: Host): Promise<void> {
       } catch (error) {
         host.ui.debug(`Recording a message failed: ${errorText(error)}`)
       }
+    return fresh.some(({ message }) => message.role === 'assistant')
   })
-  recording = step.catch(() => {})
+  recording = step.then(
+    () => {},
+    () => {},
+  )
   return step
 }
 
