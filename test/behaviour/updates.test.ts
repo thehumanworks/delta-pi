@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { UPDATE_HELPER_ARGV } from '../fake-delta/cli.ts'
 import { type Kit, startDelta } from '../kit/index.ts'
+import type { Exit, Output, ProcessStream, RunResult } from '../../src/core/process.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -235,3 +236,169 @@ for (const status of ['update_available', 'unsupported'] as const)
         : `Delta cannot update this installation: ${message}`,
     )
   })
+
+/** The Delta CLI `where.exe` finds on Windows. */
+const WINDOWS_DELTA = 'C:\\Delta\\bin\\delta.exe'
+/** What the Windows install helper asks of the person once its installer starts. */
+const UPDATE_HELPER_APPROVAL = 'Approve the Windows installer prompt if one appears.'
+const ran = (stdout: string, exitCode = 0, stderr = ''): RunResult => ({
+  stdout,
+  stderr,
+  exitCode,
+  isStdoutTruncated: false,
+  isStderrTruncated: false,
+})
+const progressEvent = (fields: Record<string, unknown>) =>
+  `${JSON.stringify({ schema_version: 1, type: 'progress', ...fields })}\n`
+
+/**
+ * A program's output as it goes: each piece in turn, waiting at each promise until it settles, then its
+ * exit; `onStop` hears it stopped.
+ */
+function streamed(pieces: (Output | Promise<void>)[], code: number | null, onStop = () => {}): ProcessStream {
+  let exit: Exit | undefined
+  let halt!: () => void
+  const halted = new Promise<void>((resolve) => (halt = resolve))
+  return {
+    pid: undefined,
+    async next() {
+      for (let piece = pieces.shift(); piece; piece = pieces.shift()) {
+        if (!(piece instanceof Promise)) return { done: false, value: piece }
+        await Promise.race([piece, halted])
+        if (exit) break
+      }
+      return { done: true, value: exit ?? { code, signal: null } }
+    },
+    async return() {
+      onStop()
+      exit ??= { code: null, signal: 'SIGTERM' }
+      halt()
+      return { done: true, value: exit }
+    },
+  }
+}
+
+type HelperOutcome = 'installed' | 'restart' | 'unsaid' | 'crash' | { code: string; message: string }
+
+/** Start pi on Windows, where `where.exe` finds Delta and its update helper does what `helper` says. */
+async function onWindows(helper: {
+  outcome: HelperOutcome
+  hold?: Promise<void>
+  stopped?: boolean
+  started?: number[]
+}) {
+  const kit = await startDelta({ answers: [NOT_NOW], windows: true, start: false })
+  kit.programs.set('where.exe', () => ran(`${WINDOWS_DELTA}\r\n`))
+  kit.programs.set('delta-update-helper', () => {
+    // The CLI has exited by now: the extension ran each download before its helper.
+    helper.started?.push(updates(kit).length)
+    const { outcome } = helper
+    if (outcome === 'crash') return streamed([], 3221225477)
+    const preparing = { stream: 'stderr', text: progressEvent({ phase: 'preparing', version: '0.24.0' }) } as const
+    if (typeof outcome === 'object')
+      return streamed(
+        [
+          preparing,
+          { stream: 'stderr', text: `delta: ${outcome.message}\n` },
+          { stream: 'stdout', text: JSON.stringify({ error: { ...outcome, retryable: false } }) },
+        ],
+        2,
+      )
+    const approval = JSON.stringify({
+      schema_version: 1,
+      type: 'action_required',
+      action: 'approve_installer',
+      message: UPDATE_HELPER_APPROVAL,
+    })
+    return streamed(
+      [
+        preparing,
+        { stream: 'stderr', text: `${progressEvent({ phase: 'installing', version: '0.24.0' })}${approval}\n` },
+        ...(helper.hold ? [helper.hold] : []),
+        {
+          stream: 'stdout',
+          text: reply('updated', {
+            message: 'Delta was updated.',
+            ...(outcome === 'unsaid' ? {} : { restart_required: outcome === 'restart' }),
+          }),
+        },
+      ],
+      0,
+      () => (helper.stopped = true),
+    )
+  })
+  kit.world.release('0.24.0')
+  await kit.pi.start()
+  await kit.until(() => kit.pi.dialogs.length === 1, 'the setup offer')
+  await kit.until(() => notices(kit).some((text) => text.includes('0.24.0 is available')), 'the startup check')
+  return kit
+}
+
+const WINDOWS_OUTCOMES = {
+  installed: 'Updated Delta to 0.24.0.',
+  restart:
+    'Updated Delta to 0.24.0. Windows reports that a restart is required to finish the installation; restart Windows, then pi.',
+  refused: 'Delta installation update failed: update: app_running: Delta is running. Quit it, then update again.',
+  crash:
+    'Delta installation update failed: The Delta installer helper exited with code 3221225477. Run `delta update --check` before retrying /delta-update.',
+  unsaid:
+    'Delta installation update failed: Unexpected Delta update response. Update your Delta installation from https://delta.dev, then restart pi and retry /delta-update.',
+} as const
+
+test('on Windows the plugin runs the installer once the CLI exits and reports each outcome', async () => {
+  const helper: Parameters<typeof onWindows>[0] = { outcome: 'installed', started: [] }
+  delta = await onWindows(helper)
+  for (const [outcome, expected] of Object.entries(WINDOWS_OUTCOMES)) {
+    helper.outcome =
+      outcome === 'refused'
+        ? { code: 'app_running', message: 'Delta is running. Quit it, then update again.' }
+        : (outcome as HelperOutcome)
+    await delta.pi.command('delta', 'update')
+    expect(notices(delta).at(-1)).toBe(expected)
+  }
+  const outcomes = Object.keys(WINDOWS_OUTCOMES).length
+  expect(updates(delta).map((call) => call.argv)).toEqual(
+    Array.from({ length: outcomes }, () => ['update', '--download-only', '--json']),
+  )
+  expect(delta.others().filter((argv) => argv[0] === UPDATE_HELPER_ARGV[0])).toEqual(
+    Array.from({ length: outcomes }, () => [...UPDATE_HELPER_ARGV, '0.24.0']),
+  )
+  expect(helper.started).toEqual([1, 2, 3, 4, 5])
+  // Each started installer asks for approval once, in full; a refused or crashed one never got that far.
+  expect(notices(delta).filter((text) => text === UPDATE_HELPER_APPROVAL)).toHaveLength(3)
+})
+
+test('a Windows installer still running at the deadline is left to finish', async () => {
+  let release!: () => void
+  const helper: Parameters<typeof onWindows>[0] = {
+    outcome: 'installed',
+    hold: new Promise<void>((resolve) => (release = resolve)),
+    stopped: false,
+  }
+  delta = await onWindows(helper)
+  const updating = delta.pi.command('delta', 'update')
+  await delta.until(() => notices(delta!).includes(UPDATE_HELPER_APPROVAL), 'the installer to ask for approval')
+  // The band keeps a short state while the installer waits on the person; the transcript has the whole ask.
+  await delta.until(() => band(delta!).includes('Waiting for installer approval'), 'the band to say so')
+  await delta.advance(600_000)
+  await updating
+  expect(notices(delta).at(-1)).toBe(
+    'Delta installation update failed: The Delta installer is still running after 10 minutes; it may be waiting for you to approve a Windows prompt. Let it finish, then run `delta update --check` before retrying /delta-update.',
+  )
+  expect(helper.stopped).toBe(false)
+  release()
+})
+
+test('Windows update option failures preserve the CLI error even when update checks work', async () => {
+  delta = await onWindows({ outcome: 'installed' })
+  delta.world.answer('update --download-only', {
+    stderr: "error: unexpected argument '--download-only' found\n\nUsage: delta.exe update [OPTIONS]\n",
+    exitCode: 2,
+  })
+  await delta.pi.command('delta', 'update')
+  const result = notices(delta).at(-1)!
+  expect(result).toContain("error: unexpected argument '--download-only' found\n\nUsage: delta.exe update [OPTIONS]")
+  expect(result).not.toContain('This Delta CLI does not support')
+  expect(result).not.toContain('https://delta.dev')
+  expect(delta.others().map((argv) => argv[0])).not.toContain(UPDATE_HELPER_ARGV[0])
+})
