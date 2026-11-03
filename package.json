@@ -4,6 +4,14 @@
   "type": "module",
   "description": "Make Pi multiplayer: record sessions to Delta threads, share them, and join teammates' threads, powered by DeltaDB",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thehumanworks/delta-pi.git"
+  },
+  "homepage": "https://github.com/thehumanworks/delta-pi#readme",
+  "bugs": {
+    "url": "https://github.com/thehumanworks/delta-pi/issues"
+  },
   "keywords": [
     "pi-package",
     "delta",
@@ -29,7 +37,8 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "npm run check && npm test"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
