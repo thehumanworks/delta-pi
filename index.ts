@@ -147,9 +147,10 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       debug(`The note could not be added to the session: ${errorText(error)}`)
     }
     // A client without pi's terminal draws no entries, so it hears each note as a notification. Print
-    // mode has no client at all: its notes go where pi reports everything but the model's answer.
+    // and JSON modes have no client at all: their notes go where pi reports everything but the model's
+    // answer or its stream of events.
     if (context.hasUI && context.mode !== 'tui') context.ui.notify(text, tone)
-    else if (context.mode === 'print') platform.stderr(`${text}\n`)
+    else if (!context.hasUI) platform.stderr(`${text}\n`)
   }
   const host: Host = {
     pi,
