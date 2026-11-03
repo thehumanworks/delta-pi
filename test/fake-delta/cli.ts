@@ -200,6 +200,17 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     fail('authentication_required', 'Sign in to Delta')
   /** Switches a test flips in the state folder: a file per switch. */
   const flag = (name: string) => existsSync(join(root, name))
+  // A test holds the next runs of a command while `hold-<command>` exists, and makes them fail while
+  // `fail-<command>` counts down: see world() in test/world.ts.
+  const switchName = words.replaceAll(' ', '-')
+  while (flag(`hold-${switchName}`)) await new Promise((resolve) => setTimeout(resolve, 20))
+  const failures = join(root, `fail-${switchName}`)
+  if (existsSync(failures)) {
+    const left = Number(readFileSync(failures, 'utf8'))
+    if (left <= 1) rmSync(failures, { force: true })
+    else writeFileSync(failures, String(left - 1))
+    fail('process_failed', `${words} failed as the test asked`, true)
+  }
 
   switch (words) {
     case 'thread contract':

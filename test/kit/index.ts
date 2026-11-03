@@ -13,11 +13,11 @@ import { vi } from 'vitest'
 import type { Platform } from '../../src/core/host.ts'
 import { FAKE_BIN, until, world, type World } from '../world.ts'
 import { flush, MockClock } from './clock.ts'
-import { type Answer, FakePi } from './pi.ts'
+import { type Answer, FakePi, type FakeSession } from './pi.ts'
 import { type Environment, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
-export { echoModel, type Model, type Reply } from './pi.ts'
+export { echoModel, type FakeSession, type Model, type Reply } from './pi.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
 
@@ -30,6 +30,10 @@ export async function startDelta(
     env?: Environment
     /** A world to start in, such as another kit's, for a second pi on the same machine. */
     world?: World
+    /** Where pi starts; the world's checkout unless given. */
+    cwd?: string
+    /** A session to resume, as a new pi process does after another one ended, cleanly or not. */
+    session?: FakeSession
     /** Leave the session unstarted, to set the kit up first. */
     start?: boolean
   } = {},
@@ -67,7 +71,7 @@ export async function startDelta(
       return true
     },
   }
-  const pi = new FakePi(platform, w.checkout, options.mode)
+  const pi = new FakePi(platform, options.cwd ?? w.checkout, options.mode, options.session)
   pi.answers.push(...(options.answers ?? []))
   const kit = {
     world: w,
@@ -87,12 +91,30 @@ export async function startDelta(
     advance: (milliseconds: number) => clock.advance(milliseconds),
     /** Let work already under way run. */
     settle: flush,
+    /**
+     * Wait for `work` while time passes, a second at a time up to `limitMs`, as it would while pi waits
+     * on a bounded budget such as shutdown's.
+     */
+    async whileTimePasses<T>(work: Promise<T>, limitMs = 120_000): Promise<T> {
+      let done = false
+      const watched = work.finally(() => (done = true))
+      for (let passed = 0; !done && passed < limitMs; passed += 1_000) await clock.advance(1_000)
+      return watched
+    },
     /** End the session, as quitting pi does, and remove the world unless another kit shares it. */
     async stop() {
-      await pi.shutdown('quit')
+      if (!stopped) await kit.whileTimePasses(pi.shutdown('quit'))
+      stopped = true
+      await processes.stopAll()
       if (!options.world) w.cleanup()
     },
+    /** End this pi as a crash would: its commands end with its process, and it says nothing. */
+    async crash() {
+      stopped = true
+      await processes.stopAll()
+    },
   }
+  let stopped = false
   if (options.start !== false) await pi.start()
   return kit
 }

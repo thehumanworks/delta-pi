@@ -86,12 +86,15 @@ export class FakePi {
   private run: Promise<void> | undefined
   private readonly sessions = new Map<string, FakeSession>()
 
+  /** A pi in `cwd`, in a new session or, as a new pi process resuming it, in `session`. */
   constructor(
     readonly platform: Platform,
     cwd: string,
     readonly mode: 'rpc' | 'print' = 'rpc',
+    session?: FakeSession,
   ) {
-    this.session = this.newSession(cwd)
+    this.session = session ?? this.newSession(cwd)
+    this.sessions.set(this.session.file, this.session)
   }
 
   /** Whether pi is between runs. */

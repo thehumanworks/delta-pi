@@ -82,6 +82,16 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
         ...extra,
       }
     },
+    /** Make the next `times` runs of `command`, such as `worktree list`, fail as a transient error. */
+    fail(command: string, times = 1) {
+      writeFileSync(join(state, `fail-${command.replaceAll(' ', '-')}`), String(times))
+    },
+    /** Hold every run of `command` until the returned function releases them. */
+    hold(command: string): () => void {
+      const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
+      writeFileSync(path, '')
+      return () => rmSync(path, { force: true })
+    },
     cleanup() {
       rmSync(base, { recursive: true, force: true })
     },

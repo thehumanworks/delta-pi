@@ -13,8 +13,11 @@ export type Environment = Record<string, string | undefined>
 /** One command the extension ran, as the fake CLI saw it. */
 export type Ran = { argv: string[]; env: Environment }
 
-export function kitProcesses(environment: () => Environment): Host['process'] & { ran: Ran[]; busy(): number } {
+export function kitProcesses(
+  environment: () => Environment,
+): Host['process'] & { ran: Ran[]; busy(): number; stopAll(): Promise<void> } {
   const ran: Ran[] = []
+  const live = new Set<ProcessStream>()
   let busy = 0
   const merged = (extra: Record<string, string> | undefined): Record<string, string> =>
     Object.fromEntries(
@@ -53,7 +56,18 @@ export function kitProcesses(environment: () => Environment): Host['process'] & 
       const env = merged(init.env)
       if (!isDelta(init.argv)) return spawn({ ...init, env })
       ran.push({ argv: init.argv, env })
-      return deltaStream(init.argv.slice(1), env)
+      const stream = deltaStream(init.argv.slice(1), env)
+      live.add(stream)
+      const stop = stream.return.bind(stream)
+      stream.return = async () => {
+        live.delete(stream)
+        return stop()
+      }
+      return stream
+    },
+    /** End every long-running command still running, as the end of their process would. */
+    async stopAll() {
+      for (const stream of [...live]) await stream.return()
     },
   }
 }
