@@ -531,7 +531,7 @@ async function consumeConversation(
         if (event.type === 'live') {
           live = true
           feed.view?.endSnapshot()
-          void settleRemote(host, session)
+          void settleRemote(host, session)?.catch((error: unknown) => report(host, error))
           participate()
         } else if (event.type === 'worktrees') {
           feed.worktrees = event.worktrees.map((tree) => tree.reference)
@@ -612,12 +612,12 @@ function observeRemote(host: Host, session: string, event: WatchEvent) {
     // Activity keeps another participant's running turn from going quiet.
     const turn = feed.remoteTurn
     if (turn) turn.heard = host.clock.now()
-    void settleRemote(host, session)
+    void settleRemote(host, session)?.catch((error: unknown) => report(host, error))
     host.ui.invalidate()
   } else if (view && (event.type === 'comment' || event.type === 'comment.remove')) {
     if (event.type === 'comment') view.upsertComment(event.comment)
     else view.removeComment(event.id)
-    void settleRemote(host, session)
+    void settleRemote(host, session)?.catch((error: unknown) => report(host, error))
     host.ui.invalidate()
   } else if (event.type === 'turn') {
     feed.threadTurn = event

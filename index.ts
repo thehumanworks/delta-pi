@@ -137,10 +137,15 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       /* the debug log is best effort */
     }
   }
+  /** A note for the person; showing it is best effort, so a failure to show it never fails the work it reports. */
   const note = (text: string, tone: NoteTone = 'info') => {
     debug(`note: ${text}`)
     if (!context) return
-    pi.appendEntry<Note>(NOTE_ENTRY, { text, tone })
+    try {
+      pi.appendEntry<Note>(NOTE_ENTRY, { text, tone })
+    } catch (error) {
+      debug(`The note could not be added to the session: ${errorText(error)}`)
+    }
     // A client without pi's terminal draws no entries, so it hears each note as a notification. Print
     // mode has no client at all: its notes go where pi reports everything but the model's answer.
     if (context.hasUI && context.mode !== 'tui') context.ui.notify(text, tone)

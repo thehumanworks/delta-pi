@@ -9,6 +9,7 @@ import {
   requests,
   resumeCheckout,
   stateFor,
+  report,
 } from '../core/session-state.ts'
 import { errorText } from '../core/text.ts'
 import { classifyCommandFailure, JoinNotReadyError } from '../cli/thread-commands.ts'
@@ -123,7 +124,7 @@ export async function admitPrompt(host: Host, text: string, steering: boolean): 
   host.clock.after(PROMPT_START_GRACE_MS, () => {
     if (!runtime.promptEntering || runtime.currentTurnId !== undefined) return
     runtime.promptEntering = false
-    void settleRemote(host, session)
+    void settleRemote(host, session)?.catch((error: unknown) => report(host, error))
   })
   await settling
 }
