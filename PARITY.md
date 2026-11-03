@@ -97,6 +97,9 @@ What an audit of the port against upstream found and this port has not changed, 
 - **A joined session is not moved when its thread's worktrees change.** It is told their new paths;
   `/delta-join` again opens a session in the thread's folder. pi keeps one directory per session, where
   Claude Code moves its own.
+- **A message Delta cannot translate is logged and skipped.** Recording goes on with the next message
+  rather than pausing; the debug log says which. Upstream pauses capture on a failed local write, as this
+  port does, but has no translation step that can fail.
 - **The once-per-repository setup offer** is claimed by a read and a write, so two sessions starting at
   the same moment may both offer it. Inherited from upstream.
 

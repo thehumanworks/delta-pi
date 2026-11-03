@@ -23,6 +23,11 @@
   could not finish in its new session finishes there when you run `/delta-join` again.
 - A prompt you send while pi is starting a turn is taken into that turn instead of refused.
 - `/delta-org list` and other command answers print in print mode (`pi -p`), on stderr.
+- A Delta command stopped while a program it started still holds its output no longer keeps pi running.
+- A shell command run before you share is exported once, not recorded again with the next turn.
+- A join interrupted by starting another session leaves nothing mounted or prepared.
+- A turn's finish reflects the reply pi kept, after other extensions changed it.
+- Two extension updates cannot run at once across a session switch.
 - Extension update checks stop with the session, respect pinned and ranged npm sources and pi's filtered
   installs, run in the session's folder, wait while a turn, share or join runs, and keep their hourly
   limit after a failure; RPC clients see the update notice.
