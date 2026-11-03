@@ -85,8 +85,11 @@ test('a stalled startup check cannot block prompts or sharing and expires withou
   expect(notices(delta).some((text) => text.includes('0.24.0 is available'))).toBe(false)
 })
 
-for (const command of ['delta-update', 'delta'] as const)
-  test(`${command} explicitly updates with its telemetry command form`, async () => {
+for (const [title, command] of [
+  ['delta-update explicitly updates with its telemetry command form', 'delta-update'],
+  ['delta explicitly updates with its telemetry command form', 'delta'],
+] as const)
+  test(title, async () => {
     delta = await started()
     delta.world.release('0.24.0')
     const release = delta.world.hold('update install')
@@ -119,8 +122,11 @@ test('an installer the plugin did not ask for is refused and never started', asy
   expect(delta.others().map((argv) => argv[0])).not.toContain(UPDATE_HELPER_ARGV[0])
 })
 
-for (const status of ['updated', 'install_ready'] as const)
-  test(`read-only checks reject ${status}`, async () => {
+for (const [title, status] of [
+  ['read-only checks reject updated', 'updated'],
+  ['read-only checks reject install_ready', 'install_ready'],
+] as const)
+  test(title, async () => {
     delta = await startDelta({ answers: [NOT_NOW], start: false })
     delta.world.answer('update --check', {
       stdout: reply(status, status === 'install_ready' ? { install_argv: [...UPDATE_HELPER_ARGV, '0.24.0'] } : {}),
@@ -192,8 +198,16 @@ const FAILURES = {
   },
 } as const
 
-for (const [failure, { advice, answer }] of Object.entries(FAILURES))
-  test(`${failure} update failures stay actionable and do not block sharing`, async () => {
+for (const [title, failure] of [
+  ['old-cli update failures stay actionable and do not block sharing', 'old-cli'],
+  ['network update failures stay actionable and do not block sharing', 'network'],
+  ['app-running update failures stay actionable and do not block sharing', 'app-running'],
+  ['app-working update failures stay actionable and do not block sharing', 'app-working'],
+  ['malformed update failures stay actionable and do not block sharing', 'malformed'],
+  ['crash update failures stay actionable and do not block sharing', 'crash'],
+] as const)
+  test(title, async () => {
+    const { advice, answer } = FAILURES[failure]
     delta = await startDelta({ answers: [NOT_NOW], start: false })
     delta.world.answer('update --check', answer)
     delta.world.answer('update', answer)
@@ -210,8 +224,11 @@ for (const [failure, { advice, answer }] of Object.entries(FAILURES))
     expect(await share(delta)).toMatch(/^https:\/\//)
   })
 
-for (const status of ['update_available', 'unsupported'] as const)
-  test(`${status} preserves manual installation advice without offering an unsupported command`, async () => {
+for (const [title, status] of [
+  ['update_available preserves manual installation advice without offering an unsupported command', 'update_available'],
+  ['unsupported preserves manual installation advice without offering an unsupported command', 'unsupported'],
+] as const)
+  test(title, async () => {
     const message =
       status === 'update_available'
         ? 'Quit Delta, then run the Windows installer from https://delta.dev.'
@@ -586,8 +603,14 @@ describe('plugin updates', () => {
     expect(extension.fetches).toHaveLength(2)
   })
 
-  for (const command of ['delta', 'delta-plugin-update'] as const)
-    test(`${command} updates at the installed scope and reloads immediately without a question`, async () => {
+  for (const [title, command] of [
+    ['delta updates at the installed scope and reloads immediately without a question', 'delta'],
+    [
+      'delta-plugin-update updates at the installed scope and reloads immediately without a question',
+      'delta-plugin-update',
+    ],
+  ] as const)
+    test(title, async () => {
       const { kit, extension } = await withExtension({}, async (_, kit) => {
         await kit.store.set('plugin-update:notifications', false)
       })
@@ -718,8 +741,12 @@ describe('plugin updates', () => {
     expect(extensionNotice(kit)).toBeDefined()
   })
 
-  for (const kind of ['headless', 'network disabled', 'development'] as const)
-    test(`background checking leaves ${kind} sessions alone`, async () => {
+  for (const [title, kind] of [
+    ['background checking leaves headless sessions alone', 'headless'],
+    ['background checking leaves network disabled sessions alone', 'network disabled'],
+    ['background checking leaves development sessions alone', 'development'],
+  ] as const)
+    test(title, async () => {
       const { kit, extension } = await withExtension(
         {
           // Any nonempty value opts out, including one that reads as false.

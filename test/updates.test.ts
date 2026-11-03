@@ -577,33 +577,36 @@ test('persisted throttles expire, survive clock changes, and snooze only the ann
   expect(reminderIsSnoozed(reminder, '1.2.3', -1)).toBe(false)
 })
 
-test.each([
-  [`npm:${NAME}`, 'registry'],
-  [`npm:${NAME}@next`, 'npm'],
-  [`npm:${NAME}@^1.0.0`, 'npm'],
-  [`npm:${NAME}@1.0.0`, 'pinned'],
-  [`npm:${NAME}@v1.0.0-beta.1+build`, 'pinned'],
-  ['npm:pi-delta-fork', 'other'],
-  ['git:github.com/thehumanworks/delta-pi', 'other'],
-  ['../pi-delta', 'other'],
-] as const)('release checks follow npm source %s as pi does: %s', async (source, follows) => {
-  const { host, packages, run } = fake()
-  packages.source = source
-  packages.nextVersion = '1.0.3'
-  const { text } = await pluginUpdateCommand(host, 'check')
-  const ran = run.mock.calls.map(([argv]) => argv.slice(0, 2).join(' '))
-  if (follows === 'registry') {
-    expect(fetch).toHaveBeenCalledWith(
-      `https://registry.npmjs.org/${NAME.replace('/', '%2F')}/latest`,
-      expect.anything(),
-    )
-    expect(text).toContain('1.1.0 is available')
-  } else expect(fetch).not.toHaveBeenCalled()
-  if (follows === 'npm') {
-    expect(ran).toEqual(['pi list', 'npm view'])
-    expect(run).toHaveBeenLastCalledWith(['npm', 'view', source.slice(4), 'version', '--json'], expect.anything())
-    expect(text).toContain('1.0.3 is available')
-  } else expect(ran).toEqual(['pi list'])
-  if (follows === 'pinned') expect(text).toContain('pinned to an exact npm version')
-  if (follows === 'other') expect(text).toContain("wasn't installed from npm")
+test('release checks follow the npm source pi installed, its tag or range, and leave pins, other packages and other sources alone', async () => {
+  for (const [source, follows] of [
+    [`npm:${NAME}`, 'registry'],
+    [`npm:${NAME}@next`, 'npm'],
+    [`npm:${NAME}@^1.0.0`, 'npm'],
+    [`npm:${NAME}@1.0.0`, 'pinned'],
+    [`npm:${NAME}@v1.0.0-beta.1+build`, 'pinned'],
+    ['npm:pi-delta-fork', 'other'],
+    ['git:github.com/thehumanworks/delta-pi', 'other'],
+    ['../pi-delta', 'other'],
+  ] as const) {
+    vi.mocked(fetch).mockClear()
+    const { host, packages, run } = fake()
+    packages.source = source
+    packages.nextVersion = '1.0.3'
+    const { text } = await pluginUpdateCommand(host, 'check')
+    const ran = run.mock.calls.map(([argv]) => argv.slice(0, 2).join(' '))
+    if (follows === 'registry') {
+      expect(fetch).toHaveBeenCalledWith(
+        `https://registry.npmjs.org/${NAME.replace('/', '%2F')}/latest`,
+        expect.anything(),
+      )
+      expect(text).toContain('1.1.0 is available')
+    } else expect(fetch, source).not.toHaveBeenCalled()
+    if (follows === 'npm') {
+      expect(ran).toEqual(['pi list', 'npm view'])
+      expect(run).toHaveBeenLastCalledWith(['npm', 'view', source.slice(4), 'version', '--json'], expect.anything())
+      expect(text).toContain('1.0.3 is available')
+    } else expect(ran, source).toEqual(['pi list'])
+    if (follows === 'pinned') expect(text).toContain('pinned to an exact npm version')
+    if (follows === 'other') expect(text, source).toContain("wasn't installed from npm")
+  }
 })
