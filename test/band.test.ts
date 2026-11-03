@@ -4,7 +4,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent'
 import { getCapabilities, getOsc8LinkAtColumn, setCapabilities, visibleWidth } from '@earendil-works/pi-tui'
 import { BandWidget, bandText, clearProgress, setProgress, stopBandTimers, styled } from '../src/band/band.ts'
 import type { Host } from '../src/core/host.ts'
-import { activation, sessions, stateFor } from '../src/core/session-state.ts'
+import { activation, requests, sessions, stateFor } from '../src/core/session-state.ts'
 import * as updates from '../src/updates/updates.ts'
 import { feed } from '../src/watch/watch.ts'
 
@@ -34,6 +34,8 @@ afterEach(() => {
   activation.session = ''
   feed.connection = { phase: 'stopped' }
   setCapabilities(capabilities)
+  requests.share = undefined
+  requests.join = undefined
   vi.restoreAllMocks()
 })
 
@@ -107,4 +109,30 @@ test('wrapped link rows fit the same four-row budget the layout reserves', () =>
           .join(''),
       ).toBe(LINK)
   }
+})
+
+test('the update notice is one colored row under the band that fits every width', () => {
+  const colored = {
+    ...theme,
+    fg: (color: string, text: string) => `${color === 'accent' ? '\x1b[36m' : '\x1b[2m'}${text}\x1b[39m`,
+  } as Theme
+  const widget = new BandWidget(host, () => colored)
+  stateFor(SESSION).reminder = 'manual'
+  for (let width = 10; width <= 120; width++) {
+    const lines = widget.render(width)
+    expect(lines.filter((line) => stripVTControlCharacters(line).includes('↑'))).toEqual([lines.at(-1)])
+    expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true)
+    if (width > NOTICE.length + 3) expect(stripVTControlCharacters(lines.at(-1)!)).toBe(` ↑ ${NOTICE}`)
+  }
+  expect(widget.render(80).at(-1)).toContain('\x1b[36m↑')
+  stateFor(SESSION).reminder = undefined
+  expect(widget.render(80).map((line) => stripVTControlCharacters(line))).toEqual([` ↑ ${NOTICE}`])
+})
+
+test.each(['turn', 'share', 'join'] as const)('the update notice gives way while a %s runs', (running) => {
+  const busy = { ...host, session: { idle: () => running !== 'turn' } } as unknown as Host
+  if (running === 'share') requests.share = { session: SESSION } as typeof requests.share
+  if (running === 'join') requests.join = { session: SESSION } as typeof requests.join
+  expect(bandText(busy)).toBeUndefined()
+  expect(new BandWidget(busy, () => theme).render(80)).toEqual([])
 })

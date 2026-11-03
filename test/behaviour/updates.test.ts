@@ -4,6 +4,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { piVersionWarning } from '../../src/core/compatibility.ts'
 import { UPDATE_HELPER_ARGV } from '../fake-delta/cli.ts'
 import { type Kit, startDelta } from '../kit/index.ts'
 import type { Exit, Output, ProcessStream, RunResult } from '../../src/core/process.ts'
@@ -846,5 +847,75 @@ describe('plugin updates', () => {
     await passes(kit, 0)
     expect(extension.piUpdates).toHaveLength(1)
     expect(kit.pi.reloads).toBe(0)
+  })
+})
+
+describe('startup and commands', () => {
+  test('an unsupported host warns in the transcript without preventing startup or commands', async () => {
+    vi.doMock('@earendil-works/pi-coding-agent', async (original) => ({
+      ...(await original<Record<string, unknown>>()),
+      VERSION: '1.3.9',
+    }))
+    try {
+      delta = await started()
+      expect(notices(delta)).toContain(piVersionWarning('1.3.9'))
+      await delta.pi.command('delta', 'help')
+      expect(notices(delta).at(-1)).toContain('Usage: /delta')
+    } finally {
+      vi.doUnmock('@earendil-works/pi-coding-agent')
+    }
+  })
+
+  test('each menu command runs its /delta form, and both forms keep working', async () => {
+    // Print mode has nobody to answer a menu, so what each form says goes to stderr.
+    delta = await startDelta({ mode: 'print' })
+    const said = async (command: string, args: string) => {
+      const before = delta!.stderr.length
+      await delta!.pi.command(command, args)
+      return delta!.stderr.slice(before)
+    }
+    expect(await said('delta-org', 'current')).toEqual(await said('delta', 'org current'))
+    expect(await said('delta-setup', '')).toEqual(await said('delta', 'setup'))
+    // Headless, a menu command missing its argument explains that command's own format.
+    expect((await said('delta-join', '')).join('')).toContain('Usage: /delta-join <link>')
+    expect((await said('delta-org', '')).join('')).toContain('Usage: /delta-org list')
+    delta.expectClean()
+    await delta.stop()
+    delta = await started()
+    for (const [command, args] of [
+      ['delta-share', ''],
+      ['delta', 'share'],
+    ] as const) {
+      const before = notices(delta).length
+      // The first share chooses the team; sharing again keeps who sees it.
+      delta.pi.answers.push((dialog) => dialog.options?.find((option) => /^(Share with Zed|Keep)/.test(option)))
+      await delta.pi.command(command, args)
+      const shared = await delta.until(
+        async () => (
+          await delta!.advance(1_000),
+          notices(delta!)
+            .slice(before)
+            .find((text) => text.startsWith('Delta: Shared'))
+        ),
+        `${command} ${args} to share`,
+      )
+      expect(shared).toContain(delta.thread()!.url)
+    }
+    // Only the command a share reports tells Delta which form ran it.
+    expect(
+      delta.world
+        .calls()
+        .filter((call) => call.env.form)
+        .map((call) => [
+          call.argv
+            .filter((arg) => arg !== '--json')
+            .slice(0, 2)
+            .join(' '),
+          call.env.form,
+        ]),
+    ).toEqual([
+      ['thread share', 'dedicated_command'],
+      ['thread share', 'delta_subcommand'],
+    ])
   })
 })
