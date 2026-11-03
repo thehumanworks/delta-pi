@@ -3,6 +3,7 @@ import { type Kit, startDelta } from '../kit/index.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
+  delta?.expectClean()
   await delta?.stop()
   delta = undefined
 })

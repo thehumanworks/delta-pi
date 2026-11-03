@@ -6,6 +6,7 @@ import { type Kit, startDelta } from '../kit/index.ts'
 const kits: Kit[] = []
 afterEach(async () => {
   // Children first: they share their parent's world, which the parent's stop removes.
+  for (const kit of kits) kit.expectClean()
   for (const kit of kits.reverse()) await kit.stop()
   kits.length = 0
 })

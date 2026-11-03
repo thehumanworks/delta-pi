@@ -4,6 +4,7 @@ import { RECORDED_TURNS } from '../world.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
+  delta?.expectClean()
   await delta?.stop()
   delta = undefined
 })

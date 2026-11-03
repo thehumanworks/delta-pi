@@ -9,7 +9,7 @@
  *   expect(delta.thread()?.records).toHaveLength(4)
  */
 import { join } from 'node:path'
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import type { Platform } from '../../src/core/host.ts'
 import { FAKE_BIN, until, world, type World } from '../world.ts'
 import { flush, MockClock } from './clock.ts'
@@ -100,6 +100,16 @@ export async function startDelta(
       const watched = work.finally(() => (done = true))
       for (let passed = 0; !done && passed < limitMs; passed += 1_000) await clock.advance(1_000)
       return watched
+    },
+    /**
+     * What every behaviour test ends with: no handler threw, no scheduled work failed, and every Delta
+     * command carried pi's label for Delta's telemetry.
+     */
+    expectClean() {
+      expect(pi.errors.map(String)).toEqual([])
+      expect(clock.failures.map(String)).toEqual([])
+      const unlabelled = processes.ran.filter((call) => call.env.DELTA_CLI_INTEGRATION !== 'pi')
+      expect(unlabelled.map((call) => call.argv.slice(1).join(' '))).toEqual([])
     },
     /** End the session, as quitting pi does, and remove the world unless another kit shares it. */
     async stop() {
