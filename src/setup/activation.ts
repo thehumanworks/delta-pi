@@ -264,6 +264,8 @@ export async function beginSession(host: Host, session: string) {
     return
   }
   const stored = await serial(() => load(host, session)).catch(() => undefined)
+  // A session that ended meanwhile, which forgets its start, starts nothing.
+  if (started?.session !== session) return
   // A join that switched into this session decides what it records.
   if (fresh && !stored?.joinTransition && !stored?.joined && !stored?.child) beginCaptureDecision(session)
   try {

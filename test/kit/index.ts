@@ -19,7 +19,7 @@ import { disk } from './disk.ts'
 import { type Environment, type FakeProgram, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
-export { echoModel, FakeSession, type Model, type Reply } from './pi.ts'
+export { echoModel, FAKE_THEME, FakeSession, type Model, type Reply, themeColor } from './pi.ts'
 export type { FakeProgram } from './processes.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
@@ -28,7 +28,7 @@ export type Kit = Awaited<ReturnType<typeof startDelta>>
 export async function startDelta(
   options: {
     policy?: Record<string, unknown>
-    mode?: 'rpc' | 'print'
+    mode?: 'rpc' | 'print' | 'tui'
     answers?: Answer[]
     env?: Environment
     /** A world to start in, such as another kit's, for a second pi on the same machine. */
@@ -97,6 +97,8 @@ export async function startDelta(
     programs,
     /** The other programs the extension ran, as full argument lists. */
     others: () => processes.others.map((call) => call.argv),
+    /** The long-running delta commands still running, such as watches and mounts, as argument lists without the program. */
+    running: () => processes.running().map((argv) => argv.filter((arg) => arg !== '--json')),
     /** The delta commands the extension ran, as argument lists without the program. */
     commands: () => processes.ran.map((call) => call.argv.slice(1).filter((arg) => arg !== '--json')),
     /** The fake CLI's one top-level thread, once it exists. */

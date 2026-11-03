@@ -109,10 +109,22 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
       const path = join(state, `events-${thread}.jsonl`)
       writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text)
     },
-    /** End the running `thread watch` of `thread` with `code` once it has reported what came before. */
-    endWatch(thread: string, code = 1) {
+    /**
+     * End the running `thread watch` of `thread` with `code` once it has reported what came before, after
+     * a last line with Delta's `error` envelope when given, as a watch Delta stops does.
+     */
+    endWatch(thread: string, code = 1, error?: { code: string; message: string; retryable: boolean; reason?: string }) {
       const path = join(state, `events-${thread}.jsonl`)
-      writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + `{"fake_watch_exit":${code}}\n`)
+      const control = error
+        ? `{"fake_watch_exit":${code},"error":${JSON.stringify(error)}}`
+        : `{"fake_watch_exit":${code}}`
+      writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + `${control}\n`)
+    },
+    /** Make `thread status` answer with `patch`'s fields over its own, or as usual again when undefined. */
+    patchStatus(patch: Record<string, unknown> | undefined) {
+      const path = join(state, 'status-patch.json')
+      if (patch) writeFileSync(path, JSON.stringify(patch))
+      else rmSync(path, { force: true })
     },
     /**
      * Make `times` runs of `command`, after letting `after` through, answer `stdout` and `stderr` with
@@ -130,10 +142,13 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
-    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
-    hold(command: string, { after = 0 } = {}): () => void {
+    /**
+     * Hold the runs of `command` after the first `after`, or only `times` of them, until the returned
+     * function releases them.
+     */
+    hold(command: string, { after = 0, times }: { after?: number; times?: number } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
-      writeFileSync(path, JSON.stringify({ after }))
+      writeFileSync(path, JSON.stringify({ after, ...(times !== undefined ? { times } : {}) }))
       return () => rmSync(path, { force: true })
     },
     cleanup() {

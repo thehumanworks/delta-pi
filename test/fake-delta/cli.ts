@@ -249,7 +249,13 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     return undefined
   }
   const holding = join(root, `hold-${switchName}`)
-  if (reached(holding)) while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+  const hold = reached(holding)
+  // A hold with `times` holds only that many runs; the runs after them go through.
+  if (hold && hold.times !== undefined) {
+    if (hold.times > 0) writeFileSync(holding, JSON.stringify({ ...hold, times: hold.times - 1 }))
+  }
+  if (hold && (hold.times === undefined || hold.times > 0))
+    while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
   const failing = join(root, `fail-${switchName}`)
   const failure = reached(failing)
   if (failure) {
@@ -402,6 +408,10 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const thread = known(state, locator)
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       const producer = state.producers[producerKey(source, external)]
+      // A test changes fields of the answer, as a thread whose inventory cannot be read reports it.
+      const patch = existsSync(join(root, 'status-patch.json'))
+        ? (JSON.parse(readFileSync(join(root, 'status-patch.json'), 'utf8')) as Record<string, unknown>)
+        : {}
       out({
         operation: 'status',
         thread_id: thread.thread_id,
@@ -432,6 +442,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
           next_sequence: producer?.thread === thread.thread_id ? producer.next : 1,
           turn: null,
         },
+        ...patch,
       })
       break
     }
@@ -549,7 +560,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         const end = fresh.lastIndexOf('\n')
         if (end < 0) return
         for (const line of fresh.slice(0, end + 1).split(/(?<=\n)/)) {
-          const control = /^\{"fake_watch_exit":(\d+)\}\n$/.exec(line)
+          const control = /^\{"fake_watch_exit":(\d+)(?:,"error":(.*))?\}\n$/.exec(line)
           if (!control) {
             io.write('stdout', line)
             offset += line.length
@@ -558,6 +569,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
           // The control line ends this watch only: the next one replays what came before it, not it.
           const current = readFileSync(eventsPath, 'utf8')
           writeFileSync(eventsPath, current.slice(0, offset) + current.slice(offset + line.length))
+          // A watch that fails says why on its last line, as Delta's error envelope.
+          if (control[2]) io.write('stdout', `{"error":${control[2]}}\n`)
           exitCode = Number(control[1])
           ended()
           return

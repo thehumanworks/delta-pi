@@ -12,10 +12,11 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { promisify } from 'node:util'
+import { promisify, stripVTControlCharacters } from 'node:util'
 import { vi } from 'vitest'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, Theme } from '@earendil-works/pi-coding-agent'
+import type { Component } from '@earendil-works/pi-tui'
 import type { Platform } from '../../src/core/host.ts'
 
 /** What the model answers: text, tool calls, and how its reply ended. */
@@ -46,6 +47,34 @@ export type Answer = string | undefined | ((dialog: Dialog) => string | undefine
 type Entry = { type: string; id: string; parentId: string | null; timestamp: string; [field: string]: unknown }
 type Handler = (event: Record<string, unknown>, ctx: unknown) => unknown
 type Command = { handler: (args: string, ctx: unknown) => Promise<void> }
+/** What pi's TUI gives a widget's factory and a renderer: a redraw, and the invalidation that rebuilds rows. */
+type FakeTui = { requestRender(): void; invalidate(): void }
+type WidgetFactory = (tui: FakeTui, theme: Theme) => Component
+type MessageRenderer = (
+  message: { customType: string; content: unknown; display: boolean; details: unknown },
+  options: { expanded: boolean; outputPad: number },
+  theme: Theme,
+) => Component | undefined
+
+/** The 256-color code `FAKE_THEME` draws each of pi's theme colors in: distinct, so a test can tell them apart. */
+const THEME_COLORS: Record<string, number> = { error: 1, success: 2, warning: 3, accent: 4, muted: 8, dim: 7 }
+/** The escape that starts text `FAKE_THEME` draws in pi's theme color `color`. */
+export function themeColor(color: string): string {
+  return `\x1b[38;5;${THEME_COLORS[color] ?? 15}m`
+}
+/**
+ * A theme drawing pi's colors and attributes as real escapes, so the extension's layout measures and
+ * truncates its text as it does in pi's terminal, and a test can still tell the colors apart.
+ */
+export const FAKE_THEME = {
+  fg: (color: string, text: string) => `${themeColor(color)}${text}\x1b[39m`,
+  bg: (_color: string, text: string) => text,
+  bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+  italic: (text: string) => `\x1b[3m${text}\x1b[23m`,
+  underline: (text: string) => `\x1b[4m${text}\x1b[24m`,
+  inverse: (text: string) => `\x1b[7m${text}\x1b[27m`,
+  strikethrough: (text: string) => `\x1b[9m${text}\x1b[29m`,
+} as unknown as Theme
 
 /** A pi session: its ID, file, working directory and the entries pi committed. */
 export class FakeSession {
@@ -75,6 +104,25 @@ class Runtime {
 export class FakePi {
   /** Notes and notices the extension showed, in order. */
   readonly notices: { text: string; tone: string }[] = []
+  /**
+   * How many times the extension asked pi's terminal to redraw, and to invalidate, which rebuilds every
+   * drawn row through its renderer. Only pi's terminal (`tui` mode) gives the extension its TUI.
+   */
+  renders = 0
+  invalidations = 0
+  private readonly tui: FakeTui = {
+    requestRender: () => this.renders++,
+    invalidate: () => {
+      this.invalidations++
+      this.built.clear()
+    },
+  }
+  /** The widgets the extension set in pi's terminal, by key, and the components pi built from them. */
+  private readonly widgets = new Map<string, WidgetFactory>()
+  private readonly shownWidgets = new Map<string, Component>()
+  /** The renderers the extension registered for its custom messages, and the rows pi built with them, by entry. */
+  private readonly messageRenderers = new Map<string, MessageRenderer>()
+  private readonly built = new Map<string, Component | undefined>()
   readonly statuses = new Map<string, string | undefined>()
   readonly dialogs: Dialog[] = []
   readonly answers: Answer[] = []
@@ -98,7 +146,7 @@ export class FakePi {
   constructor(
     readonly platform: Platform,
     cwd: string,
-    readonly mode: 'rpc' | 'print' = 'rpc',
+    readonly mode: 'rpc' | 'print' | 'tui' = 'rpc',
     session?: FakeSession,
   ) {
     this.session = session ?? this.newSession(cwd)
@@ -209,9 +257,62 @@ export class FakePi {
     await this.start('new')
   }
 
-  /** The texts of the notes and notices shown. */
+  /**
+   * The texts of the notes and notices shown. In pi's terminal, a note is an entry the extension left in
+   * the transcript, which it draws itself; those are read here too.
+   */
   noticeTexts(): string[] {
-    return this.notices.map((notice) => notice.text)
+    const notes =
+      this.mode === 'tui'
+        ? this.session.entries.flatMap((entry) =>
+            entry.type === 'custom' && isObject(entry.data) && typeof entry.data.text === 'string'
+              ? [entry.data.text]
+              : [],
+          )
+        : []
+    return [...this.notices.map((notice) => notice.text), ...notes]
+  }
+
+  /**
+   * What the widget `key` draws `width` columns wide in pi's terminal, its escapes removed unless `raw`.
+   * Like pi, this builds the widget's component once and renders it on every draw.
+   */
+  widget(key: string, width = 120, raw = false): string[] {
+    const factory = this.widgets.get(key)
+    if (!factory) return []
+    let component = this.shownWidgets.get(key)
+    if (!component) this.shownWidgets.set(key, (component = factory(this.tui, FAKE_THEME)))
+    const lines = component.render(width)
+    return raw ? lines : lines.map((line) => stripVTControlCharacters(line))
+  }
+
+  /**
+   * The custom messages pi shows the person, each as its renderer draws it `width` columns wide, escapes
+   * removed unless `raw`; undefined where the renderer drew nothing of its own, so pi draws the content.
+   * Like pi, a row is built once and drawn again on every render, until the extension invalidates the TUI.
+   */
+  drawnRows(width = 100, raw = false): { content: unknown; details: unknown; lines: string[] | undefined }[] {
+    return this.session.entries.flatMap((entry) => {
+      if (entry.type !== 'custom_message' || !entry.display) return []
+      const renderer = this.messageRenderers.get(String(entry.customType))
+      if (!this.built.has(entry.id)) {
+        const message = {
+          customType: String(entry.customType),
+          content: entry.content,
+          display: true,
+          details: entry.details,
+        }
+        this.built.set(entry.id, renderer?.(message, { expanded: false, outputPad: 1 }, FAKE_THEME))
+      }
+      const lines = this.built.get(entry.id)?.render(width)
+      return [
+        {
+          content: entry.content,
+          details: entry.details,
+          lines: raw ? lines : lines?.map((line) => stripVTControlCharacters(line)),
+        },
+      ]
+    })
   }
 
   /** The messages pi committed to the session, in order. */
@@ -382,7 +483,11 @@ export class FakePi {
       input: async (title: string) => this.ask({ method: 'input', title }),
       notify: (text: string, tone = 'info') => this.notices.push({ text, tone }),
       setStatus: (key: string, text: string | undefined) => this.statuses.set(key, text),
-      setWidget: () => {},
+      setWidget: (key: string, content: unknown) => {
+        this.shownWidgets.delete(key)
+        if (typeof content === 'function') this.widgets.set(key, content as WidgetFactory)
+        else this.widgets.delete(key)
+      },
       getEditorText: () => this.editor,
       setEditorText: (text: string) => (this.editor = text),
     }
@@ -394,7 +499,7 @@ export class FakePi {
       },
       get hasUI() {
         active()
-        return mode() === 'rpc'
+        return mode() !== 'print'
       },
       get mode() {
         active()
@@ -464,7 +569,11 @@ export class FakePi {
         runtime.assertActive()
         runtime.commands.set(name, command)
       },
-      registerMessageRenderer: () => runtime.assertActive(),
+      registerMessageRenderer: (customType: string, renderer: MessageRenderer) => {
+        runtime.assertActive()
+        this.messageRenderers.set(customType, renderer)
+        this.built.clear()
+      },
       registerEntryRenderer: () => runtime.assertActive(),
       appendEntry: (customType: string, data: unknown) => {
         runtime.assertActive()
