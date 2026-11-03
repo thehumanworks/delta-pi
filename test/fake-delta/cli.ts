@@ -236,6 +236,15 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     fail('authentication_required', 'Sign in to Delta')
   /** Switches a test flips in the state folder: a file per switch. */
   const flag = (name: string) => existsSync(join(root, name))
+  /** The account's organizations, as a test set them (`world().organizations`) and `org create` added to them. */
+  const organizationsPath = join(root, 'organizations.json')
+  const organizations = (): { id: string; name: string; current: boolean; personal?: boolean }[] =>
+    existsSync(organizationsPath)
+      ? JSON.parse(readFileSync(organizationsPath, 'utf8'))
+      : [
+          { id: 'org-1', name: 'Zed', current: true },
+          { id: 'org-personal', name: "ada's Organization", current: false, personal: true },
+        ]
   // A test holds runs of a command while `hold-<command>` exists, and makes runs fail while
   // `fail-<command>` counts down, each after letting `after` runs through: see world() in test/world.ts.
   const switchName = words.replaceAll(' ', '-')
@@ -249,7 +258,16 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     return undefined
   }
   const holding = join(root, `hold-${switchName}`)
-  if (reached(holding)) while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+  if (reached(holding)) {
+    while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+    // An answer set while the run was held is its answer, as a sign-in the person cancels ends the wait.
+    const late = takeAnswer(args, io)
+    if (late) {
+      if (late.stdout) io.write('stdout', late.stdout)
+      if (late.stderr) io.write('stderr', late.stderr)
+      throw new Exit(late.exitCode ?? 1)
+    }
+  }
   const failing = join(root, `fail-${switchName}`)
   const failure = reached(failing)
   if (failure) {
@@ -293,9 +311,13 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     case 'org switch':
       io.write('stdout', `Switched to ${rest.at(-1)}\n`)
       break
-    case 'org create':
-      out({ operation: 'created', organization: { id: 'org-new', name: rest.at(-1), current: false } })
+    case 'org create': {
+      // The new team is listed from now on, unselected, as Delta lists a team the account created.
+      const organization = { id: 'org-new', name: rest.at(-1) ?? '', current: false }
+      writeFileSync(organizationsPath, JSON.stringify([...organizations(), organization]))
+      out({ operation: 'created', organization })
       break
+    }
     case 'org invite':
       if (!json) {
         io.write('stdout', `Invited ${rest.slice(rest.indexOf('--') + 1).join(', ')}\n`)
@@ -321,12 +343,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         io.write('stdout', '* org-1  Zed\n')
         break
       }
-      out({
-        organizations: [
-          { id: 'org-1', name: 'Zed', current: true },
-          { id: 'org-personal', name: "ada's Organization", current: false, personal: true },
-        ],
-      })
+      out({ organizations: organizations() })
       break
     case 'update --check':
     case 'update':
@@ -456,12 +473,20 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         thread.url = `https://delta.dev/join/${thread.share_id}`
         thread.visibility ??= 'private'
         thread.invited = [...(thread.invited ?? []), ...emails]
+        // Addresses a test made Delta refuse (`world().inviteFailures`), each with its reason.
+        const failures: Record<string, string> = existsSync(join(root, 'invite-failures.json'))
+          ? JSON.parse(readFileSync(join(root, 'invite-failures.json'), 'utf8'))
+          : {}
         return {
           operation: 'invited',
           thread_id: thread.thread_id,
           share_id: thread.share_id,
           url: thread.url,
-          results: emails.map((email) => ({ status: 'invited', email })),
+          results: emails.map((email) =>
+            failures[email]
+              ? { status: 'failed', email, reason: 'already_member', message: failures[email] }
+              : { status: 'invited', email },
+          ),
         }
       })
       out(result)

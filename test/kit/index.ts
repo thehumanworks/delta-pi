@@ -13,7 +13,7 @@ import { expect, vi } from 'vitest'
 import type { Platform } from '../../src/core/host.ts'
 import { FAKE_BIN, until, world, type World } from '../world.ts'
 import { flush, MockClock } from './clock.ts'
-import { type Answer, FakePi, type FakeSession } from './pi.ts'
+import { type Answer, FakePi, type FakeSession, type Mode } from './pi.ts'
 import { fileStore } from '../../src/core/store.ts'
 import { disk } from './disk.ts'
 import { type Environment, type FakeProgram, kitProcesses } from './processes.ts'
@@ -28,7 +28,7 @@ export type Kit = Awaited<ReturnType<typeof startDelta>>
 export async function startDelta(
   options: {
     policy?: Record<string, unknown>
-    mode?: 'rpc' | 'print'
+    mode?: Mode
     answers?: Answer[]
     env?: Environment
     /** A world to start in, such as another kit's, for a second pi on the same machine. */
@@ -99,6 +99,13 @@ export async function startDelta(
     others: () => processes.others.map((call) => call.argv),
     /** The delta commands the extension ran, as argument lists without the program. */
     commands: () => processes.ran.map((call) => call.argv.slice(1).filter((arg) => arg !== '--json')),
+    /**
+     * The delta commands the extension ran as it ran them: the program and every argument, with the time
+     * it gave each to finish, or whether it read the command as it streamed.
+     */
+    runs: () => processes.ran.map(({ argv, timeoutMs, spawned }) => ({ argv, timeoutMs, spawned: !!spawned })),
+    /** The long-running delta commands still running, such as a mount or a sign-in's wait, without the program. */
+    running: () => processes.running().map((argv) => argv.filter((arg) => arg !== '--json')),
     /** The fake CLI's one top-level thread, once it exists. */
     thread: () => Object.values(w.delta().threads).find((thread) => !thread.parent),
     /** Wait until `read` holds, while the extension's work runs. */
