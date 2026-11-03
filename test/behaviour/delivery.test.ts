@@ -278,13 +278,15 @@ test('an acknowledgment that cannot be saved replays the exact marked record aft
   const turn = pi.submit('two')
   await delta.until(async () => model.waiting() && !(await pending(delta!)).length, 'the turn to run')
   const marked = (await binding(delta)).next
-  // Staging succeeds; only saving Delta's acknowledgment of the reply fails.
+  // Staging succeeds; only saving Delta's acknowledgment of the reply, which leaves it out of the
+  // pending records, fails.
   let failed = false
-  delta.disk.fail(
-    'write',
-    (path) => !failed && path === bindingPath(delta!) && sequences(delta!).includes(marked) && (failed = true),
-    { times: 1 },
-  )
+  const acknowledges = (path: string, text?: string) =>
+    path === bindingPath(delta!) &&
+    !!text &&
+    !(JSON.parse(text).value.pending as { sequence: number }[]).some((entry) => entry.sequence === marked) &&
+    JSON.parse(text).value.next > marked
+  delta.disk.fail('write', (path, text) => !failed && acknowledges(path, text) && (failed = true), { times: 1 })
   await model.reply({ text: 'unsaved-ack' })
   await delta.until(() => failed, 'the acknowledgment to fail to save')
   const immutable = (await staged(delta)).find((record) => record.sequence === marked)
