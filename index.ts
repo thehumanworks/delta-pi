@@ -33,9 +33,9 @@ import {
   activation,
   cancelRequestsOf,
   endActivationOf,
+  forgetRuntime,
   markEnded,
   resetRuntime,
-  sessions,
   stateFor,
 } from './src/core/session-state.ts'
 import { writeExclusive } from './src/core/files.ts'
@@ -417,7 +417,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     clearProgress(host)
     if (event.reason !== 'reload') await markEnded(host, session)
     await releaseOnEnd(host, session, event.reason)
-    sessions.delete(session)
+    forgetRuntime(session, runtime)
     tui = undefined
     context = undefined
   })

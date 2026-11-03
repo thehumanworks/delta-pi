@@ -473,3 +473,31 @@ test("an ended session's append that outlasts its budget is not delivered again 
     await ended.stop()
   }
 })
+
+test('records a failing disk could not save outlive their session in the pi process, and a share saves them', async () => {
+  delta = await recording()
+  const { pi } = delta
+  await pi.prompt('one')
+  await delta.until(async () => (await binding(delta!))?.title && !(await pending(delta!)).length, 'the first turn')
+  // The disk refuses every outbox write: the turn is stopped, and what it said is kept in memory.
+  const disk = delta.disk.fail('write', '/outbox/', { times: Infinity })
+  await delta.whileTimePasses(pi.prompt('kept in memory'))
+  expect(pi.aborts).toBe(1)
+  // The session ends while the disk still fails, so its end cannot save them either.
+  await delta.whileTimePasses(pi.shutdown('quit'))
+  expect(delivered(delta, 'kept in memory')).toBe(false)
+  disk()
+  // Resumed in the same pi process, the session still holds them: capture stays paused until a share
+  // saves and delivers them.
+  await pi.start('resume')
+  expect(await pi.prompt('refused')).toBe('handled')
+  expect(pi.noticeTexts().at(-1)).toContain('local conversation capture is paused')
+  pi.answers.push((dialog) => dialog.options?.find((option) => option.startsWith('Keep current sharing')))
+  await pi.command('delta', 'share')
+  await delta.until(() => delivered(delta!, 'kept in memory'), 'the kept records')
+  await delta.until(async () => !(await pending(delta!)).length, 'the outbox to be delivered')
+  expect(sequences(delta)).toEqual(sequences(delta).map((_, index) => index + 1))
+  await delta.until(() => pi.noticeTexts().some((text) => text.startsWith('Delta: ')), 'the share to finish')
+  expect(await pi.prompt('recorded again')).toBe('settled')
+  await delta.until(() => delivered(delta!, 'Echo: recorded again'), 'the next turn')
+})

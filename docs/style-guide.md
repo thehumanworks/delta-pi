@@ -22,8 +22,8 @@ caller.
 ## State
 
 - Module state is per session runtime (pi re-evaluates modules for each). Only the mount registry, the
-  join contracts, the installer claim and the deliveries under way live on `globalThis`. *ast-grep
-  `global-state-in-registries`.*
+  join contracts, the installer claim, the deliveries under way and unsaved records live on
+  `globalThis`. *ast-grep `global-state-in-registries`.*
 - A module variable lives in the module that changes it. If another module needs to change it, move it
   there, or call a function that does a whole step.
 - `SessionState`, `requests` and `activation` in `session-state.ts` are shared per-session records:

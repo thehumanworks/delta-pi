@@ -43,8 +43,9 @@ session. Across sessions and processes:
   are sent.
 - `globalThis` holds only what must outlive a session switch in the same process: the mount processes
   (`src/cli/delta-cli.ts`), a join's verified contract (`src/sharing/join.ts`), the claim of a running
-  installer (`src/core/installation.ts`) and each session's delivery under way, which a resumed
-  session's waits for (`src/core/session-state.ts`). ast-grep checks it.
+  installer (`src/core/installation.ts`), and each session's delivery under way, which a resumed
+  session's waits for, and the records a failing disk could not save, which a resumed session keeps
+  (`src/core/session-state.ts`). ast-grep checks it.
 
 Within a runtime, `src/core/session-state.ts` holds the per-session record each feature writes
 (`SessionState`), the join and share in flight (`requests`), and `activation`: the session being

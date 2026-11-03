@@ -1,13 +1,13 @@
 id: global-state-in-registries
 language: TypeScript
 severity: error
-message: Only the mount registry, the join contracts, the installation claim and the deliveries under way live on globalThis.
+message: Only the mount registry, the join contracts, the installation claim, the deliveries under way and unsaved records live on globalThis.
 note: |
   Pi evaluates the extension's modules afresh for every session runtime, so module state is per
   session. Only what must outlive a session switch lives on globalThis: the mount processes
   (src/cli/delta-cli.ts), a join's verified contract (src/sharing/join.ts), the installer claim
-  (src/core/installation.ts) and each session's delivery under way (src/core/session-state.ts). Keep
-  other state in the module that changes it.
+  (src/core/installation.ts), and each session's delivery under way and the records it could not save
+  (src/core/session-state.ts). Keep other state in the module that changes it.
 rule:
   pattern: globalThis
 files:
