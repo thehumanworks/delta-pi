@@ -930,11 +930,17 @@ export function recordFromStart(
     const committed = host.session.committed()
     seenMessages = Math.max(seenMessages, committed.length)
     const record = (id: string, message: AgentMessage) => recordMessage(host, message, `${session}:${id}`)
-    for (const { id, message } of turnId === undefined ? committed : committed.slice(0, runStart))
-      await record(id, message)
-    if (turnId !== undefined) {
-      await beginExecution(host, session, turnId)
-      for (const { id, message } of committed.slice(runStart)) await record(id, message)
+    try {
+      for (const { id, message } of turnId === undefined ? committed : committed.slice(0, runStart))
+        await record(id, message)
+      if (turnId !== undefined) {
+        await beginExecution(host, session, turnId)
+        for (const { id, message } of committed.slice(runStart)) await record(id, message)
+      }
+    } catch (error) {
+      // A record that cannot be saved pauses capture, as any failed local write does; the run goes on.
+      await recordCaptureFailure(host, session, error)
+      return
     }
     void drain(host, session).catch((error: unknown) => report(host, error))
     if (turnId !== undefined && runtime.binding?.child) followChildTurn(host, session)

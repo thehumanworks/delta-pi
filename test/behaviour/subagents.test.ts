@@ -458,3 +458,24 @@ test("a subagent whose parent is shared while it runs records its run so far in 
     { external_id: root.pi.session.id },
   ])
 })
+
+test('a subagent that cannot read the session that started it goes on, and records under it once it can', async () => {
+  const root = await unrecorded()
+  const sub = await startDelta({
+    world: root.world,
+    mode: 'print',
+    env: { DELTA_PI_PARENT: root.env.DELTA_PI_PARENT! },
+  })
+  kits.push(sub)
+  await share(root)
+  sub.disk.fail('read', `session_${root.pi.session.id}`, { times: 1 })
+  expect(await sub.pi.prompt('inspect the parser')).toBe('settled')
+  const thread = await root.until(() => childThread(root, idle), "the subagent's finished run")
+  expect(thread.parent).toBe(root.thread()?.thread_id)
+  expect(thread.records.map((record: any) => record.update.sessionUpdate)).toEqual([
+    'state_update',
+    'user_message',
+    'agent_message',
+    'state_update',
+  ])
+})

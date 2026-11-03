@@ -303,12 +303,24 @@ export async function beginSession(host: Host, session: string) {
  */
 export function recordUnderParent(host: Host, session: string, runStart: number): Promise<void> {
   return recordFromStart(host, session, runStart, async () => {
-    const found = await recordedParent(host, stateFor(session).binding)
-    if (!found || activation.session !== session) return false
-    host.ui.debug('The session that started this one records now, so this one records as its subagent.')
-    await beginChild(host, session, found)
-    await activate(host, session)
-    return !!stateFor(session).binding?.child
+    // Recording never fails a turn: a parent that cannot be read now is read again between the next turns.
+    const found = await recordedParent(host, stateFor(session).binding).catch((error: unknown) => {
+      host.ui.debug(`Delta could not read the session that started this one: ${errorText(error)}`)
+      return undefined
+    })
+    if (!found) return false
+    if (activation.session === session) {
+      host.ui.debug('The session that started this one records now, so this one records as its subagent.')
+      try {
+        await beginChild(host, session, found)
+        await activate(host, session)
+      } catch (error) {
+        host.ui.debug(`Delta could not record this session as a subagent: ${errorText(error)}`)
+      }
+    }
+    const adopted = !!stateFor(session).binding?.child
+    if (!adopted) awaitParent(found.link)
+    return adopted
   })
 }
 
