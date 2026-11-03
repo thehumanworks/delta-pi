@@ -381,13 +381,17 @@
     },
     {
       "upstream": "cli/install-update.test.ts > Windows update option failures preserve the CLI error even when update checks work",
-      "status": "missing",
-      "note": "Make --check succeed but --download-only fail as an unknown option; preserve the CLI error, avoid misleading compatibility/manual advice, and do not launch a helper."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > Windows update option failures preserve the CLI error even when update checks work"
+      ],
+      "note": "On a Windows kit, `update --check` reports a release while `update --download-only` fails with clap's unexpected-argument usage text; the answer keeps that text verbatim, gives no compatibility or delta.dev advice, and never starts the helper."
     },
     {
       "upstream": "cli/install-update.test.ts > a Windows installer still running at the deadline is left to finish",
-      "status": "missing",
-      "note": "Hold the helper through ten minutes, verify waiting progress/advice and that return()/termination is not called on the installer. Current updateHost always uses non-Windows and immediate streams."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > a Windows installer still running at the deadline is left to finish"],
+      "note": "The kit's fake helper asks for installer approval and holds; the transcript gets the approval text, the band says 'Waiting for installer approval', and after 10 minutes the answer is the still-running advice while the helper is never stopped. pi's RPC status line is not animated, so upstream's frame-change check is not repeated."
     },
     {
       "upstream": "cli/install-update.test.ts > a ready installer requires a target version, installation capability and its command",
@@ -399,38 +403,47 @@
     },
     {
       "upstream": "cli/install-update.test.ts > a stalled explicit update times out and allows a later retry",
-      "status": "missing",
-      "note": "Hold a streamed update, expire the ten-minute deadline, assert timeout/progress and installation-lock cleanup, then verify another explicit update succeeds."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > a stalled explicit update times out and allows a later retry"],
+      "note": "The fake CLI holds `delta update` mid-download (`world.hold('update install')`); 10 minutes on the clock end it with the timeout answer and clear the band, and a retry after release updates, so the installation claim was released."
     },
     {
       "upstream": "cli/install-update.test.ts > a stalled startup check cannot block prompts or sharing and expires without a late notice",
-      "status": "missing",
-      "note": "Hold the optional update check, exercise prompt/share, expire its ten-second budget, then release it and assert no late release notice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > a stalled startup check cannot block prompts or sharing and expires without a late notice"
+      ],
+      "note": "`update --check` is held while a prompt settles and /delta share publishes; 10 seconds on the clock log the timeout to the debug log, and the late answer, once released, announces nothing."
     },
     {
       "upstream": "cli/install-update.test.ts > an installer the plugin did not ask for is refused and never started",
-      "status": "missing",
-      "note": "Return install_ready on a non-Windows explicit update; assert refusal and that install_argv is never spawned."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > an installer the plugin did not ask for is refused and never started"],
+      "note": "Off Windows, an `install_ready` reply to `delta update` is refused as an unexpected response and the helper it names never runs."
     },
     {
       "upstream": "cli/install-update.test.ts > app-running update failures stay actionable and do not block sharing",
-      "status": "missing",
-      "note": "Return app-running failure and assert quit/retry advice without interrupting sharing."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > app-running update failures stay actionable and do not block sharing"],
+      "note": "A typed app_running envelope: the answer keeps the CLI's 'Quit Delta and retry.' The same failure from the startup check is reported, and /delta share still publishes afterwards."
     },
     {
       "upstream": "cli/install-update.test.ts > app-working update failures stay actionable and do not block sharing",
-      "status": "missing",
-      "note": "Return app_working and verify the extension-specific retry-/delta-update-once-work-finishes copy, no stopping work, and continued sharing."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > app-working update failures stay actionable and do not block sharing"],
+      "note": "A typed app_working envelope: the answer names /delta-update, not the CLI's `delta update` again. The same failure from the startup check is reported, and /delta share still publishes afterwards."
     },
     {
       "upstream": "cli/install-update.test.ts > crash update failures stay actionable and do not block sharing",
-      "status": "missing",
-      "note": "Simulate exit 101 without a typed result, ensure diagnostic exit advice replaces panic/backtrace output and sharing still works."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > crash update failures stay actionable and do not block sharing"],
+      "note": "Exit 101 with a panic on stderr: the answer says Delta exited with code 101 without a result, not the backtrace. The same failure from the startup check is reported, and /delta share still publishes afterwards."
     },
     {
       "upstream": "cli/install-update.test.ts > delta explicitly updates with its telemetry command form",
-      "status": "missing",
-      "note": "Add /delta update command-routing coverage asserting delta_subcommand telemetry, progress replacement, final answer, and cleared progress. The existing update test passes dedicated_command directly."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > delta explicitly updates with its telemetry command form"],
+      "note": "`/delta update` through pi's command router: the band shows the CLI's latest progress event in place (45%, not 25%), the transcript only says it started, the answer reports the update, the band clears, and the CLI run carries DELTA_CLI_COMMAND_FORM=delta_subcommand. The same test runs /delta-update with dedicated_command."
     },
     {
       "upstream": "cli/install-update.test.ts > delta-update explicitly updates with its telemetry command form",
@@ -443,23 +456,29 @@
     },
     {
       "upstream": "cli/install-update.test.ts > malformed update failures stay actionable and do not block sharing",
-      "status": "missing",
-      "note": "Return malformed update stdout, assert manual-install advice and continued sharing rather than a crash or raw stack."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > malformed update failures stay actionable and do not block sharing"],
+      "note": "A `{}` reply: the answer points to delta.dev to update by hand. The same failure from the startup check is reported, and /delta share still publishes afterwards."
     },
     {
       "upstream": "cli/install-update.test.ts > network update failures stay actionable and do not block sharing",
-      "status": "missing",
-      "note": "Return the typed network failure and assert actionable network advice plus successful sharing afterward."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > network update failures stay actionable and do not block sharing"],
+      "note": "A typed network_error envelope: the answer keeps 'Check network access.' The same failure from the startup check is reported, and /delta share still publishes afterwards."
     },
     {
       "upstream": "cli/install-update.test.ts > old-cli update failures stay actionable and do not block sharing",
-      "status": "missing",
-      "note": "Simulate unrecognized update subcommand, preserve CLI advice, ensure optional check/explicit update failures do not prevent sharing."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > old-cli update failures stay actionable and do not block sharing"],
+      "note": "An old CLI's \"unrecognized subcommand 'update'\": the startup check says so in the transcript and the answer keeps the CLI's text. The same failure from the startup check is reported, and /delta share still publishes afterwards."
     },
     {
       "upstream": "cli/install-update.test.ts > on Windows the plugin runs the installer once the CLI exits and reports each outcome",
-      "status": "missing",
-      "note": "Use a Windows UpdateHost to assert --download-only, helper starts after CLI exit, installed/restart/refusal/crash/missing-restart outcomes, and approval notices."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > on Windows the plugin runs the installer once the CLI exits and reports each outcome"
+      ],
+      "note": "With the kit's `windows` platform, `where.exe` finding C:\\Delta\\bin\\delta.exe and a fake update helper: each of installed, restart, refused (app_running), crash and unsaid gets its answer, every run is `update --download-only` then the helper started after the CLI exited, and the three helpers that started asked for approval once each."
     },
     {
       "upstream": "cli/install-update.test.ts > progress events are read by schema; other lines and unknown events are not progress",
@@ -471,13 +490,15 @@
     },
     {
       "upstream": "cli/install-update.test.ts > read-only checks reject install_ready",
-      "status": "missing",
-      "note": "Return install_ready from --check and assert rejection, no helper launch, and no installation/release notice."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > read-only checks reject install_ready"],
+      "note": "An `install_ready` reply to the startup `update --check` is logged as an unexpected installation change, announces nothing and starts no helper."
     },
     {
       "upstream": "cli/install-update.test.ts > read-only checks reject updated",
-      "status": "missing",
-      "note": "Return an updated receipt from --check and assert a debug refusal rather than an installation-success/release notice."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > read-only checks reject updated"],
+      "note": "An `updated` reply to the startup `update --check` is logged as an unexpected installation change and announces nothing."
     },
     {
       "upstream": "cli/install-update.test.ts > startup checks once, read-only, and notifies without changing sync state",
@@ -489,8 +510,11 @@
     },
     {
       "upstream": "cli/install-update.test.ts > unsupported preserves manual installation advice without offering an unsupported command",
-      "status": "missing",
-      "note": "Use unsupported/can_install=false and verify package-manager/manual advice in both startup notice and explicit command result."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > unsupported preserves manual installation advice without offering an unsupported command"
+      ],
+      "note": "`unsupported` with can_install false: the startup notice is 'Delta update check: <CLI message>' once, and /delta update answers 'Delta cannot update this installation: <message>'."
     },
     {
       "upstream": "cli/install-update.test.ts > update replies require the negotiated schema and typed version fields",
@@ -500,8 +524,11 @@
     },
     {
       "upstream": "cli/install-update.test.ts > update_available preserves manual installation advice without offering an unsupported command",
-      "status": "missing",
-      "note": "Use can_install=false/update_available and verify startup and explicit-update answers retain the CLI's manual-install advice rather than offering /delta-update as an automatic solution."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > update_available preserves manual installation advice without offering an unsupported command"
+      ],
+      "note": "`update_available` with can_install false: the startup notice carries the CLI's manual advice instead of offering /delta-update, and /delta update answers 'Delta was not updated: <message>'."
     },
     {
       "upstream": "cli/thread-commands.test.ts > failure classification > codes survive status decoding, append envelopes, and unavailable inspection",
@@ -700,28 +727,43 @@
     },
     {
       "upstream": "plugin-update/catalog.test.ts > installation selection follows scope and project, and recognizes a native update of the running cached copy",
-      "status": "missing",
-      "note": "The local sourceAt test covers simple exact-root matching and rejecting a local source only. Adapted project/user selection, cwd changes, filtered installations and already-installed newer versions are not tested. Claude's versioned cache-directory details should be replaced with pi installation semantics."
+      "status": "ported",
+      "ours": [
+        "test/updates.test.ts > installation selection follows scope and project, and recognizes a native update of the running cached copy"
+      ],
+      "note": "Adapted to `pi list`: the source is the npm entry installed where this copy runs, under User or Project packages; nested paths, other paths, local and git sources are not selected; Windows separators and a colored listing match; a newer version pi installed in place is offered as a reload without a request; another package at this path is left alone."
     },
     {
       "upstream": "plugin-update/catalog.test.ts > native update results must identify the operation and success, and the last line carries JSON",
-      "status": "not-applicable",
-      "note": "The exact contract is Claude's --json command/outcome/pluginId envelope. Pi update does not return that envelope. Adapted tests must still verify actual installed versions rather than equating exit 0 with installation."
+      "status": "covered",
+      "ours": [
+        "test/updates.test.ts > a successful pi exit without a newer installed version is not an update or a reload",
+        "test/updates.test.ts > update verification reports the actual installed version, not the advertised version",
+        "test/behaviour/updates.test.ts > plugin updates > installation failure never reloads, and a surviving watchdog reports a thrown reload failure"
+      ],
+      "note": "`pi update` prints text, not Claude's --json command/outcome/pluginId envelope, so its exit is never taken as success: a nonzero exit is the failure, and a zero exit is verified by listing pi's packages again and reading the installed version."
     },
     {
       "upstream": "plugin-update/catalog.test.ts > only the named plugin with a valid version is a release",
-      "status": "missing",
-      "note": "Port to npm manifest validation: malformed JSON/object, foreign identity and unsupported/malformed version must not become a release. No latestVersion validation tests exist; the implementation currently only requires a string version."
+      "status": "ported",
+      "ours": ["test/updates.test.ts > only the named plugin with a valid version is a release"],
+      "note": "npm in place of plugin.json: null, {}, another package's manifest, a numeric version and HTML are refused from the registry and from the package.json on disk, and anything but versions from `npm view`; none becomes a release."
     },
     {
       "upstream": "plugin-update/catalog.test.ts > persisted throttles expire, survive clock changes, and snooze only the announced release",
-      "status": "missing",
-      "note": "Needs fake-clock/cache tests for expiry, backward clocks, malformed persisted state and release-scoped snooze. None exists; rollback behavior is demonstrably wrong and snoozing is absent."
+      "status": "ported",
+      "ours": [
+        "test/updates.test.ts > persisted throttles expire, survive clock changes, and snooze only the announced release"
+      ],
+      "note": "Same assertions on the ported `recentlyChecked`, `checkFrom`, `answersFor` and `reminderIsSnoozed`, with pi's source (npm source and user/project scope) in place of the marketplace target: a user installation's check holds in every project, a project's only in its own."
     },
     {
       "upstream": "plugin-update/catalog.test.ts > release checks accept our Git marketplace on main or develop, not same-name substitutes or pins",
-      "status": "not-applicable",
-      "note": "Depends on Claude's registered marketplace sources, Git branch channels and plugin.json URL. README replaces that mechanism with npm. Equivalent npm pin/range/tag safety is still missing and is reported separately."
+      "status": "covered",
+      "ours": [
+        "test/updates.test.ts > release checks follow the npm source pi installed, its tag or range, and leave pins, other packages and other sources alone"
+      ],
+      "note": "pi installs from npm, not a Git marketplace: an untagged source checks the registry's latest, a tag or range asks `npm view`, exact pins (prerelease and build included) make no request, and another package, a git source or a local path at this copy's path is left alone."
     },
     {
       "upstream": "plugin-update/catalog.test.ts > versions compare numerically, and an unknown version has no order",
@@ -1151,142 +1193,204 @@
     {
       "upstream": "register.test.ts > plugin updates > Desktop attachment triggers production discovery after startup saw no surface",
       "status": "not-applicable",
-      "note": "Depends on Claude session.attach and late Desktop surfaces. Pi exposes no corresponding Desktop attachment event; the extension initializes per runtime/session_start."
+      "note": "pi fixes whether a runtime has a UI (ExtensionContext.hasUI) when its session starts and has no event for a client attaching later, so there is no late surface to start discovery for."
     },
     {
       "upstream": "register.test.ts > plugin updates > Desktop installation waits for host activation and offers restart guidance when it does not happen",
       "status": "not-applicable",
-      "note": "Depends on Claude Desktop's optional activation watcher, lack of an interactive reload command and Details button. Pi uses command-context reload directly."
+      "note": "pi has no Desktop host that installs and activates a plugin itself: the command reloads through ctx.reload(), which it awaits, and a refused or failed reload is reported at once (see 'an ordinary reload refusal response is not reported as successful activation')."
     },
     {
       "upstream": "register.test.ts > plugin updates > a failed check preserves a known release and an existing notice",
-      "status": "missing",
-      "note": "Discover a release, fail the next registry check, and assert the saved release and notice remain. No lifecycle test exercises this behavior."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > a failed check preserves a known release and an existing notice"
+      ],
+      "note": "After the first check shows 0.2.0, the registry answers 503 at the next hourly check; the stored check keeps 0.2.0 and the band keeps the notice."
     },
     {
       "upstream": "register.test.ts > plugin updates > a failure explanation keeps its row before the optional update notice",
-      "status": "not-applicable",
-      "note": "Tests allocation of Claude AbovePrompt.props.maxRows between detail and optional update rows. Pi setWidget supplies no analogous maxRows/survey budget. Adapter tests should instead ensure details are not lost in actual widget/plain status output."
+      "status": "covered",
+      "ours": ["test/band.test.ts > a failure keeps its explanation in the band, above the update notice"],
+      "note": "pi's widget has no row budget to share, so nothing is dropped: a failure's explanation stays in the widget above the update notice at 40, 80 and 120 columns, and the RPC status line keeps both."
     },
     {
       "upstream": "register.test.ts > plugin updates > a missing standalone Claude CLI has actionable advice and leaves background discovery quiet",
-      "status": "missing",
-      "note": "Replace claude with the pi executable. Test ENOENT/nonzero listing failures, debug-only background reporting and useful manual-command output."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > a missing standalone Claude CLI has actionable advice and leaves background discovery quiet"
+      ],
+      "note": "The pi command in place of claude: with `pi` missing from PATH (ENOENT), background discovery logs the advice to the debug log only, and /delta-plugin-update answers how to make pi available on PATH, without updating."
     },
     {
       "upstream": "register.test.ts > plugin updates > a native download is offered as a reload, without network access or another installation",
-      "status": "missing",
-      "note": "Adapt to a newer npm package already installed by another pi process while this runtime still runs the older version. Test reload-only activation without registry access or pi update; implementation currently lacks this path."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > a native download is offered as a reload, without network access or another installation"
+      ],
+      "note": "Another pi process installed 0.2.0 where this copy runs (the kit puts it in package.json) while the registry fails: the notice offers a reload, the announcement says it is installed and ready, and /delta-plugin-update reloads with no request and no `pi update`."
     },
     {
       "upstream": "register.test.ts > plugin updates > a plugin install and its queued reload prevent a concurrent app installation",
-      "status": "missing",
-      "note": "Hold pi update/reload pending and assert app installation is excluded until the activation operation releases ownership. No updater lock integration test exists."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > a plugin install and its queued reload prevent a concurrent app installation"
+      ],
+      "note": "`pi update` and then the reload are held; /delta update and /delta-update are refused throughout and no app update runs; once pi has reloaded the extension, /delta update installs."
     },
     {
       "upstream": "register.test.ts > plugin updates > a slow check times out, cannot install or notify late, and never overlaps its own timer",
-      "status": "missing",
-      "note": "Use a deferred fetch/timeout signal and fake clock to assert bounded discovery, no late publication, no automatic install and no duplicate observer. No lifecycle coverage exists."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > a slow check times out, cannot install or notify late, and never overlaps its own timer"
+      ],
+      "note": "A held registry request does not hold up a prompt, times out after 10 seconds on the session's clock (debug only), a new session within the hour starts no second request, and the late answer announces nothing and installs nothing."
     },
     {
       "upstream": "register.test.ts > plugin updates > a visible notice follows a native download and stays out of the way of a running turn or survey",
-      "status": "missing",
-      "note": "Test the applicable pi behaviors: notice changes when an installation becomes activation-ready and update/reload is not attempted during a running turn or conflicting operation. Claude's native survey/maxRows/button details do not apply."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > a visible notice follows a native download and stays out of the way of a running turn or survey"
+      ],
+      "note": "The notice changes from available to a reload once 0.2.0 appears on disk at the next hourly check (no second request); it gives way while a turn runs, where /delta-plugin-update refuses to reload, and returns when the turn ends. Claude's survey and row budget have no pi equivalent."
     },
     {
       "upstream": "register.test.ts > plugin updates > an app installation hides the update row and prevents plugin installation or reload",
-      "status": "missing",
-      "note": "Test the shared app/plugin installation lock and no reload during an app install. Native interactive button hiding can be adapted to pi's read-only notice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > an app installation hides the update row and prevents plugin installation or reload"
+      ],
+      "note": "While /delta update is held mid-download the band drops the extension notice and /delta plugin-update is refused without running `pi update`; when the app update ends the notice returns and the extension update installs and reloads."
     },
     {
       "upstream": "register.test.ts > plugin updates > an ordinary reload refusal response is not reported as successful activation",
-      "status": "missing",
-      "note": "Adapt for pi: TUI reload can return without reloading while streaming/compacting, although its API returns void instead of Claude's refusal text. Test busy-state refusal and truthful activation behavior."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > an ordinary reload refusal response is not reported as successful activation"
+      ],
+      "note": "pi's terminal returns from ctx.reload() without reloading while it compacts; the kit's `nextReload = 'refuse'` does the same, and the extension says the update is not active yet and restores the reload notice instead of claiming activation."
     },
     {
       "upstream": "register.test.ts > plugin updates > an unsuccessful marketplace refresh never installs a stale cached release",
       "status": "not-applicable",
-      "note": "Depends on Claude's separately refreshed marketplace catalog before plugin install. Pi's npm update mechanism has no corresponding marketplace-refresh operation. Registry/update failures still need the tests listed above."
+      "note": "pi's `pi update <source>` resolves npm itself and has no separate catalog refresh a stale cache could survive; a failing `pi update` is covered by 'installation failure never reloads, and a surviving watchdog reports a thrown reload failure'."
     },
     {
       "upstream": "register.test.ts > plugin updates > background checking leaves development sessions alone",
-      "status": "missing",
-      "note": "sourceAt's local-path rejection is partially covered, but no startup/command test asserts a local/git copy performs no registry/install work and returns the explanatory manual answer."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > background checking leaves development sessions alone"
+      ],
+      "note": "This copy runs from a checkout while pi's npm installation of the package is elsewhere: background discovery lists pi's packages but makes no request, and /delta-plugin-update says pi leaves this copy as it is."
     },
     {
       "upstream": "register.test.ts > plugin updates > background checking leaves headless sessions alone",
-      "status": "missing",
-      "note": "Call startPluginUpdates with a noninteractive host and assert no subprocess, fetch, timer or install. Existing print-mode recording e2e does not assert updater traffic."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > plugin updates > background checking leaves headless sessions alone"],
+      "note": "Print mode (no UI): no `pi list`, no registry request, no `pi update`."
     },
     {
       "upstream": "register.test.ts > plugin updates > background checking leaves network disabled sessions alone",
-      "status": "missing",
-      "note": "Adapt CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC to PI_OFFLINE and test any nonempty value, including '0', prevents background checks."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > background checking leaves network disabled sessions alone"
+      ],
+      "note": "PI_OFFLINE in place of CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, set to '0' as any nonempty value counts: no `pi list`, no request, no `pi update`."
     },
     {
       "upstream": "register.test.ts > plugin updates > concurrent explicit requests install once, and a directory transition suppresses the old reload",
-      "status": "missing",
-      "note": "Hold installation, start another request, replace/change session cwd, then resolve. Assert a single install, proper lock release and no stale reload. No command-concurrency or freshness tests exist."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > concurrent explicit requests install once, and a directory transition suppresses the old reload"
+      ],
+      "note": "A second /delta plugin-update during a held `pi update` is refused; pi then opens a new session in another directory, and the first command's update finishes without reloading the new session; `pi update` ran once."
     },
     {
       "upstream": "register.test.ts > plugin updates > delta updates at the installed scope and reloads immediately without a question",
-      "status": "missing",
-      "note": "Exercise /delta plugin-update through the real command router with a selected npm installation, captured cwd, no dialogs, successful verified update and reload. Menu action selection alone does not cover execution."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > delta updates at the installed scope and reloads immediately without a question"
+      ],
+      "note": "/delta plugin-update with notifications off runs `pi update <the source pi lists>` in the session's directory (pi updates every scope that lists it) and reloads with no dialog. Unlike upstream, the command first asks the registry whether a newer release exists, its one request; background discovery made none."
     },
     {
       "upstream": "register.test.ts > plugin updates > delta-plugin-update updates at the installed scope and reloads immediately without a question",
-      "status": "missing",
-      "note": "Exercise the dedicated /delta-plugin-update alias end to end, ensuring it uses the same npm update/verification/reload path and honors notification opt-out for discovery."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > delta-plugin-update updates at the installed scope and reloads immediately without a question"
+      ],
+      "note": "/delta-plugin-update with notifications off runs `pi update <the source pi lists>` in the session's directory (pi updates every scope that lists it) and reloads with no dialog. Unlike upstream, the command first asks the registry whether a newer release exists, its one request; background discovery made none."
     },
     {
       "upstream": "register.test.ts > plugin updates > ending the old session cancels activation advice",
       "status": "not-applicable",
-      "note": "Specifically tests the Claude Desktop/reload-plugins activation-advice watchdog, which pi's direct reload path does not implement. General background-check teardown remains applicable and missing below."
+      "note": "There is no activation watchdog to cancel: pi's ctx.reload() is awaited inside the command, which reports a refused reload before it returns. Ending a session during an update is covered by 'concurrent explicit requests install once, and a directory transition suppresses the old reload'."
     },
     {
       "upstream": "register.test.ts > plugin updates > ending the session or opting out invalidates an in-flight notice",
-      "status": "missing",
-      "note": "Hold registry discovery, stop the runtime or disable notices, then resolve it and advance an hour. Assert no notice and no new timer; the executable audit probe demonstrates the current failure."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > ending the session or opting out invalidates an in-flight notice"
+      ],
+      "note": "A held registry check survives `notifications off` and the session ending (a new session); once released it announces nothing, and an hour later no request is made."
     },
     {
       "upstream": "register.test.ts > plugin updates > failed discovery stays quiet and remains throttled",
-      "status": "missing",
-      "note": "Test failed registry/listing discovery remains debug-only, does not block prompting/install, and is throttled across new runtimes. The latter is currently broken."
+      "status": "ported",
+      "ours": ["test/behaviour/updates.test.ts > plugin updates > failed discovery stays quiet and remains throttled"],
+      "note": "A 503 from the registry is logged once to the debug log, never the transcript; a prompt still settles, and a new session within the hour makes no second request."
     },
     {
       "upstream": "register.test.ts > plugin updates > installation failure never reloads, and a surviving watchdog reports a thrown reload failure",
-      "status": "missing",
-      "note": "Adapt the applicable parts to pi: nonzero/rejected update must not reload, reload rejection must produce useful output, and installation ownership must be released. Claude watchdog response text itself is not applicable."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > installation failure never reloads, and a surviving watchdog reports a thrown reload failure"
+      ],
+      "note": "A failing `pi update` answers with its stderr and never reloads; a reload that throws is reported with its error as not active yet, and the installation claim is released so a retry reloads. No watchdog: the reload is awaited."
     },
     {
       "upstream": "register.test.ts > plugin updates > notification opt-out persists and stops background requests, while manual check and re-enabling work",
-      "status": "missing",
-      "note": "Test persisted off across runtimes, no background requests, manual check without persistent notice, and immediate cache-aware refresh on enabling. No such test exists."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > notification opt-out persists and stops background requests, while manual check and re-enabling work"
+      ],
+      "note": "/delta-plugin-update notifications off (the Mute button) stores the opt-out, hides the notice and stops hourly and new-session requests; check still reports the release without installing; notifications on stores it and reuses that check's result."
     },
     {
       "upstream": "register.test.ts > plugin updates > pressing Update installs and reloads through the command",
-      "status": "not-applicable",
-      "note": "Pi's band has no Update button and directs users to /delta-plugin-update. Command execution coverage is missing in the two preceding entries."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > delta-plugin-update updates at the installed scope and reloads immediately without a question",
+        "test/behaviour/updates.test.ts > plugin updates > a native download is offered as a reload, without network access or another installation"
+      ],
+      "note": "pi's band is text and has no Update button; it names /delta-plugin-update, which installs and reloads, after which the notice is gone."
     },
     {
       "upstream": "register.test.ts > plugin updates > startup and hourly checks notify without installing, and reminders survive another session",
-      "status": "missing",
-      "note": "Needs startup/hourly fake-clock checks, cross-runtime cached reuse, no automatic installation and the chosen pi notice/reminder semantics. Only pure updater helper tests exist."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > startup and hourly checks notify without installing, and reminders survive another session"
+      ],
+      "note": "Startup makes one registry request, announces 0.2.0 once in the transcript and shows the band notice without installing; the hourly check requests again without announcing again; a new session within the hour reuses the check (no `pi list`, no request) and does not repeat the notice announced that day."
     },
     {
       "upstream": "register.test.ts > plugin updates > the first command after clear restarts update checks without classic.SessionStart",
       "status": "not-applicable",
-      "note": "Compensates for a Claude /clear lifecycle that omits classic.SessionStart. Pi session replacement emits session_shutdown/session_start and recreates the extension runtime, so command-based recovery of that missing host hook is unnecessary."
+      "note": "pi raises session_start for every new or resumed session and loads the extension afresh for it, so no command has to restart checks a missing start hook left stopped; a new session's checks are exercised in 'startup and hourly checks notify without installing, and reminders survive another session'."
     },
     {
       "upstream": "register.test.ts > plugin updates > the notice snoozes for a day, but a newer release gets its own notice",
-      "status": "missing",
-      "note": "Provide a pi equivalent of Later, then test release-specific 24-hour dismissal, expiry and a new version bypassing the old snooze. Implementation is absent."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > plugin updates > the notice snoozes for a day, but a newer release gets its own notice"
+      ],
+      "note": "/delta-plugin-update later (the Later button) hides the notice through the next hourly check; 0.3.0 gets its own notice; snoozed too, it returns after a day; nothing installs."
     },
     {
       "upstream": "register.test.ts > plugin updates > the status band contains a single colored update row with visible button chrome",
-      "status": "not-applicable",
-      "note": "Its concrete assertions concern Claude's shaded Box tree, native Update/Later/Mute Button chrome and Desktop surface. Pi deliberately renders a text notice with a command; that adapted rendering has no direct test."
+      "status": "covered",
+      "ours": ["test/band.test.ts > the update notice is one colored row under the band that fits every width"],
+      "note": "pi's band draws the notice as one accent-colored text row naming /delta-plugin-update, last under the band or alone, fitting every width from 10 to 120 columns; Claude's Box tree and Button chrome have no pi equivalent."
     },
     {
       "upstream": "register.test.ts > recording > a call recorded before its input row names itself, and plan approvals record nothing",
@@ -1679,13 +1783,19 @@
     },
     {
       "upstream": "register.test.ts > startup and commands > an unsupported host warns in the transcript without preventing startup or commands",
-      "status": "missing",
-      "note": "test/compatibility.test.ts checks the pi warning function, but no startup integration injects an unsupported version and verifies both the warning and continued command operation."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > startup and commands > an unsupported host warns in the transcript without preventing startup or commands"
+      ],
+      "note": "pi's VERSION is mocked to 1.3.9: the session starts with piVersionWarning in the transcript, and /delta help still answers with the usage."
     },
     {
       "upstream": "register.test.ts > startup and commands > each menu command runs its /delta form, and both forms keep working",
-      "status": "missing",
-      "note": "E2Es use both forms for different operations, and pure menu tests map choices, but no test compares dedicated/subcommand forms, their headless own-format usage, repeated shares, and dedicated_command versus delta_subcommand telemetry."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/updates.test.ts > startup and commands > each menu command runs its /delta form, and both forms keep working"
+      ],
+      "note": "Headless is print mode: /delta-org current and /delta-setup say what /delta org current and /delta setup say, and bare /delta-join and /delta-org give their own usage. Interactively /delta-share then /delta share both publish the session's link, and only `thread share` carries the command form, dedicated_command then delta_subcommand."
     },
     {
       "upstream": "register.test.ts > the recording contract > a CLI newer than this plugin asks the person to update the plugin",

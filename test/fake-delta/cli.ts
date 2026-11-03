@@ -121,6 +121,14 @@ function takeAnswer(args: string[], io: FakeIo): FakeAnswer | undefined {
   return value
 }
 
+/** The install helper a Windows `delta update --download-only` hands back, before the version it installs. */
+export const UPDATE_HELPER_ARGV = [
+  'C:\\Updates\\cli-update-1\\delta-update-helper.exe',
+  '--internal-windows-update-install',
+  'C:\\Delta\\delta-app.exe',
+  'C:\\Updates\\cli-update-1',
+]
+
 /** Ends a run of the fake with an exit code. */
 class Exit extends Error {
   code: number
@@ -388,16 +396,55 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       break
     case 'update --check':
     case 'update':
-      out({
-        schema_version: 1,
-        status: 'up_to_date',
-        current_version: '0.23.0',
-        latest_version: '0.23.0',
-        channel: 'stable',
-        message: '',
-        can_install: false,
-      })
+    case 'update --download-only': {
+      // Delta 0.23.0 is installed; a test offers a newer release with `world.release`.
+      const releasePath = join(root, 'release.json')
+      const latest = existsSync(releasePath) ? (JSON.parse(readFileSync(releasePath, 'utf8')) as string) : undefined
+      const result = (status: string) =>
+        out({
+          schema_version: 1,
+          status,
+          current_version: '0.23.0',
+          latest_version: latest ?? '0.23.0',
+          channel: 'stable',
+          message: '',
+          can_install: latest !== undefined,
+          ...(status === 'install_ready' ? { install_argv: [...UPDATE_HELPER_ARGV, latest] } : {}),
+        })
+      if (command === '--check') {
+        result(latest ? 'update_available' : 'up_to_date')
+        break
+      }
+      // An update reports each step on stderr as it goes, an event sometimes in pieces.
+      const progress = (fields: Record<string, unknown>) =>
+        `${JSON.stringify({ schema_version: 1, type: 'progress', ...fields })}\n`
+      io.write('stderr', progress({ phase: 'checking' }))
+      if (!latest) {
+        result('up_to_date')
+        break
+      }
+      const downloading = progress({ phase: 'downloading', version: latest, percent: 25 })
+      io.write('stderr', downloading.slice(0, 20))
+      io.write('stderr', downloading.slice(20))
+      io.write('stderr', progress({ phase: 'downloading', version: latest, percent: 45 }))
+      // `world.hold('update install')` holds it here, mid-download; stopped meanwhile, it changes nothing.
+      const holdingInstall = join(root, 'hold-update-install')
+      if (reached(holdingInstall)) {
+        let stopped = false
+        const released = (async () => {
+          while (existsSync(holdingInstall) && !stopped) await new Promise((resolve) => setTimeout(resolve, 20))
+        })()
+        await io.hold(() => (stopped = true), undefined, released)
+        if (stopped) throw new Exit(143)
+      }
+      // Windows leaves installing to the helper it hands back; elsewhere the CLI installs the release.
+      if (command === '--download-only') result('install_ready')
+      else {
+        rmSync(releasePath, { force: true })
+        result('updated')
+      }
       break
+    }
     case 'thread create': {
       const source = option(rest, '--source')
       const external = option(rest, '--external-id')

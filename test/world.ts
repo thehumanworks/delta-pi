@@ -158,6 +158,10 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     stopAnswering(command: string) {
       rmSync(join(state, `answer-${command.replaceAll(' ', '-')}`), { force: true })
     },
+    /** Offer Delta `version` as a newer release: `update --check` reports it, and `update` installs it. */
+    release(version: string) {
+      writeFileSync(join(state, 'release.json'), JSON.stringify(version))
+    },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
@@ -183,6 +187,7 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     /**
      * Hold the runs of `command` after the first `after` until the returned function releases them. An
      * `answer` set before the release answers a held run instead, as a sign-in that ends another way does.
+     * `update install` holds an explicit `update` mid-download, once it has reported its progress.
      */
     hold(command: string, { after = 0 } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)

@@ -373,6 +373,8 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
     runStart = host.session.committed().length
     await startTurn(host)
+    // The band's update notice gives way while the run goes on.
+    host.ui.invalidate()
   })
 
   // A subagent whose parent is shared while it runs records from its next turn's end.
@@ -400,6 +402,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       .findLast(({ message }) => message.role === 'assistant')?.message
     const stop = turnStopReason(event.aborted, reply?.role === 'assistant' ? reply.stopReason : undefined)
     await completeTurn(host, stop)
+    host.ui.invalidate()
     // pi may have switched sessions meanwhile, which makes ctx stale; the title is the session's own.
     if (context === ctx) await recordTitle(host, session)
   })
