@@ -224,56 +224,56 @@ test('a share that fails before the watcher restarts leaves prompts accepted', a
   )
 })
 
-for (const patch of [{ reference: ' ' }])
-  test(`invalid attachment receipt ${JSON.stringify(patch)} keeps the binding and outbox`, async () => {
-    delta = await startDelta({ policy: MANUAL })
-    const { pi } = delta
-    await pi.prompt('one')
-    delta.world.answer('worktree attach', { patch })
-    expect(await share(delta)).toContain('Invalid worktree membership receipt')
-    const saved = await binding(delta)
-    expect(saved.thread).toBe(delta.thread().thread_id)
-    expect(saved.checkout).toBeUndefined()
-    const sequences = await staged(delta)
-    expect(sequences).toEqual(sequences.map((_, index) => index + 1))
-    expect(delta.thread().url).toBeNull()
-    expect(ran(delta)).not.toContain('thread share')
-    expect(records(delta)).toEqual([])
-    const messages = pi.messages().length
-    expect(await pi.prompt('unsafe receipt')).toBe('handled')
-    expect(pi.messages()).toHaveLength(messages)
-    expect(await share(delta)).toBe(delta.thread().url)
-    expect(checkouts(delta)).toMatchObject([{ directory: delta.world.checkout, state: 'mounted' }])
-    expect(await binding(delta)).toMatchObject({ checkout: delta.world.checkout, pending: [] })
-    expect(exports(delta)).toBe(1)
-    expect(records(delta).map((record) => record.sequence)).toEqual(sequences)
-  })
+test('invalid attachment receipt {"reference":" "} keeps the binding and outbox', async () => {
+  const patch = { reference: ' ' }
+  delta = await startDelta({ policy: MANUAL })
+  const { pi } = delta
+  await pi.prompt('one')
+  delta.world.answer('worktree attach', { patch })
+  expect(await share(delta)).toContain('Invalid worktree membership receipt')
+  const saved = await binding(delta)
+  expect(saved.thread).toBe(delta.thread().thread_id)
+  expect(saved.checkout).toBeUndefined()
+  const sequences = await staged(delta)
+  expect(sequences).toEqual(sequences.map((_, index) => index + 1))
+  expect(delta.thread().url).toBeNull()
+  expect(ran(delta)).not.toContain('thread share')
+  expect(records(delta)).toEqual([])
+  const messages = pi.messages().length
+  expect(await pi.prompt('unsafe receipt')).toBe('handled')
+  expect(pi.messages()).toHaveLength(messages)
+  expect(await share(delta)).toBe(delta.thread().url)
+  expect(checkouts(delta)).toMatchObject([{ directory: delta.world.checkout, state: 'mounted' }])
+  expect(await binding(delta)).toMatchObject({ checkout: delta.world.checkout, pending: [] })
+  expect(exports(delta)).toBe(1)
+  expect(records(delta).map((record) => record.sequence)).toEqual(sequences)
+})
 
-for (const patch of [{ thread_id: 'other-thread' }])
-  test(`invalid publication receipt ${JSON.stringify(patch)} preserves setup and staged records`, async () => {
-    delta = await startDelta({ policy: MANUAL })
-    await delta.pi.prompt('one')
-    delta.world.answer('thread share', { patch })
-    expect(await share(delta)).toContain('Invalid publication receipt')
-    const saved = await binding(delta)
-    const sequences = await staged(delta)
-    expect(saved).toMatchObject({
-      thread: delta.thread().thread_id,
-      checkout: delta.world.checkout,
-      snapshot: true,
-      next: sequences.length + 1,
-    })
-    expect(saved.url).toBeUndefined()
-    expect(sequences).toEqual(sequences.map((_, index) => index + 1))
-    // Delta published the thread; only its receipt was wrong.
-    expect(delta.thread().url).toBeTruthy()
-    const mounted = checkouts(delta)
-    expect(records(delta)).toEqual([])
-    const url = await share(delta)
-    expect(url).toBe(delta.thread().url)
-    expect(checkouts(delta)).toEqual(mounted)
-    expect(await binding(delta)).toMatchObject({ thread: delta.thread().thread_id, url, pending: [] })
-    expect(records(delta)[0]).toMatchObject({ sequence: 1, update: { content: [{ text: 'one' }] } })
-    expect(records(delta).map((record) => record.sequence)).toEqual(sequences)
-    expect(exports(delta)).toBe(1)
+test('invalid publication receipt {"thread_id":"other-thread"} preserves setup and staged records', async () => {
+  const patch = { thread_id: 'other-thread' }
+  delta = await startDelta({ policy: MANUAL })
+  await delta.pi.prompt('one')
+  delta.world.answer('thread share', { patch })
+  expect(await share(delta)).toContain('Invalid publication receipt')
+  const saved = await binding(delta)
+  const sequences = await staged(delta)
+  expect(saved).toMatchObject({
+    thread: delta.thread().thread_id,
+    checkout: delta.world.checkout,
+    snapshot: true,
+    next: sequences.length + 1,
   })
+  expect(saved.url).toBeUndefined()
+  expect(sequences).toEqual(sequences.map((_, index) => index + 1))
+  // Delta published the thread; only its receipt was wrong.
+  expect(delta.thread().url).toBeTruthy()
+  const mounted = checkouts(delta)
+  expect(records(delta)).toEqual([])
+  const url = await share(delta)
+  expect(url).toBe(delta.thread().url)
+  expect(checkouts(delta)).toEqual(mounted)
+  expect(await binding(delta)).toMatchObject({ thread: delta.thread().thread_id, url, pending: [] })
+  expect(records(delta)[0]).toMatchObject({ sequence: 1, update: { content: [{ text: 'one' }] } })
+  expect(records(delta).map((record) => record.sequence)).toEqual(sequences)
+  expect(exports(delta)).toBe(1)
+})
