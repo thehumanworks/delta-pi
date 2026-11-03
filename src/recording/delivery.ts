@@ -51,6 +51,7 @@ import {
 import { activationIncomplete, captureDecided, outbox } from '../setup/activation.ts'
 import { notifyOnce } from '../setup/interaction.ts'
 import {
+  CHILD_TAKEOVER,
   childFields,
   childNeedsSetup,
   ensureChildThread,
@@ -352,9 +353,12 @@ async function drainPending(host: Host, session: string): Promise<boolean> {
     // on the stop, so a slow or failed abort cannot hold up the outbox.
     const running = binding.execution?.sequence
     if (running !== undefined && fenced.includes(running))
-      void loseExecution(host, session, running, 'Shared execution was superseded').catch((error: unknown) =>
-        report(host, error),
-      )
+      void loseExecution(
+        host,
+        session,
+        running,
+        binding.child ? CHILD_TAKEOVER : 'Shared execution was superseded',
+      ).catch((error: unknown) => report(host, error))
     if (failure) throw failure
   }
   return false
@@ -607,9 +611,13 @@ function failDelivery(host: Host, session: string, error: unknown): never {
   // and the band offers the person Fork & Restore or Discard instead of advice to repair a cause.
   const refused = error.code === 'reload_required' && recordsOffline(session, state.binding)
   if (refused) state.refusedOffline = true
+  const child = state.binding?.child
   const pausedText = refused
     ? `${OFFLINE_REFUSAL} Run /delta resolve to choose Fork & Restore or Discard.`
-    : `Delta sharing paused: ${failure.message}. The message stays queued. ${permanentFailureAdvice(error.code, !!state.binding?.autoUpload, error.reason)}, then ${recoveryAdvice(state.binding)}.`
+    : child
+      ? // Nothing lifts a subagent's pause while its session runs: no prompt or command of its own shares it again.
+        `Delta stopped recording the subagent "${child.name}": ${errorText(error)}. Its records stay queued.`
+      : `Delta sharing paused: ${failure.message}. The message stays queued. ${permanentFailureAdvice(error.code, !!state.binding?.autoUpload, error.reason)}, then ${recoveryAdvice(state.binding)}.`
   if (!willRetry) pauseCheckout(state, decision.pause, pausedText)
   else scheduleSendRetry(host, session, error.hints.retryAfterMs)
   state.retryReason = willRetry ? failure.message : undefined
@@ -904,6 +912,44 @@ let recording: Promise<void> = Promise.resolve()
  */
 export function recordFromNow(host: Host) {
   seenMessages = host.session.committed().length
+}
+
+/**
+ * Begin recording part way through the session, as a subagent does once the session that started it
+ * records: `adopt` makes the session recorded, then what pi committed so far is recorded, earlier runs
+ * as history and the run going on now, from its first message at `runStart`, in a turn of its own. It
+ * runs in order with the recording of committed messages, so nothing is recorded twice or missed.
+ */
+export function recordFromStart(
+  host: Host,
+  session: string,
+  runStart: number,
+  adopt: () => Promise<boolean>,
+): Promise<void> {
+  const step = recording.then(async () => {
+    if (!(await adopt())) return
+    const runtime = stateFor(session)
+    const turnId = runtime.currentTurnId
+    const committed = host.session.committed()
+    seenMessages = Math.max(seenMessages, committed.length)
+    const record = (id: string, message: AgentMessage) => recordMessage(host, message, `${session}:${id}`)
+    try {
+      for (const { id, message } of turnId === undefined ? committed : committed.slice(0, runStart))
+        await record(id, message)
+      if (turnId !== undefined) {
+        await beginExecution(host, session, turnId)
+        for (const { id, message } of committed.slice(runStart)) await record(id, message)
+      }
+    } catch (error) {
+      // A record that cannot be saved pauses capture, as any failed local write does; the run goes on.
+      await recordCaptureFailure(host, session, error)
+      return
+    }
+    void drain(host, session).catch((error: unknown) => report(host, error))
+    if (turnId !== undefined && runtime.binding?.child) followChildTurn(host, session)
+  })
+  recording = step.catch(() => {})
+  return step
 }
 
 /**

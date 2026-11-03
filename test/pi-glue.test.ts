@@ -42,14 +42,16 @@ describe('titles', () => {
 
 describe('subagents', () => {
   test('only a well-formed link names a parent', () => {
-    const link = { thread: 't', reference: 't', sender: 's', directories: ['/repo'] }
+    const link = { thread: 't', sender: 's' }
     expect(parentLink(JSON.stringify(link))).toEqual(link)
+    // A subagent tells what it starts which session it is before its own thread exists.
+    expect(parentLink(JSON.stringify({ sender: 's' }))).toEqual({ sender: 's' })
     for (const value of [
       undefined,
       '',
       'not json',
       JSON.stringify({ ...link, sender: '' }),
-      JSON.stringify({ ...link, directories: [1] }),
+      JSON.stringify({ ...link, thread: 1 }),
     ])
       expect(parentLink(value)).toBeUndefined()
   })

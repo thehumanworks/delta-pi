@@ -32,7 +32,7 @@ export function promptTitle(text: string): string | undefined {
 }
 
 /** The title of a session pi has not named: its first prompt's. */
-function firstPromptTitle(host: Host): string | undefined {
+export function firstPromptTitle(host: Host): string | undefined {
   for (const message of host.session.messages()) {
     const value = message as { role?: string; content?: unknown }
     if (value.role !== 'user') continue

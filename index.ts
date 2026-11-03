@@ -58,7 +58,13 @@ import {
 } from './src/recording/delivery.ts'
 import { admitPrompt } from './src/recording/prompt.ts'
 import { recordTitle } from './src/recording/title.ts'
-import { beginSession, forgetSessionStart, settleActivation, useDataDirectory } from './src/setup/activation.ts'
+import {
+  beginSession,
+  forgetSessionStart,
+  recordUnderParent,
+  settleActivation,
+  useDataDirectory,
+} from './src/setup/activation.ts'
 import {
   COMMANDS,
   DELTA_USAGE,
@@ -71,7 +77,7 @@ import {
 } from './src/setup/commands.ts'
 import { TYPE_SOMETHING } from './src/setup/setup.ts'
 import { releaseOnEnd } from './src/sharing/join.ts'
-import { stopChildTurn, withdrawParent } from './src/subagents/subagents.ts'
+import { releaseChildCheckout, stopChildTurn, withdrawParent } from './src/subagents/subagents.ts'
 import { startPluginUpdates, stopPluginUpdates } from './src/updates/updates.ts'
 import type { RemoteDisplay } from './src/watch/rows.ts'
 import { stopWatching } from './src/watch/watch.ts'
@@ -364,8 +370,15 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     context = ctx
     // Shell commands run between turns belong before the turn that starts now.
     await recordCommitted(host)
+    await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
     runStart = host.session.committed().length
     await startTurn(host)
+  })
+
+  // A subagent whose parent is shared while it runs records from its next turn's end.
+  pi.on('turn_end', async (_event, ctx) => {
+    context = ctx
+    await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
   })
 
   pi.on('tool_call', async (event, ctx) => {
@@ -379,6 +392,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     context = ctx
     const session = ctx.sessionManager.getSessionId()
     await recordCommitted(host)
+    await recordUnderParent(host, session, runStart)
     // Why the run's last reply ended, as pi committed it, after every extension's message_end.
     const reply = host.session
       .committed()
@@ -411,12 +425,15 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     cancelRequestsOf(session, event.targetSessionFile)
     withdrawParent(host)
     const runtime = stateFor(session)
+    const binding = runtime.binding
     endActivationOf(session)
     resetRuntime(runtime)
     await stopWatching(session)
     forgetContract(session)
     clearProgress(host)
     if (event.reason !== 'reload') await markEnded(host, session)
+    // A subagent's own checkout is released before its pi exits, so whatever started it may remove it.
+    if (event.reason !== 'reload') await releaseChildCheckout(host, binding)
     await releaseOnEnd(host, session, event.reason)
     sessions.delete(session)
     tui = undefined

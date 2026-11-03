@@ -2707,52 +2707,59 @@
     {
       "upstream": "subagents/children.test.ts > isolated subagents > Claude's worktrees a session left moved aside are put back when the next one starts, unless a fork still has their place",
       "status": "not-applicable",
-      "note": "Only relevant to restoring .claude/worktrees directories moved aside for Delta fork symlinks. The pi port never moves those host-owned worktrees or creates .claude-worktree backups."
+      "note": "Restores Claude's own isolation worktrees that the plugin moved aside for a link to a Delta fork. Pi has no built-in isolated subagent (no Agent `isolation: worktree` that creates a worktree the host owns), so the extension never moves a worktree aside and has nothing to put back."
     },
     {
       "upstream": "subagents/children.test.ts > isolated subagents > an isolated subagent of a type of the organization's own plugin records Claude's worktree as its own",
       "status": "not-applicable",
-      "note": "Depends on Claude organization-managed plugins, native subagent types and a guard preventing personal plugin hooks from controlling their isolation worktrees. Pi has no equivalent managed-Agent guard and does not substitute isolation worktrees."
+      "note": "Checks the guard that keeps an organization-provided agent type in Claude's worktree instead of a Delta fork. Pi has no organization-managed plugins or agent types and no fork substitution to guard; every pi subagent in a worktree of its own records it as its own checkout (test/behaviour/subagents.test.ts > a subagent in a Git worktree nested in its parent's checkout attaches that worktree, not the parent's)."
     },
     {
       "upstream": "subagents/children.test.ts > isolated subagents > an isolated subagent of a type the managed settings directory defines, which takes the place of the built-in records Claude's worktree as its own",
       "status": "not-applicable",
-      "note": "Depends on Claude managed-settings .claude/agents definitions overriding built-in subagent types. Pi's process children have no such host-managed type/guard mechanism; their own checkout attachment is the general adaptation."
+      "note": "Checks the same guard for agent definitions in Claude's managed-settings directory. Pi has no managed agent definitions and no fork substitution; a pi subagent's own worktree is always recorded as its own checkout."
     },
     {
       "upstream": "subagents/children.test.ts > isolated subagents > an isolated subagent whose worktree cannot be linked to its fork records Claude's worktree as its own",
       "status": "not-applicable",
-      "note": "Tests fallback from failed symlink replacement of a Claude-created isolation worktree. The pi implementation never attempts that replacement. Failures in pi's ordinary attach/mount pipeline are applicable but need different tests."
+      "note": "The fallback when the symlink replacing Claude's isolation worktree with a Delta fork fails. Pi has no host isolation worktree to replace, so the extension never forks or links one; a failure attaching a subagent's own checkout is tested instead (test/behaviour/subagents.test.ts > a subagent's checkout that failed to attach is attached and mounted with its next delivery)."
     },
     {
       "upstream": "subagents/children.test.ts > isolated subagents > an isolated subagent whose worktree cannot get a fork from Delta records Claude's worktree as its own",
       "status": "not-applicable",
-      "note": "Tests fallback when Delta cannot create the isolated fork used to replace Claude's native Agent worktree. The process-based adaptation records an existing own checkout rather than forking/replacing a built-in host worktree."
+      "note": "The fallback when Delta cannot create the fork that replaces Claude's isolation worktree. Pi has no built-in isolation mode for the extension to replace with a fork; the extension that starts a pi subagent owns any worktree it runs in."
     },
     {
       "upstream": "subagents/children.test.ts > isolated subagents > an isolated subagent works in a fork under the path Claude gave it, until the session ends",
       "status": "not-applicable",
-      "note": "Depends on Claude's native isolation worktree path, Delta fork symlink substitution, SendMessage resume verification and Claude branch cleanup. Pi has no built-in isolated Agent worktree to replace; the documented adaptation attaches the subprocess's own checkout instead."
+      "note": "Claude makes an isolation worktree for the Agent call, and the plugin swaps it for a link to a Delta fork, puts it back for SendMessage resumes and removes it with its branch at the session's end. Pi has no Agent tool, isolation mode, or SendMessage resume: the extension that starts a pi subagent picks and owns its directory, and pi keeps one working directory per session."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a background subagent someone takes over in Delta is stopped",
-      "status": "missing",
-      "note": "Run a child pi asynchronously and fence its running producer sequence on append; assert its own turn aborts once and the parent remains unaffected. The existing takeover end-to-end test targets a top-level session, not a child."
+      "status": "ported",
+      "ours": ["test/behaviour/subagents.test.ts > a background subagent someone takes over in Delta is stopped"],
+      "note": "Delta fences the subagent's first turn on append; the subagent's own pi turn is stopped once, with a note, and its parent's turn is untouched. Upstream stops the background agent with Claude's TaskStop; a pi subagent is its own process and stops its own turn."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a foreground subagent someone takes over in Delta is stopped",
-      "status": "missing",
-      "note": "Add the pi subprocess equivalent while the parent's tool waits on the child, and fence the child's producer turn. Verify child cancellation and that the waiting tool resolves safely. Claude's exact implementation aborts the parent's Agent-call turn; that native host primitive is not a requirement for the process-based port, but the foreground child scenario still needs coverage."
+      "status": "covered",
+      "ours": ["test/behaviour/subagents.test.ts > a foreground subagent someone takes over in Delta is stopped"],
+      "note": "The parent's turn waits on the subagent's run, which Delta fences: the subagent's own turn stops once and the waiting parent turn then ends normally (end_turn). Upstream aborts the parent's turn instead, because Claude can stop a foreground subagent only with its parent's turn; a pi subagent is a separate process that stops its own turn."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a nested subagent's thread is under its parent subagent's, which prompts it, and shares that parent's checkout",
-      "status": "unsupported",
-      "note": "A subagent's own subagents record under the top-level session's thread, not under their parent subagent's (README, Subagents)."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/subagents.test.ts > a nested subagent's thread is under its parent subagent's, which prompts it, and shares that parent's checkout",
+        "test/behaviour/subagents.test.ts > a subagent's subagent that starts before that subagent's thread exists records under it once it does"
+      ],
+      "note": "A subagent in its own worktree starts a subagent there: the nested thread is created under the subagent's reference with --shared-worktrees, attaches nothing, and its prompt is attributed to the subagent's session. The second test covers a nested subagent started before its parent subagent's thread exists, which waits for it as upstream's does."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a refusal Delta calls permanent stops recording the subagent, once",
-      "status": "missing",
-      "note": "Inject a non-retryable child creation or append refusal, run further child hooks/turns and advance retry time, then assert no retry storm, one notice, retained pending records, and no effect on parent/siblings. Existing pure failure-classification tests are not a child lifecycle test."
+      "status": "ported",
+      "ours": ["test/behaviour/subagents.test.ts > a refusal Delta calls permanent stops recording the subagent, once"],
+      "note": "A non-retryable thread create refusal is shown once as upstream's 'Delta stopped recording the subagent' note, a later prompt and a minute of retry time attempt nothing more, its records stay queued, and the parent goes on recording."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a restart delivers what a subagent queued and closes the turn it left open",
@@ -2781,43 +2788,52 @@
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a subagent queues while Delta is unreachable and is delivered on retry",
-      "status": "missing",
-      "note": "Inject a transient child append failure, verify the child's durable records remain queued without blocking the parent, restore service, and assert exactly-once ordered delivery after retry. Pure backoff/outbox tests do not cover the child creation/delivery integration."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/subagents.test.ts > a subagent queues while Delta is unreachable and is delivered on retry"
+      ],
+      "note": "Transient append failures keep all four of the subagent's records queued; once Delta answers, the retry delivers them once, in order."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a subagent running when sharing starts stops when Delta takes it over, and its own checkout reaches Delta",
-      "status": "unsupported",
-      "note": "Recording subagents that started before the session was recorded is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/subagents.test.ts > a subagent running when sharing starts stops when Delta takes it over, and its own checkout reaches Delta"
+      ],
+      "note": "A pi subagent in a worktree of its own, started by a session not yet recorded, is running when that session is shared; it finds out at its next turn's end (pi has no agent inventory for the parent to read), gets a thread under the parent's with its own checkout attached, is stopped by the takeover, and at its end its mount is released while the checkout stays attached."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a subagent whose spawning agent cannot be read is recorded as sharing its parent checkout",
-      "status": "unsupported",
-      "note": "Recording subagents that started before the session was recorded is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "Upstream reads the spawning agent's transcript to find the Agent call that placed the subagent, and defaults to sharing when it cannot. Pi has no agent transcripts or Agent calls for that: a pi subagent places itself from its own working directory and its parent's binding. A parent binding that cannot be read is tested instead (test/behaviour/subagents.test.ts > a subagent that cannot read the session that started it goes on, and records under it once it can)."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a subagent's hooks that run before its spawn resolves are recorded once it does",
       "status": "not-applicable",
-      "note": "This tests Claude agent.spawn resolution racing hooks in the same host. Pi children initialize their own extension runtime/session_start in a separate session/process and have no native agent.spawn result/discovery mechanism to race."
+      "note": "Races Claude's agent.spawn result against the subagent's first hooks in the same host. A pi subagent is its own pi session: pi awaits the extension's session_start, where the subagent's binding is decided, before running any prompt (print and RPC modes await bindExtensions), so no event of the subagent can precede that decision."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a subagent's hooks that run while its first hook finds out whether it is recorded are recorded in order",
       "status": "not-applicable",
-      "note": "The specific discovery queue depends on Claude childFor, agent.list, per-agent hook routing, and child binding lookup by agent ID. The pi adaptation establishes child status during awaited session startup instead. Delayed pi startup capture is worth testing, but it is not this Claude discovery mechanism."
+      "note": "Orders Claude hooks that arrive while the first one looks the agent up (childFor, agent.list). A pi subagent decides in session_start, which pi awaits before any prompt; a subagent that starts recording part way through does so inside the extension's recording queue, which the run-so-far test checks for order (test/behaviour/subagents.test.ts > a subagent whose parent is shared while it runs records its run so far in that run's turn, and what ran before as history)."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > a subagent's run ends only once Delta stops syncing the worktree Claude may then remove",
-      "status": "missing",
-      "note": "Port the release barrier to pi child-session shutdown: end the mount process while the fake CLI still reports the directory as mounted/restoring, assert that child exit/shutdown remains pending, then release it. test/command-outcomes.test.ts tests only the pure syncing-state predicate, not this lifecycle guarantee."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/subagents.test.ts > a subagent's run ends only once Delta stops syncing the worktree Claude may then remove"
+      ],
+      "note": "With Delta holding the checkout `restoring` after its mount ends, the subagent's session_shutdown keeps polling `worktree list` and does not end until Delta releases it, within a 6 s budget. A pi subagent's run ends with its session, so the barrier is at session end, before the code that started it can remove the worktree."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > forks and teammates are not recorded, nor is anything their own agents spawn",
       "status": "not-applicable",
-      "note": "Claude's fork/teammate agent taxonomy, teammateId and per-agent ancestry are absent from pi's extension API. Pi session forks are a different operation and already contain history; this is not a test of pi /fork."
+      "note": "Claude's fork and teammate agent kinds (agent.type, teammateId, parentAgentId) have no pi counterpart: pi has no agent inventory, and a session pi forks starts with history, so it is never taken for a subagent."
     },
     {
       "upstream": "subagents/children.test.ts > subagents > sharing records the subagents that already ran, and a running one once its run ends",
       "status": "unsupported",
-      "note": "Recording subagents that started before the session was recorded is not ported (README, Not ported)."
+      "note": "The running half is supported and tested (test/behaviour/subagents.test.ts > a subagent whose parent is shared while it runs records its run so far in that run's turn, and what ran before as history): every session now tells the pi processes it starts who it is, and a subagent of a session not yet recorded records under it, with its conversation so far, from its next turn once that session is shared. Subagents that already ended are not recorded: pi keeps no list of the processes a session started, and subagent extensions usually run them with `--no-session` (pi's own example, and test/e2e), so their conversation is gone when they exit. Covering those that kept a session file would need every unrecorded subagent to register in Delta's store and the parent to deliver another session's records as that session's producer."
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > a Delta turn's report names who ran it, its messages and its tool calls, and nothing is reported without a message",
@@ -2852,17 +2868,17 @@
     {
       "upstream": "subagents/git-worktrees.test.ts > a worktree's branch is the one git lists for its path; a detached or unlisted one has none",
       "status": "not-applicable",
-      "note": "listedBranch is used to remove Claude-created isolation worktrees/branches after restoring paths replaced by fork symlinks. Pi does not create, move or clean up those host-owned worktrees; its own-checkout adaptation leaves lifecycle ownership with the spawning extension."
+      "note": "listedBranch finds the branch of Claude's isolation worktree so the plugin can delete both at the session's end. Pi has no isolation worktrees; the extension never creates or removes a subagent's worktree or branch, which belong to the extension that started it."
     },
     {
       "upstream": "subagents/org-agents.test.ts > an agent definition is named by its frontmatter, else by its file's name",
       "status": "not-applicable",
-      "note": "Used exclusively to identify organization-managed Claude .claude/agents definitions for the native Agent worktree guard. The pi child-process adaptation does not inspect or depend on those Claude definitions."
+      "note": "Reads Claude managed-settings .claude/agents definitions to recognise organization-provided agent types for the isolation guard. Pi has no managed agent definitions or isolation substitution to guard."
     },
     {
       "upstream": "subagents/org-agents.test.ts > the organization's plugins are those managed settings seat or enable, by name",
       "status": "not-applicable",
-      "note": "Parses Claude organization policy keys prependPlugins/appendPlugins/enabledPlugins to avoid replacing guarded native Agent worktrees. Pi has no corresponding Claude managed-plugin policy or isolation-path substitution."
+      "note": "Parses Claude managed-settings keys (prependPlugins, appendPlugins, enabledPlugins) for the same guard. Pi has no organization plugin policy, and the extension substitutes no worktree it would need to guard."
     },
     {
       "upstream": "testing/cli-fixtures.test.ts > documented status, mount, append receipts, and watch frames parse at the CLI boundary",
