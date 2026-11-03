@@ -60,6 +60,18 @@ export type FakeState = {
   forked?: string[]
 }
 
+/**
+ * Delta's background upload of an automatic session's thread, as a test sets it (`world().upload`):
+ * `queued` before Delta registers the thread, `uploading` once it has a link, then `uploaded` or
+ * `failed` with `error`. `reportsOrganization: false` answers status without the organization, as
+ * some CLIs have.
+ */
+export type FakeUpload = {
+  state: 'queued' | 'uploading' | 'uploaded' | 'failed'
+  error?: string
+  reportsOrganization?: boolean
+}
+
 /** How one run of the fake reaches its caller. */
 export type FakeIo = {
   env: Record<string, string | undefined>
@@ -193,8 +205,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   function out(value: unknown) {
     io.write('stdout', JSON.stringify(value) + '\n')
   }
-  function fail(code: string, message: string, retryable = false): never {
-    out({ error: { code, message, retryable } })
+  function fail(code: string, message: string, retryable = false, reason?: string): never {
+    out({ error: { code, ...(reason ? { reason } : {}), message, retryable } })
     throw new Exit(1)
   }
   function option(args: string[], name: string): string | undefined {
@@ -249,7 +261,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   // `fail-<command>` counts down, each after letting `after` runs through: see world() in test/world.ts.
   const switchName = words.replaceAll(' ', '-')
   /** Whether this run is past the runs the switch lets through; counts them down meanwhile. */
-  type Switch = { after: number; times?: number; code?: string; retryable?: boolean }
+  type Switch = { after: number; times?: number; code?: string; retryable?: boolean; reason?: string }
   const reached = (path: string): Switch | undefined => {
     if (!existsSync(path)) return
     const value = JSON.parse(readFileSync(path, 'utf8')) as Switch
@@ -274,7 +286,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     const left = (failure.times ?? 1) - 1
     if (left <= 0) rmSync(failing, { force: true })
     else writeFileSync(failing, JSON.stringify({ ...failure, after: 0, times: left }))
-    fail(failure.code ?? 'process_failed', `${words} failed as the test asked`, failure.retryable ?? true)
+    fail(
+      failure.code ?? 'process_failed',
+      `${words} failed as the test asked`,
+      failure.retryable ?? true,
+      failure.reason,
+    )
   }
 
   switch (words) {
@@ -419,14 +436,27 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const thread = known(state, locator)
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       const producer = state.producers[producerKey(source, external)]
+      // Delta's background upload of a thread created with an upload organization, as a test sets it in
+      // `upload.json` (`world().upload`); uploaded otherwise. Until Delta registers it, it has no link.
+      const upload: FakeUpload =
+        thread.organization && existsSync(join(root, 'upload.json'))
+          ? JSON.parse(readFileSync(join(root, 'upload.json'), 'utf8'))
+          : { state: 'uploaded' }
+      const registered = upload.state !== 'queued'
       out({
         operation: 'status',
         thread_id: thread.thread_id,
         title: thread.title,
-        url: thread.url,
-        visibility: thread.visibility,
-        upload: thread.visibility ? { state: 'uploaded', organization_id: thread.organization, error: null } : null,
-        access: { state: 'granted', is_owner: true },
+        url: registered ? thread.url : null,
+        visibility: registered ? thread.visibility : null,
+        upload: thread.visibility
+          ? {
+              state: upload.state,
+              organization_id: upload.reportsOrganization === false ? null : thread.organization,
+              error: upload.error ? { code: 'upload_failed', reason: 'upload_failed', message: upload.error } : null,
+            }
+          : null,
+        access: registered ? { state: 'granted', is_owner: true } : { state: 'local_only', is_owner: null },
         worktrees: {
           status: 'available',
           items: thread.worktrees.map((reference) => ({

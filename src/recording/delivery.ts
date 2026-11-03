@@ -586,6 +586,9 @@ export async function drain(host: Host, session: string): Promise<void> {
   }
 }
 
+/** What the band says while Delta refuses an offline session's recorded changes, beside the choice it offers. */
+export const OFFLINE_REFUSAL = "Delta couldn't publish this thread's offline changes."
+
 /**
  * Classify a failed drain, schedule its retry or pause sharing, and show the person why.
  * Failures that are not Delta command errors, such as a changed outbox file, pass through unchanged.
@@ -605,7 +608,7 @@ function failDelivery(host: Host, session: string, error: unknown): never {
   const refused = error.code === 'reload_required' && recordsOffline(session, state.binding)
   if (refused) state.refusedOffline = true
   const pausedText = refused
-    ? "Delta couldn't publish this thread's offline changes. Run /delta resolve to choose Fork & Restore or Discard."
+    ? `${OFFLINE_REFUSAL} Run /delta resolve to choose Fork & Restore or Discard.`
     : `Delta sharing paused: ${failure.message}. The message stays queued. ${permanentFailureAdvice(error.code, !!state.binding?.autoUpload, error.reason)}, then ${recoveryAdvice(state.binding)}.`
   if (!willRetry) pauseCheckout(state, decision.pause, pausedText)
   else scheduleSendRetry(host, session, error.hints.retryAfterMs)

@@ -1844,8 +1844,11 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a new session without a policy never holds a prompt behind the open setup offer",
-      "status": "missing",
-      "note": "Existing E2Es answer or dismiss onboarding before prompting. Hold the onboarding dialog open and prove input/turn startup proceeds without awaiting its answer."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > a new session without a policy never holds a prompt behind the open setup offer"
+      ],
+      "note": "The setup offer's dialog is held open (an answer the test gives later); a prompt runs to its end before the offer is answered, then the offer is declined."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a resumed session never activates",
@@ -1871,23 +1874,35 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > band reminder: a Manual checkout is told how to share, not to set up",
-      "status": "missing",
-      "note": "The setup-offer E2E checks Not syncing after saving Private sync, not initial startup under an existing Manual policy. Verify /delta-share rather than /delta-setup and no transcript reminder."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > band reminder: a Manual checkout is told how to share, not to set up"
+      ],
+      "note": "Under a Manual policy the band (pi's `delta` status line) says Not syncing with /delta-share, and no transcript note says Not syncing or Not set up."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > band reminder: a headless session gets none",
-      "status": "missing",
-      "note": "The print-mode recording E2E checks recording and no login, but not suppression of reminders/status or onboarding for a headless unconfigured session."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > band reminder: a headless session gets none"
+      ],
+      "note": "A print-mode session (pi's headless mode) gets no band status at all, no setup offer, and no reminder on stderr; Claude Code's empty surface list becomes pi's print mode."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > band reminder: a session with an unfinished join gets none",
-      "status": "missing",
-      "note": "Adapt to pi's persisted joinTransition: while completion is pending or failed, assert setup/manual reminders do not compete with join status. The normal join E2E does not hold this state."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > band reminder: a session with an unfinished join gets none"
+      ],
+      "note": "A stored joinTransition whose thread folder is not where pi started fails to finish the join; the band shows that failure, not a setup or share reminder. Upstream's plan carries only a locator; pi's JoinPlan needs its folder."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > band reminder: an unconfigured checkout is told how to set up",
-      "status": "missing",
-      "note": "Assert the live startup band shows Not set up and /delta-setup, with no stale transcript reminder. Local rendering tests do not exercise startSession reminder selection."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > band reminder: an unconfigured checkout is told how to set up"
+      ],
+      "note": "With the setup offer dismissed, the band says Not set up with /delta-setup, and no transcript note says Not syncing or Not set up."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > holds the first prompt, row, and turn until the auto decision, so none is lost",
@@ -1899,13 +1914,19 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > quitting partway through setup offers it again",
-      "status": "missing",
-      "note": "Pure tests cover a dismissed wizard returning normally, not session_shutdown while the wizard remains pending. Verify shutdown releases the claimed repository marker and a later session is offered setup again."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > quitting partway through setup offers it again"
+      ],
+      "note": "Accepting the offer opens the wizard, whose first question stays open; quitting pi clears the claimed setup-offered marker, and a new pi in the same repository is offered setup again (an addition upstream's title promises)."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > the band switches from its reminder to Syncing as soon as the session is shared, and stays so on resume",
-      "status": "missing",
-      "note": "The sharing E2E checks successful Shared status and a different E2E checks automatic-session resume. Neither checks this full reminder-to-share transition and resume of that manually shared session."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > automatic activation > the band switches from its reminder to Syncing as soon as the session is shared, and stays so on resume"
+      ],
+      "note": "Not set up gives way to the share's progress while `thread create` is held, the band says Syncing once shared, and a new pi resuming the session shows Syncing with no reminder. The band's share button is /delta share with its audience question answered."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > the plugin's own question draws a hint beside each option, and no other question changes",
@@ -1931,43 +1952,67 @@
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a /delta share session records offline like an automatic one",
-      "status": "missing",
-      "note": "The manual-share E2E stays online. After sharing, force offline status/append behavior and verify local capture, continued prompts, and eventual drain without republishing."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a /delta share session records offline like an automatic one"
+      ],
+      "note": "After /delta share with the team, appends and status fail as app_unavailable: the prompt runs to its end unaborted, records are appended with --acknowledge local and stay pending, and drain once Delta is back."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a failed discard after a fork stays paused with the controls and can fork again",
-      "status": "missing",
-      "note": "Inject failure of discard after a successful fork; verify pending records and /delta resolve remain available and a retry is possible."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a failed discard after a fork stays paused with the controls and can fork again"
+      ],
+      "note": "/delta resolve's Fork & Restore stands in for the band's button: with appends refused, it forks but its discard fails, so records stay pending and the band keeps the choice; forking again (beyond upstream) forks, discards and drains."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a non-retryable refusal pauses delivery but never drops a prompt or publishes",
-      "status": "missing",
-      "note": "Failure-classification units cover the envelope decision only. Assert the live prompt/turn remains accepted, pending records survive, and automatic recovery never calls thread share."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a non-retryable refusal pauses delivery but never drops a prompt or publishes"
+      ],
+      "note": "Appends refused as not_visible (non-retryable): both prompts settle unaborted, records stay pending, and no `thread share` runs as recovery."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a permanent refusal during activation stops recording and removes what was queued",
-      "status": "missing",
-      "note": "Hold create while recording begins, then return organization_not_member/non-retryable refusal. Check removal of the staged binding and its outbox, no automatic retries, and a clear refusal."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a permanent refusal during activation stops recording and removes what was queued"
+      ],
+      "note": "With an empty organization list and `thread create` held then refused (not_visible, organization_not_member), a prompt during create is staged; the refusal removes the binding and its outbox files, the band says the account isn't in the team, and nothing retries."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a policy naming an organization the account is not in records nothing and explains once per repository",
-      "status": "missing",
-      "note": "Wizard tests warn about this setting, but do not test automatic activation. Verify pre-staging membership refusal, no create/queue, accepted prompts, and notice suppression across new sessions."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a policy naming an organization the account is not in records nothing and explains once per repository"
+      ],
+      "note": "A policy naming org-other: no create, no binding, the band's refusal line, one transcript explanation; a prompt is accepted, and a /new session (upstream's /clear) keeps the band line without repeating the explanation."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a prompt and rows arriving during activation are accepted and drain once it completes",
-      "status": "missing",
-      "note": "Hold create/attach after snapshot staging, run a prompt/turn while thread is not published in the binding, then complete activation and assert all records drain without abort or share."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a prompt and rows arriving during activation are accepted and drain once it completes"
+      ],
+      "note": "With `worktree attach` held under an organization policy, a `!` shell command (a row of its own) and a prompt are accepted unaborted while the binding has no thread; once attach finishes, the binding has its thread and checkout and every record drains, without `thread share`."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a refused offline append pauses delivery, keeps prompts, and shows both controls until resolved",
-      "status": "missing",
-      "note": "The Fork & Restore E2E covers one refused prompt and the command's two choices, but not additional accepted prompts while paused or external resolution clearing the refusal on a subsequent append."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a refused offline append pauses delivery, keeps prompts, and shows both controls until resolved"
+      ],
+      "note": "Appends refused as reload_required: prompts keep settling with records pending, and the band names the refusal and, having no buttons in pi, both choices (`Fork & Restore or Discard: /delta resolve`); once appends succeed again the next prompt drains everything and the choice clears."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > a session that ended before activation finished completes it on resume without dropping a prompt or stopping its turn",
-      "status": "missing",
-      "note": "Existing resume coverage starts from complete activation. Persist an incomplete autoUpload binding after a transient create failure, end/resume, then verify repair, end-marker removal, and retained prompt/turn."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/offline.test.ts > offline recording > a session that ended before activation finished completes it on resume without dropping a prompt or stopping its turn"
+      ],
+      "note": "`thread create` fails as app_unavailable: the staged automatic binding has no thread, a prompt records locally, and quitting marks it ended. A new pi resuming it completes activation (private, org-1), drops the end marker, and delivers the prompts from before and after, without `thread share`."
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > keeps a prompt and its turn while Delta is unreachable, then drains after reconnect",
@@ -2103,43 +2148,67 @@
     },
     {
       "upstream": "setup/auto.test.ts > store retention > a session resumed in another process during pruning keeps its binding",
-      "status": "missing",
-      "note": "Use a held store read and concurrent update of another binding to verify pruning re-reads each candidate and does not delete resumed pending state."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > store retention > a session resumed in another process during pruning keeps its binding"
+      ],
+      "note": "Pruning's read of the second of two expired bindings is held (kit.disk); the first, already read, is resumed meanwhile with a pending record, and survives. The order is the store directory's, so the test resumes whichever was read first."
     },
     {
       "upstream": "setup/auto.test.ts > store retention > the store prunes a long-ended session through activation, and keeps every unsettled one",
-      "status": "missing",
-      "note": "Seed old, recent, live, pending-record, capture-failure, and join-transition bindings plus ledgers; activate and assert only safe expired entries are removed. General fileStore tests do not cover retention."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > store retention > the store prunes a long-ended session through activation, and keeps every unsettled one"
+      ],
+      "note": "Seeds expired, recent, pending, capture-failure, joining and live bindings with ledgers; starting a session prunes only the expired one's binding and ledger. Recent is a day before the kit's clock, which does not start at 0."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > a failed background upload shows its reason on the band",
-      "status": "missing",
-      "note": "Supply an upload failure after registration; assert the link remains, failure reason is shown, and successful-sync wording is absent."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > the band on an automatic session > a failed background upload shows its reason on the band"
+      ],
+      "note": "The fake's upload state is failed with `storage quota exceeded`: the band says Sync failed with the reason and keeps the link, never Synced to DeltaDB."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > a organization thread in a personal organization is synced, never shared, and offers no share control",
-      "status": "missing",
-      "note": "Wizard personal-organization tests are not runtime band tests. Start organization-mode automatic recording into a personal organization and verify Synced wording, no Shared wording, and no team-share suggestion."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > the band on an automatic session > a organization thread in a personal organization is synced, never shared, and offers no share control"
+      ],
+      "note": "An organization policy naming the account's personal organization: the band says Synced with ada's Organization, never Shared with, and offers no /delta-share control on its 200-column line."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > a private thread in a personal organization is synced, never shared, and offers no share control",
-      "status": "missing",
-      "note": "Need the same runtime assertion for private mode. Literal button assertions adapt to pi's status/suggestions; personal audience semantics remain applicable."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > the band on an automatic session > a private thread in a personal organization is synced, never shared, and offers no share control"
+      ],
+      "note": "As the organization case, under a private policy, where a team's private thread would offer /delta-share."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > a private thread is labelled with its own organization and offers a share control that publishes the same thread",
-      "status": "missing",
-      "note": "Adapt the button press to /delta-share. Use a saved organization different from the CLI's current one and status omitting the organization; assert correct audience and publication of the same thread without create or re-export."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/activation.test.ts > the band on an automatic session > a private thread is labelled with its own organization and offers a share control that publishes the same thread"
+      ],
+      "note": "Policy org-2 (not current), status reporting no organization: the band says Synced with Personal and offers /delta-share, whose question offers Share with Personal (upstream's button label); answering it runs `thread share` on the same thread, with one `thread create` and no re-export."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > follows the upload after activation even when the watcher never becomes ready",
-      "status": "missing",
-      "note": "Hold watch readiness and verify independent status polling still discovers and displays the automatic thread link."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > the band on an automatic session > follows the upload after activation even when the watcher never becomes ready"
+      ],
+      "note": "`thread watch` is held before it reports readiness; status reads alone bring the thread's link to the band, whose mark stays the connecting one."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > shows the link and its audience once Delta finishes the background upload, without a prompt or a share",
-      "status": "missing",
-      "note": "Private-link E2E covers eventual link availability, but the fake CLI reports uploaded immediately. Port needs registration/uploading/uploaded transitions, short-band priority, audience, and completion-message expiry."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/activation.test.ts > the band on an automatic session > shows the link and its audience once Delta finishes the background upload, without a prompt or a share"
+      ],
+      "note": "The fake's upload goes queued, uploading, uploaded: the one-line band says Waiting to sync…, then the link with Syncing to DeltaDB…, then Synced to DeltaDB with the link and Shared with Zed, and after 5 s the link without the completion message; no `thread share` runs."
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > the share control pressed during a turn shares once the turn ends",

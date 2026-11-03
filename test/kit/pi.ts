@@ -46,8 +46,11 @@ export type Mode = 'tui' | 'rpc' | 'print' | 'json'
 
 /** A dialog the extension opened. */
 export type Dialog = { method: 'select' | 'input'; title: string; options?: string[] }
-/** How a dialog is answered: a value, a function of the dialog, or undefined to dismiss it. */
-export type Answer = string | undefined | ((dialog: Dialog) => string | undefined)
+/**
+ * How a dialog is answered: a value, a function of the dialog, or undefined to dismiss it. A function
+ * may answer later, with a promise, to hold the dialog open while the test goes on.
+ */
+export type Answer = string | undefined | ((dialog: Dialog) => string | undefined | Promise<string | undefined>)
 
 type Entry = { type: string; id: string; parentId: string | null; timestamp: string; [field: string]: unknown }
 type Handler = (event: Record<string, unknown>, ctx: unknown) => unknown
