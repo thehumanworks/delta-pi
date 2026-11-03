@@ -76,9 +76,17 @@ export type FakeIo = {
 /**
  * What a test makes a command answer instead of its own answer (`world().answer`): exactly this output
  * and exit code, after the command has run when `run` is set, so its effects happen and its answer is
- * lost, as when Delta did the work and the reply never arrived.
+ * lost, as when Delta did the work and the reply never arrived. With `patch`, the command runs and
+ * answers as usual, with these fields replacing those of its JSON answer, as a receipt or a status
+ * naming something else would.
  */
-export type FakeAnswer = { stdout?: string; stderr?: string; exitCode?: number; run?: boolean }
+export type FakeAnswer = {
+  stdout?: string
+  stderr?: string
+  exitCode?: number
+  run?: boolean
+  patch?: Record<string, unknown>
+}
 type AnswerSwitch = FakeAnswer & { after: number; times: number }
 
 /** The answer a test set for this run of `args`, counting its runs down; undefined to run as usual. */
@@ -111,6 +119,13 @@ class Exit extends Error {
 export async function fakeDelta(args: string[], io: FakeIo): Promise<number> {
   const answer = takeAnswer(args, io)
   if (!answer) return runToExit(args, io)
+  if (answer.patch) {
+    let stdout = ''
+    const write: FakeIo['write'] = (stream, text) => (stream === 'stdout' ? (stdout += text) : io.write(stream, text))
+    const code = await runToExit(args, { ...io, write })
+    io.write('stdout', stdout.trim() ? `${JSON.stringify({ ...JSON.parse(stdout), ...answer.patch })}\n` : stdout)
+    return code
+  }
   if (answer.run) await runToExit(args, { ...io, write: () => {}, hold: async () => {} })
   if (answer.stdout) io.write('stdout', answer.stdout)
   if (answer.stderr) io.write('stderr', answer.stderr)

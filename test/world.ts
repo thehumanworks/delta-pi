@@ -117,14 +117,20 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     /**
      * Make `times` runs of `command`, after letting `after` through, answer `stdout` and `stderr` with
      * `exitCode` (1 unless given) instead of their own answer: a crash, an old CLI's usage text, a
-     * malformed reply. With `run`, the command does its work first and only its answer is lost.
+     * malformed reply. With `run`, the command does its work first and only its answer is lost. With
+     * `patch`, the command runs and answers as usual, with `patch`'s fields replacing its answer's, such
+     * as a receipt naming another thread or a status reporting other access.
      */
     answer(
       command: string,
-      answer: { stdout?: string; stderr?: string; exitCode?: number; run?: boolean },
+      answer: { stdout?: string; stderr?: string; exitCode?: number; run?: boolean; patch?: Record<string, unknown> },
       { times = 1, after = 0 } = {},
     ) {
       writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
+    },
+    /** Let `command` answer for itself again after `answer`. */
+    stopAnswering(command: string) {
+      rmSync(join(state, `answer-${command.replaceAll(' ', '-')}`), { force: true })
     },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
