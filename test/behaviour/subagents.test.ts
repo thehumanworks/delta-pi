@@ -158,3 +158,22 @@ test('a subagent the extension named keeps that name, even the default one', asy
   const thread = await sub.until(() => childThread(sub, idle), "the subagent's finished turn")
   expect(thread.name).toBe('Subagent')
 })
+
+test('a subagent whose checkout setup failed once is still followed for takeover once setup succeeds', async () => {
+  const root = await parent()
+  const nested = worktree(root, join(root.world.checkout, '.worktrees', 'feature'))
+  const sub = await child(root, { cwd: nested })
+  root.world.fail('worktree list')
+  // The turn stays running, as during a long tool call, so only the watch can see a takeover.
+  sub.pi.model = () => new Promise(() => {})
+  void sub.pi.submit('a long task')
+  const created = () => Object.values(sub.world.delta().threads).find((thread) => thread.parent)
+  await sub.until(created, "the subagent's thread")
+  await sub.advance(60_000)
+  await sub.until(() => mountState(sub, nested) === 'mounted', 'the checkout to be mounted on retry')
+  const reference = created()?.reference
+  await sub.until(
+    () => sub.commands().some((args) => args[0] === 'thread' && args[1] === 'watch' && args[2] === reference),
+    "the subagent's turn to be followed",
+  )
+})

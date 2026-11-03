@@ -293,7 +293,6 @@ async function drainPending(host: Host, session: string): Promise<boolean> {
     // is attached and mounted before they are sent; a step that failed is retried here.
     if (binding.pending.length && childNeedsSetup(binding)) {
       await requireContract(host, session)
-      const created = !binding.thread
       try {
         binding = await ensureChildThread(host, binding, () => delivering() && current())
       } catch (error) {
@@ -301,7 +300,8 @@ async function drainPending(host: Host, session: string): Promise<boolean> {
         if (!delivering() || !current()) return false
         throw error
       }
-      if (created && stateFor(session).currentTurnId !== undefined) followChildTurn(host, session)
+      // The running turn is followed once its thread exists, whichever attempt finished setting it up.
+      if (stateFor(session).currentTurnId !== undefined) followChildTurn(host, session)
     }
     if (!binding.thread || !binding.pending.length) return true
     // A recovered outbox checks the CLI's contract before its first append, so an incompatible CLI

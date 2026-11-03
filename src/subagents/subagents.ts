@@ -199,6 +199,8 @@ export async function ensureChildThread(host: Host, binding: Binding, current: (
   const check = async () => {
     if (!current()) throw new Error("The subagent's session ended while its thread was being prepared")
   }
+  // Nothing starts for a session that is no longer current, as after the contract check this follows.
+  await check()
   let next = binding
   if (next.child && !next.thread) next = await createChildThread(host, next, check)
   const checkout = next.checkout
@@ -226,6 +228,7 @@ async function createChildThread(host: Host, binding: Binding, check: () => Prom
       name: child.name,
       ...(child.sharesParentCheckout ? { worktrees: 'shared' as const } : {}),
     },
+    check,
   })
   if (typeof created.reference !== 'string' || !created.reference)
     throw new Error("thread create: Delta returned no reference for the subagent's thread")
