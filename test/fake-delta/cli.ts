@@ -112,9 +112,23 @@ export async function fakeDelta(args: string[], io: FakeIo): Promise<number> {
   const answer = takeAnswer(args, io)
   if (!answer) return runToExit(args, io)
   if (answer.run) await runToExit(args, { ...io, write: () => {}, hold: async () => {} })
+  // A held command holds its answer too, so a test can deliver an answer it chose late.
+  else await waitWhileHeld(args, io)
   if (answer.stdout) io.write('stdout', answer.stdout)
   if (answer.stderr) io.write('stderr', answer.stderr)
   return answer.exitCode ?? 1
+}
+
+/** Wait while a test holds `args`'s command (`world().hold`), once its runs to let through have passed. */
+async function waitWhileHeld(args: string[], io: FakeIo) {
+  const root = io.env.FAKE_DELTA_STATE
+  if (!root) return
+  const [group, command] = args.filter((arg) => arg !== '--json')
+  const holding = join(root, `hold-${`${group} ${command ?? ''}`.trim().replaceAll(' ', '-')}`)
+  if (!existsSync(holding)) return
+  const value = JSON.parse(readFileSync(holding, 'utf8')) as { after: number }
+  if (value.after > 0) return writeFileSync(holding, JSON.stringify({ after: value.after - 1 }))
+  while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
 }
 
 async function runToExit(args: string[], io: FakeIo): Promise<number> {
