@@ -1,6 +1,7 @@
 // What the recording tests share: a session that records, what reached its thread, and records seeded
 // into its outbox as an earlier pi process would have left them.
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { digest } from '../../src/core/session-state.ts'
 import { type Kit, startDelta } from '../kit/index.ts'
@@ -29,9 +30,21 @@ export const watches = (kit: Kit) => kit.commands().filter((args) => args[0] ===
 /** The session's binding in the store. */
 export const binding = async (kit: Kit): Promise<any> => kit.store.get(`session:${kit.pi.session.id}`)
 
+/** The path of the session's binding in the store, as `fileStore` names it. */
+export function bindingPath(kit: Kit): string {
+  const key = `session:${kit.pi.session.id}`
+  const name = `${key.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80)}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}.json`
+  return join(kit.world.agentDir, 'delta', 'store', name)
+}
+
+/** The session's binding, read at once, for a disk fault's predicate. */
+export function bindingNow(kit: Kit): any {
+  const path = bindingPath(kit)
+  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).value : undefined
+}
+
 /** The records staged in the session's outbox, as written. */
 export async function staged(kit: Kit): Promise<any[]> {
-  const { readFileSync } = await import('node:fs')
   return ((await binding(kit))?.pending ?? []).map((entry: { files: string[] }) =>
     JSON.parse(entry.files.map((file) => readFileSync(file, 'utf8')).join('')),
   )
