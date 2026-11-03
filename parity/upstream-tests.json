@@ -107,103 +107,159 @@
     },
     {
       "upstream": "cli/auth.test.ts > a session replaced during setup installation cannot start login or write the old checkout policy",
-      "status": "missing",
-      "note": "Hold installation, switch sessions, then complete installation; assert obsolete setup stops before login, organization operations, or writing the old checkout."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > a session replaced during setup installation cannot start login or write the old checkout policy"
+      ],
+      "note": "Holds the stood-in installer, switches pi to a new session, then lets it finish: no sign-in, no org command, no policy written. The old runtime's answer ('obsolete setup was stopped') is read from the debug log, where pi sends a note once its session ended."
     },
     {
       "upstream": "cli/auth.test.ts > automatic sign-in ending with access_denied stops recording and does not reopen the browser on prompts",
-      "status": "missing",
-      "note": "Repeat the automatic-activation failure/cleanup/no-reprompt/explicit-recovery scenario with access_denied."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > automatic sign-in ending with access_denied stops recording and does not reopen the browser on prompts"
+      ],
+      "note": "The held `auth wait` ends access_denied: the staged binding and outbox go, the transcript says to retry /delta-share, later prompts start no sign-in and nothing cancels or logs out, and /delta share then signs in again and exports the conversation from pi."
     },
     {
       "upstream": "cli/auth.test.ts > automatic sign-in ending with cancelled stops recording and does not reopen the browser on prompts",
-      "status": "missing",
-      "note": "Return cancelled from the held auth waiter; verify automatic outbox/binding removal, no repeated browser attempts on prompts, no cancel/logout, and a later explicit share exporting fresh history."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > automatic sign-in ending with cancelled stops recording and does not reopen the browser on prompts"
+      ],
+      "note": "As upstream, with the held `auth wait` ending cancelled: binding and outbox removed, retry advice, no new sign-in on prompts, no cancel/logout, and a later /delta share exports both prompts from pi."
     },
     {
       "upstream": "cli/auth.test.ts > automatic sign-in ending with expired stops recording and does not reopen the browser on prompts",
-      "status": "missing",
-      "note": "Repeat the automatic-activation failure/cleanup/no-reprompt/explicit-recovery scenario with expired."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > automatic sign-in ending with expired stops recording and does not reopen the browser on prompts"
+      ],
+      "note": "As upstream, with the held `auth wait` ending expired: binding and outbox removed, retry advice, no new sign-in on prompts, no cancel/logout, and a later /delta share exports both prompts from pi."
     },
     {
       "upstream": "cli/auth.test.ts > automatic sync in desktop signs in without blocking work, then uploads the same session",
-      "status": "missing",
-      "note": "The generic interactive behavior applies to pi RPC despite no Claude Desktop surface. Existing RPC sign-in completes before prompting; add the same held-wait/nonblocking/queued-record assertions through RPC."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > automatic sync in desktop signs in without blocking work, then uploads the same session"
+      ],
+      "note": "Claude Code Desktop's surface is pi's RPC client here: automatic sign-in runs status, login, wait on the selected CLI, a prompt during the held wait settles and queues locally with no second attempt, and once it finishes the same session uploads privately to org-1 with matching turn start/finish and nothing exported or published."
     },
     {
       "upstream": "cli/auth.test.ts > automatic sync in terminal signs in without blocking work, then uploads the same session",
-      "status": "missing",
-      "note": "test/e2e/accounts.test.ts > automatic recording signs in through the browser when Delta is signed out, then syncs covers eventual RPC sign-in only. Add a held auth wait, submit/record during it, assert queued records/no upload/no extra login, then release and verify the same session uploads."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > automatic sync in terminal signs in without blocking work, then uploads the same session"
+      ],
+      "note": "Claude Code's terminal is pi's terminal (the kit's `tui` mode, notes read from the transcript): the same held-sign-in, nonblocking prompt, queued records and same-session private upload as upstream."
     },
     {
       "upstream": "cli/auth.test.ts > automatic sync rechecks organization membership after browser sign-in",
-      "status": "missing",
-      "note": "Hold login, change the available organizations before release, and assert no activation/binding/thread when the configured organization is no longer accessible."
+      "status": "ported",
+      "ours": ["test/behaviour/auth.test.ts > automatic sync rechecks organization membership after browser sign-in"],
+      "note": "While sign-in waits the account's organizations change to another team; after it finishes, activation rechecks membership, creates no thread, drops the binding and says the account isn't a member."
     },
     {
       "upstream": "cli/auth.test.ts > changing sessions closes the login waiter without cancelling a shared login or continuing share",
-      "status": "missing",
-      "note": "Replace the session while explicit share waits for login; assert waiter closure, no thread/publication, and no app-owned login cancellation/logout."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > changing sessions closes the login waiter without cancelling a shared login or continuing share"
+      ],
+      "note": "/delta share waits on a held `auth wait`; pi switches to a new session: the wait process is stopped, no thread is created, and the only auth commands are status, login and wait."
     },
     {
       "upstream": "cli/auth.test.ts > declined beta terms leave a one-line explanation with the terms link, without a failure or a new sign-in",
-      "status": "missing",
-      "note": "Decline the terms dialog and assert no browser, no login retry/thread, and the terms URL in the unwrapped AccessRequiredError message."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > declined beta terms leave a one-line explanation with the terms link, without a failure or a new sign-in"
+      ],
+      "note": "`auth status` reports terms not accepted and the person answers Not now: no browser opens, one single-line note gives the terms link and the retry, no 'Delta sharing failed', sign-in ran status only, no thread."
     },
     {
       "upstream": "cli/auth.test.ts > declining sign-in for automatic sync leaves the session unsynced without opening a browser",
-      "status": "missing",
-      "note": "Run automatic activation with a declined sign-in dialog; assert status-only auth traffic, no thread, an unsynced band, and /delta-share recovery advice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > declining sign-in for automatic sync leaves the session unsynced without opening a browser"
+      ],
+      "note": "Automatic sign-in declined with Not now: only `auth status` runs, the transcript says to run /delta-share again, the band says Not syncing, no browser opens and no thread exists."
     },
     {
       "upstream": "cli/auth.test.ts > ending an automatically syncing session closes its login waiter without cancelling the shared attempt",
-      "status": "missing",
-      "note": "End/switch the session while automatic login waits; assert the waiter process closes, no thread is created, and auth cancel/logout is never invoked."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > ending an automatically syncing session closes its login waiter without cancelling the shared attempt"
+      ],
+      "note": "Quitting pi while automatic sign-in waits on a held `auth wait` stops that process (the kit lists running commands); no thread, and no auth command besides status, login and wait."
     },
     {
       "upstream": "cli/auth.test.ts > ending the session stops setup sign-in without cancelling the app-owned login",
-      "status": "missing",
-      "note": "End the session during setup's auth wait; assert waiter closure, no auth cancel/logout, no org command, and no settings write."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > ending the session stops setup sign-in without cancelling the app-owned login"
+      ],
+      "note": "Quitting during /delta setup's held sign-in stops the wait, runs no org command and writes no policy; setup's 'could not sign in' answer is read from the debug log, where pi sends a note after its session ended."
     },
     {
       "upstream": "cli/auth.test.ts > failed and unknown authentication outcomes stop share without creating a thread",
-      "status": "missing",
-      "note": "Exercise cancelled, expired, access_denied, wrong_account, future_state, and malformed pending replies through share; assert no thread/records and preserve access URL plus quoted recovery advice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > failed and unknown authentication outcomes stop share without creating a thread"
+      ],
+      "note": "/delta share against cancelled, expired, access_denied, wrong_account, an unknown status and a malformed pending login: each reports 'Delta sharing failed' (access_denied with its link and the quoted '/selected/delta' recovery), with no thread, records, cancel or logout."
     },
     {
       "upstream": "cli/auth.test.ts > headless automatic sync stays noninteractive when signed out",
-      "status": "missing",
-      "note": "Add print/JSON signed-out automatic activation asserting no browser/auth login, no thread or binding, and actionable shell-login advice. The existing print-mode recording E2E is signed in."
+      "status": "ported",
+      "ours": ["test/behaviour/auth.test.ts > headless automatic sync stays noninteractive when signed out"],
+      "note": "Print mode under a Private sync policy, signed out: no auth command, thread or binding, and the advice to run `delta auth login` on stderr."
     },
     {
       "upstream": "cli/auth.test.ts > keeping the wait leaves the share waiting for the beta terms, without a second share",
-      "status": "missing",
-      "note": "Invoke share during terms polling and choose Keep waiting; verify no duplicate share/already-in-progress error and eventual continuation of the original share."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > keeping the wait leaves the share waiting for the beta terms, without a second share"
+      ],
+      "note": "A second /delta share while the terms are awaited asks to stop waiting; Keep waiting lets the first share continue once `auth status` turns signed in, with no 'Stopped waiting' or 'already in progress'."
     },
     {
       "upstream": "cli/auth.test.ts > reauthentication recovery quotes absolute paths for POSIX shells and PowerShell",
-      "status": "missing",
-      "note": "Add direct authLoginCommand assertions for apostrophes, spaces, and dollar signs in absolute POSIX and Windows executable paths; no port test imports this helper."
+      "status": "ported",
+      "ours": [
+        "test/accounts.test.ts > sign-in > reauthentication recovery quotes absolute paths for POSIX shells and PowerShell"
+      ],
+      "note": "authLoginCommand quotes apostrophes, spaces and dollar signs for POSIX shells and PowerShell, as upstream."
     },
     {
       "upstream": "cli/auth.test.ts > running /delta-share again while the beta terms are awaited offers to stop waiting",
-      "status": "missing",
-      "note": "Hold denied terms polling, invoke share again, choose Stop waiting, and assert AccessRequiredError copy, no continued polling, no failed-share wrapper, and successful later retry."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > running /delta-share again while the beta terms are awaited offers to stop waiting"
+      ],
+      "note": "A second /delta share while the terms are awaited asks to stop waiting; Stop waiting ends it with the AccessRequiredError note alone (no failure wrapper), no further polls, and a later share succeeds."
     },
     {
       "upstream": "cli/auth.test.ts > setup installs Delta and finishes browser sign-in before creating a team and saving the policy",
-      "status": "missing",
-      "note": "The setup-offer E2E is already installed/signed in. Add missing-CLI setup with held login, checking no org command/policy/setup question before authentication, then team creation, saved policy, and its application to a new session."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > setup installs Delta and finishes browser sign-in before creating a team and saving the policy"
+      ],
+      "note": "With Delta missing (the kit stands in for discovery and the installer), /delta setup installs it, signs in on the selected CLI with sign-in as its only question and no org command, then creates the team, saves Private sync, and the next session uploads privately to the new team."
     },
     {
       "upstream": "cli/auth.test.ts > setup stops before organization operations when sign-in is cancelled or access is required",
-      "status": "missing",
-      "note": "Exercise cancelled login and declined terms during setup; assert /delta-setup-specific advice, no org operations or settings write, and no failure wrapper for access-required outcomes."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > setup stops before organization operations when sign-in is cancelled or access is required"
+      ],
+      "note": "/delta setup with a cancelled sign-in and with declined beta terms: each answer names /delta-setup (the terms one its link, without 'could not sign in'), with no org command and no policy written."
     },
     {
       "upstream": "cli/auth.test.ts > share signs in an existing installation before exporting, then continues on the selected CLI",
-      "status": "missing",
-      "note": "The helper sign-in test does not run share. Add share with a held login and existing conversation, asserting no export/records/thread before success, selected executable reuse, successful publication afterward, and no redundant auth on resume."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > share signs in an existing installation before exporting, then continues on the selected CLI"
+      ],
+      "note": "/delta share on a session with a prompt waits on a held sign-in run by the selected CLI with nothing exported or created, then shares the conversation; resuming the session signs in no more."
     },
     {
       "upstream": "cli/auth.test.ts > sign-in waits for the person to ask for it, and declining opens no browser",
@@ -215,8 +271,11 @@
     },
     {
       "upstream": "cli/auth.test.ts > stopping automatic sync while sign-in waits closes the waiter and leaves the session unsynced",
-      "status": "missing",
-      "note": "Stop the browser wait through a repeated command during automatic activation; verify process closure, unsynced state, no thread, and no auth cancel/logout."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/auth.test.ts > stopping automatic sync while sign-in waits closes the waiter and leaves the session unsynced"
+      ],
+      "note": "/delta share during automatic sign-in's held wait asks to stop waiting; Stop waiting stops the wait process with no cancel or logout, says to run /delta-share again, and the band says Not syncing with no thread."
     },
     {
       "upstream": "cli/auth.test.ts > unaccepted beta terms open in the browser on request, and the share continues once they are accepted",
@@ -1920,18 +1979,27 @@
     },
     {
       "upstream": "setup/auto.test.ts > setup command and policy problems > a headless session refuses /delta setup and never offers onboarding",
-      "status": "missing",
-      "note": "Run /delta-setup in real print/JSON modes and assert a visible refusal, no questions/auth/org calls, and no settings write. The print-mode output reproduction exposes a related bug."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup command and policy problems > a headless session refuses /delta setup and never offers onboarding"
+      ],
+      "note": "In pi's print and JSON modes: no offer, no org or auth command, and /delta setup's refusal on stderr with no policy written. JSON mode showed the refusal nowhere; fixed in index.ts."
     },
     {
       "upstream": "setup/auto.test.ts > setup command and policy problems > a malformed policy is reported once and leaves the checkout recording manually",
-      "status": "missing",
-      "note": "Policy parsing and explicit replacement are unit-tested, but startup's once-only notice, unchanged malformed contents, and absence of automatic creation are not."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup command and policy problems > a malformed policy is reported once and leaves the checkout recording manually"
+      ],
+      "note": "An unparsable .delta/settings.json is reported once across the session's prompts, left byte for byte, and no thread is created."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > /delta setup offers to create an organization when the account has none, and syncs to it",
-      "status": "missing",
-      "note": "Pure wizard tests cover choosing/creating a team, but no integration test verifies the real `org create -- <name>` wiring and that its returned ID is persisted."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > /delta setup offers to create an organization when the account has none, and syncs to it"
+      ],
+      "note": "With no organizations, setup's typed team name runs `org create -- Acme` and the policy saves the ID the CLI returned (the fake's org-new)."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > /delta setup writes the policy after its questions are answered",
@@ -1953,33 +2021,51 @@
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > /delta share in a Manual repository shares to its saved team, not the selected organization",
-      "status": "missing",
-      "note": "Use a Manual policy naming a different organization from the CLI current selection; assert thread creation uses the saved ID and the band names that team."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > /delta share in a Manual repository shares to its saved team, not the selected organization"
+      ],
+      "note": "A Manual policy naming org-2 while org-1 is selected: the thread is created under org-2 privately, published, and the band says Shared with Acme."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > /delta share in a repository without a Git remote says so before asking or uploading anything",
-      "status": "missing",
-      "note": "Only setup's remote-refusal unit path is tested. A share integration must remove the remote and assert refusal before audience questions, CLI installation, export, or thread creation."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > /delta share in a repository without a Git remote says so before asking or uploading anything"
+      ],
+      "note": "With the checkout's remote removed, /delta share gives upstream's refusal before the audience question, any installation or a thread."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > /delta share with addresses invites them without publishing",
-      "status": "missing",
-      "note": "The collaboration E2E covers successful direct invitations, but not upstream's mixed invite failure summary and retry with unknown visibility/Keep current sharing that must not publish. Add those assertions to complete coverage."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > /delta share with addresses invites them without publishing"
+      ],
+      "note": "One of two typed addresses fails: both are sent, the note names the invited and the failed one with the link, nothing is published, and Keep current sharing on a binding with no reported audience reconnects without publishing."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > a plugin installed into a running session never starts recording it automatically",
-      "status": "missing",
-      "note": "Load into an unbound session with history under an automatic policy; assert no automatic create and no onboarding when policy is configured. Existing resume E2E has an established binding."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > a plugin installed into a running session never starts recording it automatically"
+      ],
+      "note": "pi loads the extension into a session with history (reload) under a Private sync policy: no thread is created and nothing is asked."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > a plugin installed into a running session offers setup there, and declining names /delta-setup",
-      "status": "missing",
-      "note": "Load/reload the extension into a session with existing history, decline onboarding, and verify the offer plus ONBOARDING_DECLINED note. Helper flag tests do not establish runtime startup classification."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > a plugin installed into a running session offers setup there, and declining names /delta-setup"
+      ],
+      "note": "pi loads the extension into a session with history (reload) in a repository not set up: the setup offer is its only question, and Not now leaves ONBOARDING_DECLINED."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > accepting the startup offer signs in before setup and updates the band once it saves",
-      "status": "missing",
-      "note": "Separate E2Es cover a signed-in setup offer and signed-out automatic recording. Combine signed-out onboarding acceptance with setup; verify auth ordering, saved policy, and refreshed reminder."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > accepting the startup offer signs in before setup and updates the band once it saves"
+      ],
+      "note": "Signed out, Set up now signs in (status, login, wait) before setup's questions, saves Manual with Zed, and the band then reminds of /delta-share."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > bare /delta opens a menu that runs the chosen action",
@@ -1992,13 +2078,19 @@
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > dismissing the share question shares nothing",
-      "status": "missing",
-      "note": "Pure audience cases include Cancel but not an actual rejected/dismissed pi dialog through the share flow. Assert no export/create/publication and cleared progress without a sharing-failed notice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > dismissing the share question shares nothing"
+      ],
+      "note": "Dismissing pi's audience dialog during /delta share creates and exports nothing, clears 'Preparing to share' from the band, and reports no failure."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > syncing this session from /delta setup after Private sync uploads it privately, never to the team",
-      "status": "missing",
-      "note": "The pure wizard verifies shareSession('private'), but no real setup integration selects Sync it and asserts a private upload and absence of thread share."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/setup.test.ts > setup dialogs and notices > syncing this session from /delta setup after Private sync uploads it privately, never to the team"
+      ],
+      "note": "Setup with Zed, Private sync, then Sync it: the answer says it is syncing, and the session's thread is created privately under org-1 and never published."
     },
     {
       "upstream": "setup/auto.test.ts > setup dialogs and notices > the onboarding offer is shown once per repository, then never again",
@@ -2065,18 +2157,27 @@
     },
     {
       "upstream": "setup/organization.test.ts > bare /delta-org opens the selected team on the dashboard, and a headless session gets its link",
-      "status": "missing",
-      "note": "The menu unit maps Manage team in browser to org manage and wizard units test openMembersPage, but no integration opens the current CLI-selected team from bare /delta-org, provides a headless link, or verifies the 120-second organization timeout."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/organization.test.ts > bare /delta-org opens the selected team on the dashboard, and a headless session gets its link"
+      ],
+      "note": "Bare /delta-org's Manage team in browser opens the current team's members page; a print-mode pi on the same machine gets the link instead; listing teams runs with the 120-second limit."
     },
     {
       "upstream": "setup/organization.test.ts > invalid organization syntax and CLI failures are returned without sharing",
-      "status": "missing",
-      "note": "The team-command E2E checks missing invite addresses and generic unknown-command usage only. Add malformed switch/current/create syntax, '--' protection for option-looking IDs, nonzero CLI output, truncated output, and no sharing/export."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/organization.test.ts > invalid organization syntax and CLI failures are returned without sharing"
+      ],
+      "note": "Malformed switch/current/create arguments answer the usage, an invite without addresses links the dashboard, `--help` is passed after `--`, a failing CLI's stderr and an output cut at run's capture limit are reported, and nothing is shared."
     },
     {
       "upstream": "setup/organization.test.ts > organization commands return CLI output on a headless host using the selected executable",
-      "status": "missing",
-      "note": "test/e2e/accounts.test.ts > team commands pass Delta's own answers through covers interactive RPC list/switch only. Need headless list/current/switch/invite, selected-executable arguments, and visible output; print mode currently executes list silently."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/organization.test.ts > organization commands return CLI output on a headless host using the selected executable"
+      ],
+      "note": "In print and JSON modes, list, current, switch and invite run the selected CLI with `--` before IDs and addresses and show its output on stderr, with no auth or share. JSON mode showed nothing before the index.ts fix."
     },
     {
       "upstream": "setup/project-policy.test.ts > project policy > each kind of file reads as its effective policy, and unusable ones record manually",
