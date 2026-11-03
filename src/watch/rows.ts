@@ -3,6 +3,7 @@
  * added between turns as custom messages the model reads and the person sees drawn under their author.
  */
 import type { Host } from '../core/host.ts'
+import { isJsonObject } from '../core/json.ts'
 import { ledgerKey, stateFor } from '../core/session-state.ts'
 import type { WatchComment, WatchItem } from '../cli/thread-commands.ts'
 import { REMOTE_MESSAGE } from '../recording/content.ts'
@@ -19,6 +20,8 @@ import {
   itemAuthor,
   itemMarkdown,
   keyedComment,
+  type Ledger,
+  OMITTED,
   type PendingRow,
   type QuotedLine,
   type RemoteView,
@@ -180,16 +183,38 @@ function appendRow(host: Host, row: PendingRow): { deny?: string } {
     const item = view.items.get(row.commandItem)
     display = comment ? commentDisplay(view, comment) : item ? itemDisplay(item, view.thread) : undefined
   }
+  const details: RemoteDisplay = display ?? { kind: 'context', id: row.id }
   host.pi.sendMessage<RemoteDisplay>(
-    {
-      customType: REMOTE_MESSAGE,
-      content: row.text,
-      display: display !== undefined,
-      details: display ?? { kind: 'context' },
-    },
+    { customType: REMOTE_MESSAGE, content: row.text, display: display !== undefined, details },
     { triggerTurn: false },
   )
+  // Rows are added only while pi is idle, when it adds them at once; one it failed to add, which it
+  // reports only on its own error channel, is not counted, so the next snapshot offers it again.
+  if (!host.session.holds(details)) return { deny: 'pi did not add it to the session' }
   return {}
+}
+
+/**
+ * The ledger without what pi's session holds no row for, as when pi could not write a row to the
+ * session file: the model of a resumed session never read those, so they are offered again. A row
+ * names its item or comment in its details, or, saved by an earlier version, in its first line.
+ * Snapshot items left out of the model's context have no row of their own and stay as they are.
+ */
+export function heldLedger(ledger: Ledger, rows: { content: unknown; details: unknown }[]): Ledger {
+  const held = new Set<string>()
+  for (const { content, details } of rows) {
+    const id = isJsonObject(details) && typeof details.id === 'string' ? details.id : undefined
+    if (id !== undefined) {
+      held.add(id)
+      continue
+    }
+    const named = /\((item|comment) ([^\s)]+)\)/.exec(typeof content === 'string' ? content.split('\n', 1)[0]! : '')
+    if (named) held.add(named[1] === 'comment' ? commentKey(named[2]!) : named[2]!)
+  }
+  const items = Object.fromEntries(
+    Object.entries(ledger.items).filter(([id, fingerprint]) => fingerprint === OMITTED || held.has(id)),
+  )
+  return { ...ledger, items }
 }
 
 /**

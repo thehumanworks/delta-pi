@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'vitest'
 import type { Host } from '../src/core/host.ts'
-import { RemoteView } from '../src/watch/conversation.ts'
-import { liveDisplay, settleRemote } from '../src/watch/rows.ts'
+import { OMITTED, RemoteView } from '../src/watch/conversation.ts'
+import { heldLedger, liveDisplay, settleRemote } from '../src/watch/rows.ts'
 import { feed } from '../src/watch/watch.ts'
 
 afterEach(() => {
@@ -11,12 +11,18 @@ afterEach(() => {
 
 test('a row taken just before a run starts waits for it to end, then reaches the model once', async () => {
   let idle = true
+  let added: unknown
   const sent: { whileIdle: boolean; text: unknown }[] = []
   const host = {
-    session: { idle: () => idle },
+    session: { idle: () => idle, holds: (details: unknown) => details === added },
     ui: { debug() {}, note() {} },
     store: { async set() {} },
-    pi: { sendMessage: (message: { content: unknown }) => sent.push({ whileIdle: idle, text: message.content }) },
+    pi: {
+      sendMessage: (message: { content: unknown; details: unknown }) => {
+        sent.push({ whileIdle: idle, text: message.content })
+        added = message.details
+      },
+    },
   } as unknown as Host
   feed.connection = { phase: 'failed', session: 's' }
   const view = new RemoteView('t', { thread: 't', items: {} })
@@ -116,4 +122,19 @@ test('a drawn row shows the item as it is now while the watch holds its thread, 
   // A row saved before rows carried their item draws as it was saved.
   const { id: _id, thread: _thread, ...old } = saved
   expect(liveDisplay(old).display).toBe(old)
+})
+
+test("a resumed session's ledger keeps only what its session holds a row for", () => {
+  const ledger = { thread: 't', items: { a: 'fa', b: 'fb', 'comment:c': 'fc', d: 'fd', old: OMITTED } }
+  const held = heldLedger(ledger, [
+    { content: '[Delta] Ada, user message (item a):\nHi', details: { kind: 'message', id: 'a', thread: 't' } },
+    // Rows saved before rows named their item in their details are known by their first line.
+    {
+      content: '[Delta] Ada changed an earlier user message (item b); it now reads:\nHo',
+      details: { kind: 'context' },
+    },
+    { content: '[Delta] Ada, comment (comment c):\n<comments>', details: undefined },
+  ])
+  // `d` lost its row, as when pi could not write it to the session file; an omitted item never had one.
+  expect(held).toEqual({ thread: 't', items: { a: 'fa', b: 'fb', 'comment:c': 'fc', old: OMITTED } })
 })

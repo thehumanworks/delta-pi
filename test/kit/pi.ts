@@ -131,6 +131,11 @@ export class FakePi {
   editor = ''
   /** How many times the extension stopped a running turn. */
   aborts = 0
+  /**
+   * How many of the next custom messages pi fails to add, as when its session cannot take them: pi
+   * reports such a failure on its own error channel, never to the extension.
+   */
+  failMessages = 0
   model: Model = echoModel
   session: FakeSession
   private runtime: Runtime | undefined
@@ -516,6 +521,7 @@ export class FakePi {
           getSessionId: () => session.id,
           getSessionFile: () => session.file,
           getEntries: () => [...session.entries],
+          getLeafEntry: () => session.entries.at(-1),
           getBranch: () => [...session.entries],
           getHeader: () => ({ type: 'session', id: session.id, cwd: session.cwd, timestamp: '' }),
           getCwd: () => session.cwd,
@@ -589,7 +595,8 @@ export class FakePi {
           display: message.display,
           details: message.details,
         }
-        if (this.streaming) this.pendingCustom.push(entry)
+        if (this.failMessages > 0) this.failMessages--
+        else if (this.streaming) this.pendingCustom.push(entry)
         else this.append(entry)
       },
       getSessionName: () => {

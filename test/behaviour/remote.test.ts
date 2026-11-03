@@ -409,3 +409,58 @@ test('supersession aborts the owned turn and remote rows wait until it ends', as
   expectOffered(kit, ['takeover'])
   expect(turns(kit)).toBe(started)
 })
+
+/** End `kit`'s watch, and wait until the next one is live. */
+async function reconnect(kit: Kit) {
+  const watches = kit.commands().filter((args) => args[1] === 'watch').length
+  const notes = kit.pi.noticeTexts().length
+  kit.world.endWatch(THREAD)
+  await kit.until(
+    () => kit.pi.statuses.get('delta') !== undefined && kit.running().every((args) => args[1] !== 'watch'),
+    'the drop',
+  )
+  await kit.advance(1000)
+  await kit.until(() => kit.commands().filter((args) => args[1] === 'watch').length > watches, 'the reconnect')
+  await kit.until(() => kit.pi.statuses.get('delta')?.startsWith('●'), 'the watch to be live again')
+  await kit.settle()
+  return kit.pi.noticeTexts().slice(notes)
+}
+
+test('a row pi fails to add is not counted as added, and the next snapshot offers it again', async () => {
+  const kit = await shared()
+  // pi reports a message it could not add on its own error channel, never to the extension.
+  kit.pi.failMessages = 1
+  kit.world.remote(THREAD, { type: 'item', item: item('Lost once', { id: 'lost' }) })
+  await kit.until(
+    () => kit.pi.noticeTexts().some((text) => text.startsWith("Couldn't add Delta activity to pi's context")),
+    'the failure to be shown',
+  )
+  expect(rows(kit)).toEqual([])
+  await reconnect(kit)
+  await offered(kit, 1)
+  expectOffered(kit, ['lost'])
+  expect(drawn(kit, 'lost')!.join('\n')).toContain('Lost once')
+})
+
+test('a row the session file never kept is offered again when the session resumes', async () => {
+  const kit = await shared()
+  kit.world.remote(
+    THREAD,
+    { type: 'item', item: item('Kept', { id: 'kept' }) },
+    { type: 'item', item: item('Unsaved', { id: 'unsaved' }) },
+  )
+  await offered(kit, 2)
+  await kit.whileTimePasses(kit.pi.shutdown('quit'))
+  // pi held the second row in memory but could not write it to the session file, so the session pi
+  // resumes from that file does not hold it.
+  const entries = kit.pi.session.entries
+  entries.splice(
+    entries.findIndex((entry) => entry.type === 'custom_message' && String(entry.content).includes('(item unsaved)')),
+    1,
+  )
+  const again = await startDelta({ world: kit.world, session: kit.pi.session })
+  kits.push(again)
+  await again.until(() => again.pi.statuses.get('delta')?.startsWith('●'), 'the resumed watch to be live')
+  await offered(again, 2)
+  expectOffered(again, ['kept', 'unsaved'])
+})
