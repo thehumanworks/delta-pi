@@ -14,11 +14,13 @@ import { claimInstallation, installation } from '../core/installation.ts'
 
 const NOTIFICATIONS = 'plugin-update:notifications'
 const CHECK = 'plugin-update:check'
+const REMINDER = 'plugin-update:reminder'
 /** One check an hour is shared by every pi process on the machine. */
 const CHECK_INTERVAL_MS = 60 * 60 * 1000
 const CHECK_TIMEOUT_MS = 10_000
+const REMINDER_INTERVAL_MS = 24 * CHECK_INTERVAL_MS
 const USAGE =
-  'Usage: /delta-plugin-update [check | notifications on | notifications off]. Updates this pi extension and reloads it. /delta-update updates the Delta app and CLI instead.'
+  'Usage: /delta-plugin-update [check | later | notifications on | notifications off]. Updates this pi extension and reloads it. /delta-update updates the Delta app and CLI instead.'
 
 /** Where pi installed the extension from: an npm package source, by name. */
 type Source = { source: string; name: string }
@@ -188,9 +190,13 @@ export function startPluginUpdates(host: Host) {
       if (observer !== current) return
       if (!enabled) return stopPluginUpdates()
       const { latest } = await check(host)
+      const reminder = await host.store.get(REMINDER)
       const stillEnabled = await notificationsOn(host)
       if (observer !== current || !stillEnabled || installation) return
-      available = latest && compareVersions(latest, host.plugin.version) === 1 ? latest : undefined
+      available =
+        latest && compareVersions(latest, host.plugin.version) === 1 && !snoozed(reminder, latest, host.clock.now())
+          ? latest
+          : undefined
       host.ui.invalidate()
     } catch (error) {
       if (observer === current) host.ui.debug(`Delta extension update check: ${errorText(error)}`)
@@ -216,7 +222,17 @@ export function stopPluginUpdates() {
 /** Reloading pi's extensions, which only a command handler may do. */
 export type Reload = { reload?(): Promise<void> }
 
-/** `/delta-plugin-update`: update and reload, `check`, or turn notifications on or off. */
+function snoozed(value: unknown, version: string, now: number): boolean {
+  return (
+    isJsonObject(value) &&
+    value.version === version &&
+    typeof value.until === 'number' &&
+    value.until > now &&
+    value.until <= now + REMINDER_INTERVAL_MS
+  )
+}
+
+/** `/delta-plugin-update`: update and reload, check, snooze this release, or control notifications. */
 export async function pluginUpdateCommand(host: Host, args: string, command?: Reload): Promise<{ text?: string }> {
   if (args === 'notifications on' || args === 'notifications off') {
     await host.store.set(NOTIFICATIONS, args === 'notifications on')
@@ -224,6 +240,17 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
     if (args === 'notifications on') startPluginUpdates(host)
     host.ui.invalidate()
     return { text: `Delta extension update notifications are ${args === 'notifications on' ? 'on' : 'off'}.` }
+  }
+  if (args === 'later') {
+    const version = available,
+      started = generation
+    if (!pluginUpdateNotice() || !version) return { text: 'There is no Delta extension update notice to snooze.' }
+    await host.store.set(REMINDER, { version, until: host.clock.now() + REMINDER_INTERVAL_MS })
+    if (generation !== started) return {}
+    stopPluginUpdates()
+    startPluginUpdates(host)
+    host.ui.invalidate()
+    return { text: `Delta extension ${version} update notices are snoozed for 24 hours.` }
   }
   if (args && args !== 'check') return { text: USAGE }
   const session = host.session.id(),

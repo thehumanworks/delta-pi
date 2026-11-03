@@ -419,3 +419,46 @@ test('a changed project does not reuse another project’s cached source or rele
   expect(run).toHaveBeenLastCalledWith(['pi', 'list'], { cwd: '/another/project', timeoutMs: 10_000 })
   expect(fetch).toHaveBeenCalledTimes(2)
 })
+
+test('Later snoozes only the announced release for a day, including across restarts', async () => {
+  const { host, timers, values, clock } = fake()
+  startPluginUpdates(host)
+  await timers.at(-1)!.run()
+  expect((await pluginUpdateCommand(host, 'later')).text).toContain('24 hours')
+  expect(pluginUpdateNotice()).toBeUndefined()
+  expect(values.get('plugin-update:reminder')).toEqual({ version: '1.1.0', until: 24 * HOUR })
+  expect(values.get('plugin-update:notifications')).not.toBe(false)
+  stopPluginUpdates()
+  startPluginUpdates(host)
+  await timers.at(-1)!.run()
+  expect(pluginUpdateNotice()).toBeUndefined()
+  expect((await pluginUpdateCommand(host, 'check')).text).toContain('1.1.0 is available')
+  expect(pluginUpdateNotice()).toBeUndefined()
+  clock.time = 24 * HOUR
+  await timers.at(-1)!.run()
+  expect(pluginUpdateNotice()).toContain('1.1.0')
+})
+
+test('a different release bypasses Later without re-enabling notifications', async () => {
+  const { host, timers, clock } = fake()
+  startPluginUpdates(host)
+  await timers.at(-1)!.run()
+  await pluginUpdateCommand(host, 'later')
+  await timers.at(-1)!.run()
+  expect(pluginUpdateNotice()).toBeUndefined()
+  clock.time = HOUR
+  vi.mocked(fetch).mockResolvedValue(Response.json({ name: NAME, version: '1.2.0' }))
+  await timers.at(-1)!.run()
+  expect(pluginUpdateNotice()).toContain('1.2.0')
+})
+
+test('malformed or clock-rollback snoozes cannot hide a release indefinitely', async () => {
+  for (const until of [Infinity, 'tomorrow', 25 * HOUR]) {
+    const { host, timers, values } = fake()
+    values.set('plugin-update:reminder', { version: '1.1.0', until })
+    startPluginUpdates(host)
+    await timers.at(-1)!.run()
+    expect(pluginUpdateNotice()).toContain('1.1.0')
+    stopPluginUpdates()
+  }
+})
