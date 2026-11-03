@@ -16,8 +16,8 @@ the conventions, and which of them lint, ast-grep and the tests check.
 - Delta's recording contract: `delta --json thread contract`; the extension speaks version 8.
 
 Before finishing a change, run `npm run format`, then `npm run verify`: the format check, type check,
-ESLint, the ast-grep rules and their tests, and every test. On NixOS without nix-ld the pinned ast-grep
-cannot run; run `nix shell nixpkgs#ast-grep -c npm run verify` and the scripts use that one. Before a
+ESLint, the ast-grep rules and their tests, and every test. `npm ci` supplies every tool they use, the
+pinned ast-grep included (`scripts/ast-grep.mjs` runs it through Node's loader on NixOS). Before a
 release, also run `npm run test:package`.
 
 Tests:

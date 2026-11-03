@@ -161,8 +161,9 @@ npm run test:package   # install the packed release into a throwaway pi and run 
 ```
 
 [docs/architecture.md](docs/architecture.md) maps the code and its two seams, `Host` and `Platform`;
-[docs/style-guide.md](docs/style-guide.md) gives the conventions and which checks enforce them. On NixOS
-without nix-ld, run the checks in `nix shell nixpkgs#ast-grep`.
+[docs/style-guide.md](docs/style-guide.md) gives the conventions and which checks enforce them. Every
+tool the checks use comes from `npm ci`, ast-grep included: `scripts/ast-grep.mjs` runs the pinned
+binary, through Node's own loader on NixOS, which cannot start generic Linux binaries without nix-ld.
 
 The tests come in layers. Unit tests in `test/` are mostly the Claude Code plugin's own, ported.
 Behaviour tests in `test/behaviour` run the whole extension in process through the kit in `test/kit`: a
