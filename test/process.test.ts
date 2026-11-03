@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { KILL_GRACE_MS, run, spawn } from '../src/core/process.ts'
 
@@ -58,5 +60,20 @@ describe('processes', () => {
     expect((await stopped).value).toEqual({ code: null, signal: 'SIGKILL' })
     expect(Date.now() - started).toBeLessThan(KILL_GRACE_MS + 1_000)
     expect((await stream.next()).done).toBe(true)
+  })
+
+  test('a stopped stream lets pi exit even when a descendant still holds its output open', () => {
+    const script = [
+      `import { spawn } from ${JSON.stringify(join(import.meta.dirname, '..', 'src', 'core', 'process.ts'))}`,
+      "const stream = spawn({ argv: ['sh', '-c', 'sleep 30 & echo ready'] })",
+      'await stream.next()',
+      'await stream.return()',
+    ].join('\n')
+    const started = Date.now()
+    const result = spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e', script], {
+      timeout: 15_000,
+    })
+    expect(result.status).toBe(0)
+    expect(Date.now() - started).toBeLessThan(10_000)
   })
 })

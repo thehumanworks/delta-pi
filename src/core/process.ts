@@ -181,6 +181,9 @@ export function spawn(init: SpawnInit): ProcessStream {
       if (!closed) {
         closed = true
         queue.length = 0
+        // The output is no longer read; a descendant holding the pipes open must not keep pi alive.
+        child.stdout.destroy()
+        child.stderr.destroy()
         wake()
         if (!exit) {
           child.kill('SIGTERM')
