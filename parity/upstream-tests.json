@@ -1493,133 +1493,189 @@
     },
     {
       "upstream": "register.test.ts > sharing > a checkout Delta manages for another thread is named in the share failure, which a retry can still finish",
-      "status": "missing",
-      "note": "Inject worktree_directory_in_use on attach; verify actionable join advice and a later successful retry using the original staged snapshot."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > a checkout Delta manages for another thread is named in the share failure, which a retry can still finish"
+      ],
+      "note": "`worktree attach` answers Delta's worktree_directory_in_use envelope (world.answer); the failure names the checkout and /delta-join, and a retry finishes from the same export and the local worktree identity the first attempt created (worktree list made to name none)."
     },
     {
       "upstream": "register.test.ts > sharing > a missing session binding cannot adopt a nonempty producer or import a regenerated suffix",
-      "status": "missing",
-      "note": "Delete a previously used session binding, add source history, then share twice. Assert neither attempt adopts the advanced producer or appends a regenerated suffix; preserve server history and staged records."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > a missing session binding cannot adopt a nonempty producer or import a regenerated suffix"
+      ],
+      "note": "After a share, the store loses the binding and the transcript gains a message while no pi runs; two shares in the resumed pi refuse to adopt the advanced producer before attach, publish or append, keep the server's records and mount, and keep the newly staged plan unchanged."
     },
     {
       "upstream": "register.test.ts > sharing > a share that fails before the watcher restarts leaves prompts accepted",
-      "status": "missing",
-      "note": "After a working share, fail checkout-root discovery on a repeat share; verify the existing live watcher and prompt admission are not paused, then recover successfully."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > a share that fails before the watcher restarts leaves prompts accepted"
+      ],
+      "note": "A repeat share fails at `git rev-parse --show-toplevel` (kit.programs); the live watch still delivers a teammate's row, a prompt is accepted, and fixing Git lets the share finish with the same link."
     },
     {
       "upstream": "register.test.ts > sharing > a staging record write failure contacts no Delta command and leaves no partial import",
-      "status": "missing",
-      "note": "Fail an outbox record write during first-share staging. Verify no create/attach/share/watch or partial committed manifest; after repair, retry must stage and deliver the original content once."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > a staging record write failure contacts no Delta command and leaves no partial import"
+      ],
+      "note": "An outbox write fails (kit.disk) while the share stages its export: only the contract, sign-in and team list ran, no binding, thread or worktree exists; once the disk works the retry stages and delivers the conversation once from sequence 1."
     },
     {
       "upstream": "register.test.ts > sharing > failed attach preserves the staged manifest for retry",
-      "status": "missing",
-      "note": "Fail attach before completion, restart the session, and explicitly retry. Assert immutable staged bytes/sequence numbers, no re-export, no premature publication, and eventual exact delivery."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > failed attach preserves the staged manifest for retry"],
+      "note": "`worktree attach` fails; the staged export, its sequences and thread are kept, a prompt is refused, and a restarted pi (the transcript changed meanwhile) runs no setup, keeps the outbox, and the explicit retry attaches the same worktree identity and delivers the original export once."
     },
     {
       "upstream": "register.test.ts > sharing > first explicit share installs a missing CLI, never plugin load or contract failure",
-      "status": "missing",
-      "note": "Port command-level ordering: startup must not install; explicit share may install; an incompatible contract must prevent setup/recording; retry after compatibility is restored must reuse installation."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > first explicit share installs a missing CLI, never plugin load or contract failure"
+      ],
+      "note": "The Delta CLI is missing (the shell running cli.ts's discovery and installer scripts is faked): startup discovers nothing beyond the update check's own, the first share discovers and installs, a refused contract stops it before any thread or worktree command, and the retry reuses the installation."
     },
     {
       "upstream": "register.test.ts > sharing > first share binds and publishes the checkout, and repeating it does not reimport",
-      "status": "missing",
-      "note": "test/e2e/collaboration.test.ts > /delta-share exports the conversation so far, publishes it, and records live from then on covers the first share, but never repeats it. Add repeat-share assertions preserving the snapshot, producer, mount identity, and original records without reimport."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > first share binds and publishes the checkout, and repeating it does not reimport"
+      ],
+      "note": "Nothing records before the share; the share binds thread, checkout and link, mounts the checkout, the band is live, the export holds the conversation without turn sequences or live metadata, and appends name the Pi producer. A repeat share keeps records, export count, mount and worktree identity. pi has no local-command framing rows to skip."
     },
     {
       "upstream": "register.test.ts > sharing > invalid attachment receipt {\"reference\":\" \"} keeps the binding and outbox",
-      "status": "missing",
-      "note": "Receipt-validation primitives exist, but the share lifecycle does not test a whitespace reference preserving binding/outbox, blocking unsafe prompts/publication, and succeeding on explicit retry without re-export."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > invalid attachment receipt {\"reference\":\" \"} keeps the binding and outbox"
+      ],
+      "note": "`worktree attach` does its work and answers a blank reference (world.answer's new patch); the binding keeps its thread without a checkout, the outbox stays staged, nothing is published or appended, a prompt is refused, and the retry finishes without exporting again."
     },
     {
       "upstream": "register.test.ts > sharing > invalid publication receipt {\"thread_id\":\"other-thread\"} preserves setup and staged records",
-      "status": "missing",
-      "note": "test/command-outcomes.test.ts rejects mismatched publication receipts, but no orchestration test verifies retained attachment/outbox, absent URL, and successful explicit retry with no re-export."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > invalid publication receipt {\"thread_id\":\"other-thread\"} preserves setup and staged records"
+      ],
+      "note": "`thread share` publishes and answers another thread's ID (patch); the binding keeps thread and checkout without a link, the records stay staged, and the retry publishes with the same mount and delivers the export once."
     },
     {
       "upstream": "register.test.ts > sharing > lost attach receipt save preserves completed setup for explicit retry",
-      "status": "missing",
-      "note": "Fail saving the successful attachment receipt, then restart/retry. Verify no second worktree identity and no re-export or sequence reset."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > lost attach receipt save preserves completed setup for explicit retry"
+      ],
+      "note": "Every store write fails once Delta has attached the worktree (kit.disk predicate on the fake's state), so the attachment is never saved; a restarted pi runs no setup, and the explicit retry reuses the saved pending worktree identity (no second worktree) and delivers the original export once."
     },
     {
       "upstream": "register.test.ts > sharing > lost attach response with exit 1 preserves completed setup for explicit retry",
-      "status": "missing",
-      "note": "Let attach complete remotely but lose its response with exit 1; restart/retry and verify idempotent worktree identity and preservation of the staged snapshot."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > lost attach response with exit 1 preserves completed setup for explicit retry"
+      ],
+      "note": "`worktree attach` attaches and loses its answer with exit 1 (world.answer run); restart and retry as for the lost receipt save."
     },
     {
       "upstream": "register.test.ts > sharing > lost creation binding write retries the same source identity",
-      "status": "missing",
-      "note": "Fail saving the creation receipt and verify a retry resolves the same thread before attachment/publication without duplicating snapshot records."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > lost creation binding write retries the same source identity"],
+      "note": "Store writes fail once Delta has the thread, so its creation receipt is not saved; nothing is attached, published or appended, a restarted pi runs no setup, and the retry finds the same thread (one thread) and delivers the export once."
     },
     {
       "upstream": "register.test.ts > sharing > lost creation local binding retries the same source identity",
-      "status": "missing",
-      "note": "After remotely successful creation with a lost response, delete local staged binding before restart. Verify regeneration is permitted only against the still-empty original producer and resolves the same thread."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > lost creation local binding retries the same source identity"],
+      "note": "Creation's answer is lost and the binding deleted while no pi runs; the retry exports again (two exports) and adopts the still-empty producer's thread, delivering the conversation once."
     },
     {
       "upstream": "register.test.ts > sharing > lost creation response retries the same source identity",
-      "status": "missing",
-      "note": "Complete thread creation remotely but lose the response; restart/retry and assert the same pi source/external session identity, one remote thread, and one imported snapshot."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > lost creation response retries the same source identity"],
+      "note": "`thread create` creates and loses its answer (retryable app_unavailable envelope); a restarted pi runs no setup and the retry resolves the same thread through the producer's empty frontier."
     },
     {
       "upstream": "register.test.ts > sharing > lost share receipt save preserves completed setup for explicit retry",
-      "status": "missing",
-      "note": "Fail the binding write after publication, preserve the pending manifest, and explicitly retry to recover URL/receipts without changing setup identity."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > lost share receipt save preserves completed setup for explicit retry"
+      ],
+      "note": "Store writes fail once the thread is published, so its link is not saved; the binding keeps thread and checkout, a restarted pi runs no setup, and the retry publishes again with the same mount and no second export."
     },
     {
       "upstream": "register.test.ts > sharing > lost share response preserves completed setup for explicit retry",
-      "status": "missing",
-      "note": "Publish remotely, lose the response, then restart/retry. Verify the same thread/mount and original staged content are recovered without duplicate import."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > lost share response preserves completed setup for explicit retry"],
+      "note": "`thread share` publishes and loses its answer; restart and retry as for the lost receipt save."
     },
     {
       "upstream": "register.test.ts > sharing > reference-bound checkout selection cannot silently switch or adopt ambiguous inventories",
-      "status": "missing",
-      "note": "thread-commands.test.ts tests reference/directory selection primitives, but not resume and explicit share preserving the entire existing binding and outbox when status or attach proposes another history."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > reference-bound checkout selection cannot silently switch or adopt ambiguous inventories"
+      ],
+      "note": "Status reports the checkout under another worktree's history (patch); the resumed session refuses a prompt and keeps its binding exactly, and a share whose attach also names that history fails without changing it."
     },
     {
       "upstream": "register.test.ts > sharing > resume checks authenticated denied access without deriving it from a URL",
-      "status": "missing",
-      "note": "Inject an authenticated status/access failure despite a saved URL; assert no unauthorized live delivery or implicit setup changes and preserve the binding. Decoder tests alone do not exercise prompt/delivery effects."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > resume checks authenticated denied access without deriving it from a URL"
+      ],
+      "note": "A shared session with a saved link resumes while `thread status` answers not_visible; its prompt is refused, a shell command is not delivered, no setup runs, and the binding is kept. pi has no tool call outside a turn, so the person's shell command stands in for upstream's tool call."
     },
     {
       "upstream": "register.test.ts > sharing > resume observes attached setup without publishing or reattaching",
-      "status": "missing",
-      "note": "The automatic-session resume e2e test covers remounting, but not an explicitly shared session with attached setup, immutable prior export, zero create/attach/share on resume, and later explicit recovery."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > resume observes attached setup without publishing or reattaching"],
+      "note": "Resuming a shared session remounts its checkout, accepts and delivers a prompt, and runs no create, attach or publish; a later explicit share keeps the link, mount and export."
     },
     {
       "upstream": "register.test.ts > sharing > resume observes unshared setup without publishing or reattaching",
-      "status": "missing",
-      "note": "Resume an explicitly shared thread whose publication/access has disappeared; assert observation does not republish or reattach and explicit share is required to recover queued activity."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > resume observes unshared setup without publishing or reattaching"],
+      "note": "Status reports the thread unpublished and access local only (patch); the resumed session refuses its prompt and runs no setup, and the explicit share publishes again with the same mount, after which prompts deliver. pi's shell command and prompts stand in for upstream's tool call."
     },
     {
       "upstream": "register.test.ts > sharing > resume takes prompts while its checkout mount waits for Delta, and delivers them once it is back",
-      "status": "missing",
-      "note": "Hold restoration of an owned checkout mount, admit and record local prompts meanwhile, then release the mount and assert the queued records drain once with no data loss."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > resume takes prompts while its checkout mount waits for Delta, and delivers them once it is back"
+      ],
+      "note": "`worktree mount` is held as Delta holds it while offline; the resumed session accepts a prompt whose records queue, then delivers them once the mount is ready."
     },
     {
       "upstream": "register.test.ts > sharing > resume with a missing CLI preserves the binding and asks for explicit setup",
-      "status": "missing",
-      "note": "test/cli.test.ts covers discovery versus installation in isolation, but no resumed session test asserts preservation of its binding, zero setup side effects, and explicit share/join recovery advice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > resume with a missing CLI preserves the binding and asks for explicit setup"
+      ],
+      "note": "A saved shared binding resumes with the CLI missing: only discovery runs, no Delta command, the binding is unchanged, and the note says to run /delta-share or /delta-join."
     },
     {
       "upstream": "register.test.ts > sharing > share and join refuse a session without an interactive surface before contacting Delta",
-      "status": "missing",
-      "note": "Attempt share, share-with-email, and join with pi hasUI false; assert refusal before explicit Delta operations or snapshot. Existing headless tests cover automatic recording, not these commands."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/sharing.test.ts > share and join refuse a session without an interactive surface before contacting Delta"
+      ],
+      "note": "In print mode (`hasUI` false) `/delta share`, `/delta share ada@example.com` and `/delta join some-link` refuse on stderr; no Delta command runs and nothing is exported."
     },
     {
       "upstream": "register.test.ts > sharing > share continues when its Windows path spelling changes during installation",
-      "status": "missing",
-      "note": "Change C:\\repo to C:/repo during installation; assert samePath permits exactly one complete share. Primitive separator tests do not exercise the pending operation."
+      "status": "not-applicable",
+      "note": "pi fixes a session runtime's working directory: ExtensionRunner sets `cwd` once in its constructor (core/extensions/runner.js) and `ctx.cwd` returns it, so the folder a share started in cannot be respelled while its session stays (Claude Code's `/cd` can). The share stamps its request with that same string; assertShareSession keeps upstream's samePath check."
     },
     {
       "upstream": "register.test.ts > sharing > share stops when its Windows folder changes during installation",
-      "status": "missing",
-      "note": "With a Host fake, change cwd to another Windows checkout while installation is pending; assert the old share stops before export/setup."
+      "status": "not-applicable",
+      "note": "pi fixes a session runtime's working directory (ExtensionRunner sets `cwd` once in its constructor; core/extensions/runner.js), so a share's folder cannot change while its session stays; moving to another folder is a session switch, which 'share stops when its session changes during installation' covers."
     },
     {
       "upstream": "register.test.ts > sharing > share stops when its session changes during installation",
-      "status": "missing",
-      "note": "Hold installer resolution, replace the session, then release it; assert no snapshot, create, attach, publish, or stale notice in the replacement."
+      "status": "ported",
+      "ours": ["test/behaviour/lifecycle.test.ts > share stops when its session changes during installation"],
+      "note": "The installer is held (faked shell); pi switches to a new session; once installation ends the old share exports, stages, creates and publishes nothing and says nothing in the new session, whose prompt is accepted."
     },
     {
       "upstream": "register.test.ts > startup and commands > an unsupported host warns in the transcript without preventing startup or commands",
@@ -2630,17 +2686,20 @@
     {
       "upstream": "sharing/lifecycle.test.ts > join checks every required built-in, not commands with matching plugin names",
       "status": "not-applicable",
-      "note": "Tests Claude clear/cd built-in capability discovery. Pi's documented switchSession adaptation requires neither built-in command."
+      "note": "Upstream checks that Claude Code's built-in /clear and /cd exist and are not plugin commands. A pi join switches sessions with ExtensionCommandContext.switchSession, an API every command handler gets, so there is no command inventory to check."
     },
     {
       "upstream": "sharing/lifecycle.test.ts > join preflight refuses empty worktrees and unauthenticated access before clearing",
-      "status": "missing",
-      "note": "The same joinPreflight helper exists in src/sharing/lifecycle.ts but is not tested. Test empty available worktrees and non-granted access before pi mount/switch."
+      "status": "ported",
+      "ours": [
+        "test/lifecycle.test.ts > join preflight refuses empty worktrees and unauthenticated access before clearing"
+      ],
+      "note": "joinPreflight with the status fixture: empty available worktrees, and local-only access."
     },
     {
       "upstream": "sharing/lifecycle.test.ts > only completed, failed, or killed background agents permit joining",
       "status": "not-applicable",
-      "note": "Requires Claude's managed-agent status inventory; pi extensions do not receive an equivalent list of independent spawned pi processes."
+      "note": "Upstream reads Claude Code's background agent list (`$.agent.list()` statuses). pi's ExtensionAPI exposes no list of agents or processes a session started; a pi subagent is an independent pi process."
     },
     {
       "upstream": "sharing/lifecycle.test.ts > only exit reasons release session mounts",
@@ -2653,18 +2712,29 @@
     },
     {
       "upstream": "sharing/lifecycle.test.ts > pending share and join operations hold prompts until the operation ends",
-      "status": "missing",
-      "note": "promptGate exists in the port but no test invokes it or verifies admission while explicit sharing/joining is pending."
+      "status": "ported",
+      "ours": [
+        "test/lifecycle.test.ts > pending share and join operations hold prompts until the operation ends",
+        "test/behaviour/lifecycle.test.ts > pending share and join operations hold prompts until the operation ends"
+      ],
+      "note": "promptGate's verdicts, and in the kit: a prompt during a share held at `thread create`, and during a join held at `thread mount`, is refused with the operation's reason and accepted once it ends."
     },
     {
       "upstream": "sharing/lifecycle.test.ts > terminal and desktop are interactive, while headless hosts are not",
-      "status": "missing",
-      "note": "Adapt the helper test to pi hasUI/mode behavior: TUI and dialog-capable RPC may share/join, print/JSON must refuse. Current print-mode recording tests do not attempt explicit share/join."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/lifecycle.test.ts > terminal and desktop are interactive, while headless hosts are not",
+        "test/behaviour/sharing.test.ts > share and join refuse a session without an interactive surface before contacting Delta"
+      ],
+      "note": "pi has no surface list; `ctx.hasUI` (true in pi's terminal and RPC, false in print and JSON modes) decides. An RPC session is asked who should see a share; a print session refuses share, join and setup. The fake pi models RPC and print, not the terminal or JSON modes."
     },
     {
       "upstream": "sharing/lifecycle.test.ts > worktree changes name additions and removals, moving out of a checkout only once",
-      "status": "missing",
-      "note": "Port the pure worktreeChanges addition/removal/path-equivalence matrix. Interpret moves as rejoin guidance rather than automatic cwd movement in pi."
+      "status": "ported",
+      "ours": [
+        "test/lifecycle.test.ts > worktree changes name additions and removals, moving out of a checkout only once"
+      ],
+      "note": "worktreeChanges' addition, removal and Windows path-equivalence matrix. In pi a move becomes rejoin guidance rather than a directory change."
     },
     {
       "upstream": "sharing/share-audience.test.ts > share audience > each answer the question can get decides one audience, or none",

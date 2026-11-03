@@ -97,6 +97,8 @@ export async function startDelta(
     programs,
     /** The other programs the extension ran, as full argument lists. */
     others: () => processes.others.map((call) => call.argv),
+    /** How many one-shot Delta commands the extension started are still running. */
+    busy: () => processes.busy(),
     /** The delta commands the extension ran, as argument lists without the program. */
     commands: () => processes.ran.map((call) => call.argv.slice(1).filter((arg) => arg !== '--json')),
     /**

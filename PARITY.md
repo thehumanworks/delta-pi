@@ -36,11 +36,11 @@ Each entry gives its reason. Three checks keep the record honest:
 <!-- parity-summary:start -->
 | Status | Upstream tests |
 | --- | --- |
-| ported | 198 |
-| covered | 56 |
-| missing | 165 |
+| ported | 225 |
+| covered | 57 |
+| missing | 135 |
 | unsupported | 23 |
-| not-applicable | 67 |
+| not-applicable | 69 |
 <!-- parity-summary:end -->
 
 Most missing tests are upstream's engine tests (`register.test.ts`, `setup/auto.test.ts`,
