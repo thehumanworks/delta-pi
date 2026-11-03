@@ -174,8 +174,18 @@ export class FakePi {
     this.runtime = undefined
   }
 
+  /**
+   * How the next switch a command asks for goes: pi's own refusal before it starts, a failure before it
+   * shuts the session down, or, unset, a switch.
+   */
+  nextSwitch: 'cancel' | Error | undefined
+
   /** Switch to the session saved in `file`, as `/resume` or a command's `switchSession` does. */
   async switchTo(file: string, reason: 'resume' | 'new' | 'fork' = 'resume') {
+    const outcome = this.nextSwitch
+    this.nextSwitch = undefined
+    if (outcome === 'cancel') return { cancelled: true }
+    if (outcome) throw outcome
     await this.shutdown(reason, file)
     this.session = this.sessions.get(file) ?? this.sessionFromFile(file)
     await this.start(reason)

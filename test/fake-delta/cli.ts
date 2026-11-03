@@ -46,7 +46,8 @@ export type FakeThread = {
 export type FakeWorktree = {
   reference: string
   worktree_id: string
-  directories: { directory: string; state: 'waiting' | 'mounted' }[]
+  /** Where the worktree is checked out, and, for a thread mount's folder, how many mount commands hold it. */
+  directories: { directory: string; state: 'waiting' | 'mounted'; holders?: number }[]
 }
 /** Everything the fake Delta holds, in `$FAKE_DELTA_STATE/state.json`. */
 export type FakeState = {
@@ -200,15 +201,25 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     fail('authentication_required', 'Sign in to Delta')
   /** Switches a test flips in the state folder: a file per switch. */
   const flag = (name: string) => existsSync(join(root, name))
-  // A test holds the next runs of a command while `hold-<command>` exists, and makes them fail while
-  // `fail-<command>` counts down: see world() in test/world.ts.
+  // A test holds runs of a command while `hold-<command>` exists, and makes runs fail while
+  // `fail-<command>` counts down, each after letting `after` runs through: see world() in test/world.ts.
   const switchName = words.replaceAll(' ', '-')
-  while (flag(`hold-${switchName}`)) await new Promise((resolve) => setTimeout(resolve, 20))
-  const failures = join(root, `fail-${switchName}`)
-  if (existsSync(failures)) {
-    const left = Number(readFileSync(failures, 'utf8'))
-    if (left <= 1) rmSync(failures, { force: true })
-    else writeFileSync(failures, String(left - 1))
+  /** Whether this run is past the runs the switch lets through; counts them down meanwhile. */
+  const reached = (path: string): { after: number; times?: number } | undefined => {
+    if (!existsSync(path)) return
+    const value = JSON.parse(readFileSync(path, 'utf8')) as { after: number; times?: number }
+    if (value.after <= 0) return value
+    writeFileSync(path, JSON.stringify({ ...value, after: value.after - 1 }))
+    return undefined
+  }
+  const holding = join(root, `hold-${switchName}`)
+  if (reached(holding)) while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+  const failing = join(root, `fail-${switchName}`)
+  const failure = reached(failing)
+  if (failure) {
+    const left = (failure.times ?? 1) - 1
+    if (left <= 0) rmSync(failing, { force: true })
+    else writeFileSync(failing, JSON.stringify({ after: 0, times: left }))
     fail('process_failed', `${words} failed as the test asked`, true)
   }
 
@@ -514,9 +525,11 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         for (const reference of thread.worktrees) {
           let tree = state.worktrees.find((entry) => entry.reference === reference)
           if (!tree) state.worktrees.push((tree = { reference, worktree_id: reference, directories: [] }))
-          if (!tree.directories.some((entry) => entry.directory === folder))
-            tree.directories.push({ directory: folder, state: 'mounted' })
-          else for (const entry of tree.directories) if (entry.directory === folder) entry.state = 'mounted'
+          const entry = tree.directories.find((candidate) => candidate.directory === folder)
+          if (entry) {
+            entry.state = 'mounted'
+            entry.holders = (entry.holders ?? 0) + 1
+          } else tree.directories.push({ directory: folder, state: 'mounted', holders: 1 })
         }
         return folder
       })
@@ -528,7 +541,16 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         directory,
         worktrees: thread.worktrees.map((reference) => ({ reference, name: 'repo', directory, state: 'mounted' })),
       })
-      await io.hold()
+      // Delta releases an owner's directories once no mount command for them runs; mounting again under
+      // the same owner replaces the process and keeps them mounted.
+      await io.hold(() =>
+        update((state) => {
+          for (const tree of state.worktrees)
+            for (const entry of tree.directories)
+              if (entry.directory === directory && (entry.holders = (entry.holders ?? 1) - 1) <= 0)
+                entry.state = 'waiting'
+        }),
+      )
       break
     }
     case 'worktree list': {

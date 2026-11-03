@@ -61,6 +61,14 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
             .map((line) => JSON.parse(line))
         : []
     },
+    /** Run the fake CLI as another producer would, such as a teammate, and read its JSON answer. */
+    cli(...args: string[]): any {
+      return JSON.parse(
+        execFileSync(join(FAKE_BIN, 'delta'), ['--json', ...args], {
+          env: { ...process.env, FAKE_DELTA_STATE: state },
+        }).toString(),
+      )
+    },
     /** Make `thread watch` report `events` for `thread`, as if a teammate acted. */
     remote(thread: string, ...events: Event[]) {
       const path = join(state, `events-${thread}.jsonl`)
@@ -82,14 +90,17 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
         ...extra,
       }
     },
-    /** Make the next `times` runs of `command`, such as `worktree list`, fail as a transient error. */
-    fail(command: string, times = 1) {
-      writeFileSync(join(state, `fail-${command.replaceAll(' ', '-')}`), String(times))
+    /**
+     * Make `times` runs of `command`, such as `worktree list`, fail as a transient error, after letting
+     * `after` runs through.
+     */
+    fail(command: string, { times = 1, after = 0 } = {}) {
+      writeFileSync(join(state, `fail-${command.replaceAll(' ', '-')}`), JSON.stringify({ after, times }))
     },
-    /** Hold every run of `command` until the returned function releases them. */
-    hold(command: string): () => void {
+    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
+    hold(command: string, { after = 0 } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
-      writeFileSync(path, '')
+      writeFileSync(path, JSON.stringify({ after }))
       return () => rmSync(path, { force: true })
     },
     cleanup() {

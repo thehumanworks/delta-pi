@@ -93,6 +93,11 @@ function deltaStream(args: string[], env: Record<string, string>): ProcessStream
     },
     hold: (onStop, poll) =>
       new Promise((resolve) => {
+        // Stopped before it was ready, the command ends as a killed program does.
+        if (exit) {
+          onStop?.()
+          return resolve()
+        }
         const timer = poll ? setInterval(poll, 50) : undefined
         stop = () => {
           if (timer) clearInterval(timer)
