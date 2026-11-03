@@ -136,3 +136,15 @@ test.each(['turn', 'share', 'join'] as const)('the update notice gives way while
   expect(bandText(busy)).toBeUndefined()
   expect(new BandWidget(busy, () => theme).render(80)).toEqual([])
 })
+
+test('a failure keeps its explanation in the band, above the update notice', () => {
+  setProgress(host, "Delta couldn't share: this folder isn't a Git checkout.", 'error')
+  expect(bandText(host)).toContain("this folder isn't a Git checkout")
+  expect(bandText(host)).toContain(NOTICE)
+  for (const width of [40, 80, 120]) {
+    const lines = new BandWidget(host, () => theme).render(width).map((line) => stripVTControlCharacters(line))
+    const failure = lines.findIndex((line) => line.includes("Delta couldn't"))
+    expect(failure).toBeGreaterThanOrEqual(0)
+    expect(lines.findIndex((line) => line.includes('↑'))).toBeGreaterThan(failure)
+  }
+})

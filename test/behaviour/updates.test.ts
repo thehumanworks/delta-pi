@@ -645,6 +645,9 @@ describe('plugin updates', () => {
     expect(extension.fetches).toEqual([])
     expect(extension.piUpdates).toEqual([])
     expect(kit.pi.reloads).toBe(1)
+    // The reloaded extension does not offer the release it announced again.
+    await quiet(kit)
+    expect(extensionNotice(kit)).toBeUndefined()
   })
 
   test('a visible notice follows a native download and stays out of the way of a running turn or survey', async () => {
