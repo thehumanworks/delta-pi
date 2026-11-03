@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { FakeSession, type Kit, startDelta } from '../kit/index.ts'
 import { FAKE_BIN, type World } from '../world.ts'
+import { itemFingerprint } from '../../src/watch/conversation.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -640,4 +641,126 @@ test("the switch a join makes ends the previous session without releasing the jo
   expect(threadMounts(kit.world, thread)).toEqual({ [session]: 'mounted' })
   expect(await bindingOf(kit, session)).toMatchObject({ owner: session, joined: true })
   expect(before).not.toBe(session)
+})
+
+/** What the band starts with while a recorded session's watch is live. */
+const LIVE = '● Delta · Syncing'
+/** Wait until `session`'s outbox has nothing left to deliver. */
+const delivered = (kit: Kit, session: string) =>
+  kit.until(async () => !(await bindingOf(kit, session)).pending.length, 'the outbox to drain')
+
+test('resume mounts again, moves Claude from its launch directory, and records only new rows', async () => {
+  const first = await joiner()
+  delta = first
+  const { thread, share } = sharedThread(first.world)
+  await first.pi.command('delta-join', share)
+  await first.until(() => joined(first), 'the join to finish')
+  const session = first.pi.session.id
+  await first.pi.prompt('before leaving')
+  await delivered(first, session)
+  const binding = structuredClone(await bindingOf(first, session))
+  const recorded = structuredClone(recordsOf(first, thread))
+  await first.whileTimePasses(first.pi.shutdown('quit'))
+  await first.crash()
+  // Exiting released the checkouts.
+  expect(Object.values(threadMounts(first.world, thread))).toEqual(['waiting'])
+  // pi resumes the session in the thread's folder, which its file names: there is nothing to move.
+  const release = first.world.hold('thread mount')
+  const second = await startDelta({ world: first.world, session: first.pi.session })
+  let third: Kit | undefined
+  try {
+    // Prompts wait while the worktrees come back, and the band shows the progress.
+    await second.until(() => band(second).includes("Restoring the thread's worktrees"), 'the restore to start')
+    expect(await second.pi.prompt('too early')).toBe('handled')
+    expect(shown(second)).toContain("Delta is restoring this thread's worktrees")
+    release()
+    await second.until(() => band(second).includes('Restored 1 worktree'), 'the worktrees to be restored')
+    expect(second.pi.session.cwd).toBe(binding.directory)
+    expect(await bindingOf(second, session)).toEqual(binding)
+    expect(ran(second, 'thread mount').length).toBeGreaterThan(0)
+    expect(ran(second, 'thread mount').every((args) => !args.includes('--join'))).toBe(true)
+    expect(await second.pi.prompt('run echo new local output')).toBe('settled')
+    await delivered(second, session)
+    // Only the new turn is recorded: nothing earlier is exported again.
+    const records = recordsOf(second, thread)
+    expect(records.slice(0, recorded.length)).toEqual(recorded)
+    expect(records.slice(recorded.length).some((record) => JSON.stringify(record).includes('new local output'))).toBe(
+      true,
+    )
+    expect(JSON.stringify(records.slice(recorded.length))).not.toContain('before leaving')
+    expect(records.map((record) => record.sequence)).toEqual(records.map((_, index) => index + 1))
+    await second.pi.command('delta', 'share')
+    await second.until(() => shown(second).includes('/delta-join'), 'the share to be refused')
+    for (const command of ['thread create', 'worktree attach', 'thread share']) expect(ran(second, command)).toEqual([])
+    // Resuming again mounts again, in the same folder.
+    await second.whileTimePasses(second.pi.shutdown('quit'))
+    await second.crash()
+    third = await startDelta({ world: first.world, session: second.pi.session })
+    await third.until(() => band(third!).includes('Restored 1 worktree'), 'the worktrees to be restored again')
+    expect(ran(third, 'thread mount').every((args) => !args.includes('--join'))).toBe(true)
+    expect(Object.values(threadMounts(first.world, thread))).toContain('mounted')
+    expect(third.pi.session.cwd).toBe(binding.directory)
+    second.expectClean()
+    third.expectClean()
+  } finally {
+    await third?.stop()
+    await second.stop()
+  }
+})
+
+test('terminal: repeated join aliases preserve the existing producer and pending immutable records, then deliver once', async () => {
+  const { kit, thread, share, session } = await joinedThread()
+  delta = kit
+  await kit.pi.prompt('run echo recorded')
+  await delivered(kit, session)
+  const recorded = structuredClone(recordsOf(kit, thread))
+  kit.world.fail('thread append', { times: 1_000, code: 'app_unavailable', retryable: true })
+  await kit.whileTimePasses(kit.pi.prompt('run echo queued'))
+  const binding = structuredClone(await bindingOf(kit, session))
+  const files = binding.pending
+    .flatMap((entry: { files: string[] }) => entry.files)
+    .map((path: string) => [path, readFileSync(path, 'utf8')] as const)
+  expect(binding.pending.length).toBeGreaterThan(0)
+  expect(binding.lastTurnSequence).toBeGreaterThan(0)
+  // A teammate's message the model has already read.
+  const item = remoteItem('Already handed off', 'known')
+  const ledger = { thread, items: { known: await itemFingerprint(item.item as never) } }
+  await kit.store.set(`appended:${session}`, ledger)
+  kit.world.remote(thread, item)
+  kit.world.endWatch(thread)
+  await kit.until(() => shown(kit).includes('Connection interrupted'), 'the watch to drop')
+  const commands = kit.commands().length
+  const rows = kit.pi.contextMessages().length
+  // Joining again by the thread's ID reconnects this session as it is, while Delta still cannot be reached.
+  await kit.pi.command('delta-join', thread)
+  expect(kit.pi.session.id).toBe(session)
+  expect(await bindingOf(kit, session)).toEqual(binding)
+  for (const [path, content] of files) expect(readFileSync(path, 'utf8')).toBe(content)
+  expect(recordsOf(kit, thread)).toEqual(recorded)
+  expect(await kit.store.get(`appended:${session}`)).toEqual(ledger)
+  expect(kit.pi.contextMessages()).toHaveLength(rows)
+  // Recovery checks the sign-in, then only mounts, reads, watches and sends: no transition of its own.
+  const recovery = ['auth status', 'thread mount', 'thread status', 'thread watch', 'thread append']
+  const since = kit.commands().slice(commands)
+  expect(since.map((args) => args.slice(0, 2).join(' ')).filter((command) => !recovery.includes(command))).toEqual([])
+  // Joining again by its share ID, with Delta back, delivers what was queued, once.
+  kit.world.stopFailing('thread append')
+  await kit.pi.command('delta-join', share)
+  await delivered(kit, session)
+  const recovered = await bindingOf(kit, session)
+  expect(recovered).toEqual({ ...binding, pending: [] })
+  expect(recovered.lastTurnSequence).toBe(binding.lastTurnSequence)
+  const records = recordsOf(kit, thread)
+  expect(records.slice(0, recorded.length)).toEqual(recorded)
+  expect(records.map((record) => record.sequence)).toEqual(records.map((_, index) => index + 1))
+  expect(
+    records.filter(
+      (record) => record.update.sessionUpdate === 'user_message' && JSON.stringify(record).includes('run echo queued'),
+    ),
+  ).toHaveLength(1)
+  expect(await kit.store.get(`appended:${session}`)).toEqual(ledger)
+  expect(kit.pi.contextMessages()).toHaveLength(rows)
+  // The reconnected conversation keeps reporting in the band.
+  expect(band(kit)).toContain(LIVE)
+  for (const command of ['thread create', 'worktree attach', 'thread share']) expect(ran(kit, command)).toEqual([])
 })
