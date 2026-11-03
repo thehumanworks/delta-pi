@@ -45,7 +45,8 @@
     "test:behaviour": "vitest run --project behaviour",
     "test:e2e": "vitest run --project e2e",
     "verify": "npm run format:check && npm run check && npm run lint && npm test",
-    "prepublishOnly": "npm run verify"
+    "prepublishOnly": "npm run verify",
+    "test:package": "node scripts/test-package.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
