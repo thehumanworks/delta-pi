@@ -2,7 +2,7 @@
 // engine tests (hooks/register.test.ts: the recording contract) onto the kit.
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, startDelta } from '../kit/index.ts'
-import { appends, binding, delivered, recording, records, restart, seedPending, watches } from './recorded.ts'
+import { appends, binding, delivered, recording, records, seedPending, watches } from './recorded.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {

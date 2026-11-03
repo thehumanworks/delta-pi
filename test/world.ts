@@ -92,13 +92,33 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     },
     /**
      * Make `times` runs of `command`, such as `worktree list`, fail with Delta's error `code`, transient
-     * unless `retryable` is false, after letting `after` runs through.
+     * unless `retryable` is false, after letting `after` runs through. A `thread append` given `accept`
+     * fails only after Delta accepted and acknowledged that many of its leading records.
      */
-    fail(command: string, { times = 1, after = 0, code = 'process_failed', retryable = true } = {}) {
+    fail(
+      command: string,
+      {
+        times = 1,
+        after = 0,
+        code = 'process_failed',
+        retryable = true,
+        accept,
+      }: { times?: number; after?: number; code?: string; retryable?: boolean; accept?: number } = {},
+    ) {
       writeFileSync(
         join(state, `fail-${command.replaceAll(' ', '-')}`),
-        JSON.stringify({ after, times, code, retryable }),
+        JSON.stringify({ after, times, code, retryable, accept }),
       )
+    },
+    /**
+     * Supersede the producer turn `sequence` of `thread`, as another participant taking the thread does:
+     * Delta fences the records the turn appends from now on. The watch says so only when a test also
+     * reports it (`remote`).
+     */
+    supersede(thread: string, sequence: number) {
+      const path = join(state, `superseded-${thread}.json`)
+      const previous: number[] = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : []
+      writeFileSync(path, JSON.stringify([...previous, sequence]))
     },
     /** Let `command` run normally again after `fail`. */
     stopFailing(command: string) {

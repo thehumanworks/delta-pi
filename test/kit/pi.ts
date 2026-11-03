@@ -18,8 +18,9 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import type { Platform } from '../../src/core/host.ts'
 
-/** What the model answers: text, tool calls, and how its reply ended. */
+/** What the model answers: its thinking, text, tool calls, and how its reply ended. */
 export type Reply = {
+  thinking?: string
   text?: string
   calls?: { name: 'bash' | 'write'; arguments: Record<string, unknown> }[]
   stopReason?: 'stop' | 'length' | 'error'
@@ -82,6 +83,16 @@ export class FakePi {
   readonly errors: unknown[] = []
   /** Text in the editor, where a refused prompt goes back. */
   editor = ''
+  /** How many times an extension asked pi to stop its run. */
+  aborts = 0
+  /**
+   * How pi runs a reply's tool calls: `parallel`, pi's default, prepares every call (its
+   * `tool_execution_start` and `tool_call`) before running any, and adds their results once all have
+   * run; `sequential` prepares, runs and adds each call in turn.
+   */
+  toolExecution: 'parallel' | 'sequential' = 'parallel'
+  /** Other extensions' handlers, which pi runs after this extension's, by event. */
+  readonly others = new Map<string, Handler[]>()
   model: Model = echoModel
   session: FakeSession
   private runtime: Runtime | undefined
@@ -201,6 +212,12 @@ export class FakePi {
     return { cancelled: false }
   }
 
+  /** Name the session, as `/name` does, and tell the extension. */
+  async rename(name: string) {
+    this.session.name = name
+    await this.emit('session_info_changed', { name })
+  }
+
   /** Start a new empty session in `cwd`, as `/new` does. */
   async newSessionIn(cwd = this.session.cwd) {
     const session = this.newSession(cwd)
@@ -280,22 +297,7 @@ export class FakePi {
       const reply: Reply = this.aborted ? { stopReason: 'stop' } : await this.model(this.messages())
       const assistant = this.assistant(reply)
       await this.message(assistant)
-      const results: AgentMessage[] = []
-      for (const call of reply.calls && !this.aborted ? toolCalls(assistant) : []) {
-        const outcome = await this.emit('tool_call', {
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.arguments,
-        })
-        await this.emit('tool_execution_start', { toolCallId: call.id, toolName: call.name, args: call.arguments })
-        const result =
-          isObject(outcome) && outcome.block === true
-            ? toolResult(call, 'Blocked by an extension', true)
-            : await this.execute(call)
-        await this.emit('tool_execution_end', { toolCallId: call.id, toolName: call.name, result, isError: false })
-        await this.message(result)
-        results.push(result)
-      }
+      const results = reply.calls && !this.aborted ? await this.runTools(toolCalls(assistant)) : []
       await this.emit('turn_end', { turnIndex: turn, message: assistant, toolResults: results })
       // pi adds context messages sent during the turn once the turn has ended.
       for (const entry of this.pendingCustom.splice(0)) this.append(entry)
@@ -306,6 +308,35 @@ export class FakePi {
     this.streaming = false
     for (const message of this.pendingShell.splice(0)) this.append({ type: 'message', message })
     await this.emit('agent_settled', { aborted: this.aborted })
+  }
+
+  /** Run a reply's tool calls as pi's agent loop does (`toolExecution`), and add their results. */
+  private async runTools(calls: ToolCallBlock[]): Promise<AgentMessage[]> {
+    const prepare = async (call: ToolCallBlock) => {
+      await this.emit('tool_execution_start', { toolCallId: call.id, toolName: call.name, args: call.arguments })
+      const outcome = await this.emit('tool_call', { toolCallId: call.id, toolName: call.name, input: call.arguments })
+      return isObject(outcome) && outcome.block === true
+    }
+    const finish = async (call: ToolCallBlock, blocked: boolean) => {
+      const result = blocked ? toolResult(call, 'Blocked by an extension', true) : await this.execute(call)
+      await this.emit('tool_execution_end', { toolCallId: call.id, toolName: call.name, result, isError: false })
+      return result
+    }
+    const results: AgentMessage[] = []
+    if (this.toolExecution === 'sequential') {
+      for (const call of calls) {
+        const result = await finish(call, await prepare(call))
+        await this.message(result)
+        results.push(result)
+      }
+      return results
+    }
+    const blocked: boolean[] = []
+    for (const call of calls) blocked.push(await prepare(call))
+    // pi starts every prepared call at once; its file mutation queue runs writes to one file in order.
+    for (const [index, call] of calls.entries()) results.push(await finish(call, blocked[index]!))
+    for (const result of results) await this.message(result)
+    return results
   }
 
   /** A message's start and end; pi commits what the end handlers leave. */
@@ -325,6 +356,7 @@ export class FakePi {
 
   private assistant(reply: Reply): AgentMessage {
     const content = [
+      ...(reply.thinking ? [{ type: 'thinking', thinking: reply.thinking, thinkingSignature: 'signature' }] : []),
       ...(reply.text ? [{ type: 'text', text: reply.text }] : []),
       ...(reply.calls ?? []).map((call) => ({
         type: 'toolCall',
@@ -358,7 +390,7 @@ export class FakePi {
 
   private async emit(type: string, event: Record<string, unknown>): Promise<unknown> {
     let result: unknown
-    for (const handler of this.runtime?.handlers.get(type) ?? []) {
+    for (const handler of [...(this.runtime?.handlers.get(type) ?? []), ...(this.others.get(type) ?? [])]) {
       try {
         const answer = await handler({ type, ...event }, this.context())
         if (answer !== undefined) result = answer
@@ -386,7 +418,10 @@ export class FakePi {
       getEditorText: () => this.editor,
       setEditorText: (text: string) => (this.editor = text),
     }
-    const abort = () => (this.aborted = true)
+    const abort = () => {
+      this.aborts++
+      this.aborted = true
+    }
     return {
       get cwd() {
         active()
