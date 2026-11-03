@@ -15,7 +15,7 @@ import { dirname, resolve } from 'node:path'
 import { promisify, stripVTControlCharacters } from 'node:util'
 import { vi } from 'vitest'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import type { ExtensionAPI, Theme } from '@earendil-works/pi-coding-agent'
+import { type ExtensionAPI, initTheme, type Theme } from '@earendil-works/pi-coding-agent'
 import type { Component } from '@earendil-works/pi-tui'
 import type { Platform } from '../../src/core/host.ts'
 
@@ -130,6 +130,8 @@ export class FakePi {
   readonly errors: unknown[] = []
   /** Text in the editor, where a refused prompt goes back. */
   editor = ''
+  /** How many times the extension stopped a running turn. */
+  aborts = 0
   model: Model = echoModel
   session: FakeSession
   private runtime: Runtime | undefined
@@ -292,6 +294,8 @@ export class FakePi {
    * Like pi, a row is built once and drawn again on every render, until the extension invalidates the TUI.
    */
   drawnRows(width = 100, raw = false): { content: unknown; details: unknown; lines: string[] | undefined }[] {
+    // pi's terminal loads its theme, which markdown draws in, before it draws anything.
+    initTheme('dark')
     return this.session.entries.flatMap((entry) => {
       if (entry.type !== 'custom_message' || !entry.display) return []
       const renderer = this.messageRenderers.get(String(entry.customType))
@@ -491,7 +495,10 @@ export class FakePi {
       getEditorText: () => this.editor,
       setEditorText: (text: string) => (this.editor = text),
     }
-    const abort = () => (this.aborted = true)
+    const abort = () => {
+      this.aborts++
+      this.aborted = true
+    }
     return {
       get cwd() {
         active()

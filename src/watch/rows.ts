@@ -11,6 +11,7 @@ import {
   addRows,
   commentAction,
   commentAuthor,
+  commentKey,
   commentMarkdown,
   commentQuote,
   isDrawnItem,
@@ -20,14 +21,17 @@ import {
   keyedComment,
   type PendingRow,
   type QuotedLine,
+  type RemoteView,
 } from './conversation.ts'
 import { feed, watchedSession } from './watch.ts'
 
 /**
  * What a remote row draws for the person, saved with the row so it draws the same after a restart or
- * resume. Only what is drawn is kept; the model reads the row's own text.
+ * resume. Only what is drawn is kept; the model reads the row's own text. `id` is the item's, or the
+ * comment's key, and `thread` the thread it is in: while the watch holds that thread, the row draws
+ * the item as it is now (`liveDisplay`), so a teammate's edit or removal redraws it.
  */
-export type RemoteDisplay =
+export type RemoteDisplay = (
   | { kind: 'message'; author: string; person: string; agent: boolean; markdown: string }
   | { kind: 'tool'; author: string; person: string; name: string; detail?: string; status?: string }
   | { kind: 'event'; markdown: string }
@@ -38,10 +42,15 @@ export type RemoteDisplay =
       action: string
       reply: boolean
       routed: boolean
+      /** The quoted context, each passage with up to QUOTE_ROOM of its line around it; drawing fits it to the row. */
       quote: QuotedLine[]
       markdown: string
     }
   | { kind: 'context' }
+) & { id?: string; thread?: string }
+
+/** How much of a quoted passage's line a saved row keeps, more than any terminal row shows. */
+const QUOTE_ROOM = 1_000
 
 /** The pass adding the watched thread's completed items to pi's context, while one runs. */
 export let settling: Promise<void> | undefined
@@ -88,7 +97,8 @@ export function stopRows(): Promise<void> | undefined {
 /** What an item draws for the person, from the view the watch keeps. */
 function itemDisplay(item: WatchItem, thread: string): RemoteDisplay | undefined {
   if (!isDrawnItem(item)) return
-  if (isEventItem(item)) return { kind: 'event', markdown: itemMarkdown(item, thread) }
+  const row = { id: item.id, thread }
+  if (isEventItem(item)) return { kind: 'event', markdown: itemMarkdown(item, thread), ...row }
   const person = personKey(item.author ?? { user_id: null, name: itemAuthor(item) })
   if (item.kind === 'tool_call') {
     const { name, detail, status } = toolCallParts(item)
@@ -99,6 +109,7 @@ function itemDisplay(item: WatchItem, thread: string): RemoteDisplay | undefined
       name,
       ...(detail ? { detail } : {}),
       ...(status ? { status } : {}),
+      ...row,
     }
   }
   return {
@@ -107,13 +118,12 @@ function itemDisplay(item: WatchItem, thread: string): RemoteDisplay | undefined
     person,
     agent: item.kind !== 'user_message',
     markdown: itemMarkdown(item, thread),
+    ...row,
   }
 }
 
 /** What a comment draws for the person: its author and action, the passage it is about, and its text. */
-function commentDisplay(comment: WatchComment): RemoteDisplay | undefined {
-  const view = feed.view
-  if (!view) return
+function commentDisplay(view: RemoteView, comment: WatchComment): RemoteDisplay {
   const parent = view.commentParent(comment)
   const target = view.commentTarget(comment)
   return {
@@ -123,9 +133,38 @@ function commentDisplay(comment: WatchComment): RemoteDisplay | undefined {
     action: commentAction(comment, parent, target),
     reply: comment.chain !== comment.id,
     routed: !!comment.routed_to,
-    quote: commentQuote(comment, parent, target, view.items, 100),
+    quote: commentQuote(comment, parent, target, view.items, QUOTE_ROOM),
     markdown: commentMarkdown(comment, view.thread),
+    id: commentKey(comment.id),
+    thread: view.thread,
   }
+}
+
+/**
+ * What a drawn row shows now. While the watch holds the row's thread, that is the item or comment as
+ * it is now, nothing (`gone`) once it was removed, emptied, or is missing from a complete snapshot,
+ * and what was saved while its snapshot is still arriving. Otherwise, as after a restart before the
+ * watch is back, it is what was saved. `sources` are the objects the answer was made from, so a
+ * renderer redraws only when one of them is replaced.
+ */
+export function liveDisplay(saved: RemoteDisplay): { display: RemoteDisplay | 'gone'; sources: unknown[] } {
+  const view = feed.view
+  if (!view || saved.id === undefined || saved.thread !== view.thread) return { display: saved, sources: [saved] }
+  if (view.wasRemoved(saved.id)) return { display: 'gone', sources: [view, 'removed'] }
+  const commentId = keyedComment(saved.id)
+  if (commentId !== undefined) {
+    const comment = view.comments.get(commentId)
+    if (!comment) return view.snapshotDone ? { display: 'gone', sources: [view] } : { display: saved, sources: [saved] }
+    const target = view.commentTarget(comment)
+    const quoted = target?.kind === 'transcript' && target.item_id !== null ? view.items.get(target.item_id) : undefined
+    return {
+      display: commentDisplay(view, comment),
+      sources: [comment, view.commentParent(comment), view.comments.get(comment.chain), quoted],
+    }
+  }
+  const item = view.items.get(saved.id)
+  if (!item) return view.snapshotDone ? { display: 'gone', sources: [view] } : { display: saved, sources: [saved] }
+  return { display: itemDisplay(item, view.thread) ?? 'gone', sources: [item] }
 }
 
 /**
@@ -139,7 +178,7 @@ function appendRow(host: Host, row: PendingRow): { deny?: string } {
     const commentId = keyedComment(row.commandItem)
     const comment = commentId === undefined ? undefined : view.comments.get(commentId)
     const item = view.items.get(row.commandItem)
-    display = comment ? commentDisplay(comment) : item ? itemDisplay(item, view.thread) : undefined
+    display = comment ? commentDisplay(view, comment) : item ? itemDisplay(item, view.thread) : undefined
   }
   host.pi.sendMessage<RemoteDisplay>(
     {
