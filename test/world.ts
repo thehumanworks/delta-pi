@@ -94,10 +94,19 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
      * Make `times` runs of `command`, such as `worktree list`, fail with Delta's error `code`, transient
      * unless `retryable` is false, after letting `after` runs through.
      */
-    fail(command: string, { times = 1, after = 0, code = 'process_failed', retryable = true } = {}) {
+    fail(
+      command: string,
+      {
+        times = 1,
+        after = 0,
+        code = 'process_failed',
+        retryable = true,
+        reason,
+      }: { times?: number; after?: number; code?: string; retryable?: boolean; reason?: string } = {},
+    ) {
       writeFileSync(
         join(state, `fail-${command.replaceAll(' ', '-')}`),
-        JSON.stringify({ after, times, code, retryable }),
+        JSON.stringify({ after, times, code, retryable, ...(reason ? { reason } : {}) }),
       )
     },
     /** Let `command` run normally again after `fail`. */
@@ -125,6 +134,22 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
       { times = 1, after = 0 } = {},
     ) {
       writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
+    },
+    /** Make `org list` answer these organizations, `{ id, name, current, personal? }`, as the account's. */
+    organizations(organizations: { id: string; name: string; current: boolean; personal?: boolean }[]) {
+      writeFileSync(join(state, 'organizations.json'), JSON.stringify(organizations))
+    },
+    /**
+     * Set where Delta's background upload of an automatic session's thread is (`FakeUpload` in
+     * test/fake-delta/cli.ts): `queued` before Delta registers it and gives it a link, `uploading`, then
+     * `uploaded` or `failed` with `error`. Every thread with an upload organization reports it.
+     */
+    upload(upload: {
+      state: 'queued' | 'uploading' | 'uploaded' | 'failed'
+      error?: string
+      reportsOrganization?: boolean
+    }) {
+      writeFileSync(join(state, 'upload.json'), JSON.stringify(upload))
     },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
