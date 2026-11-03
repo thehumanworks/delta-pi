@@ -3,7 +3,7 @@
 // onto the kit.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { UPDATE_HELPER_ARGV } from '../fake-delta/cli.ts'
 import { type Kit, startDelta } from '../kit/index.ts'
 import type { Exit, Output, ProcessStream, RunResult } from '../../src/core/process.ts'
@@ -13,6 +13,7 @@ afterEach(async () => {
   delta?.expectClean()
   await delta?.stop()
   delta = undefined
+  vi.unstubAllGlobals()
 })
 
 const NOT_NOW = (dialog: { title: string }) => (dialog.title.includes('Set it up now?') ? 'Not now' : undefined)
@@ -83,13 +84,13 @@ test('a stalled startup check cannot block prompts or sharing and expires withou
   expect(notices(delta).some((text) => text.includes('0.24.0 is available'))).toBe(false)
 })
 
-for (const command of ['delta'] as const)
+for (const command of ['delta-update', 'delta'] as const)
   test(`${command} explicitly updates with its telemetry command form`, async () => {
     delta = await started()
     delta.world.release('0.24.0')
     const release = delta.world.hold('update install')
     const before = notices(delta).length
-    const updating = delta.pi.command('delta', 'update')
+    const updating = command === 'delta' ? delta.pi.command('delta', 'update') : delta.pi.command('delta-update')
     // The band draws the CLI's latest event in place of the last; the transcript only says it started.
     await delta.until(() => band(delta!).includes('45%'), 'the download to report its progress')
     expect(band(delta)).toContain('Downloading 0.24.0')
@@ -100,7 +101,10 @@ for (const command of ['delta'] as const)
     expect(notices(delta).at(-1)).toBe('Updated Delta to 0.24.0.')
     expect(band(delta)).not.toContain('Downloading')
     expect(updates(delta).map((call) => call.argv)).toEqual([['update', '--json']])
-    expect(updates(delta)[0]!.env).toEqual({ integration: 'pi', form: 'delta_subcommand' })
+    expect(updates(delta)[0]!.env).toEqual({
+      integration: 'pi',
+      form: command === 'delta' ? 'delta_subcommand' : 'dedicated_command',
+    })
   })
 
 test('an installer the plugin did not ask for is refused and never started', async () => {
@@ -401,4 +405,446 @@ test('Windows update option failures preserve the CLI error even when update che
   expect(result).not.toContain('This Delta CLI does not support')
   expect(result).not.toContain('https://delta.dev')
   expect(delta.others().map((argv) => argv[0])).not.toContain(UPDATE_HELPER_ARGV[0])
+})
+
+/** This copy of the extension: where it runs from, and the version it runs. */
+const ROOT = join(import.meta.dirname, '..', '..')
+const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { name: string; version: string }
+const NAME = MANIFEST.name
+const RUNNING = MANIFEST.version
+const REGISTRY = `https://registry.npmjs.org/${NAME.replace('/', '%2F')}/latest`
+const HOUR = 3_600_000
+const DAY = 24 * HOUR
+
+/**
+ * The extension as pi installed it, and npm: `pi list` lists `source` at `path`, `pi update` installs
+ * `latest`, and the registry answers `latest` (or `status`). Holds make a request or update wait.
+ */
+type Extension = {
+  source: string
+  path: string
+  latest: string
+  status: number
+  holdFetch?: Promise<void>
+  holdUpdate?: Promise<void>
+  /** What a failing `pi update` says. */
+  updateFailure?: string
+  /** Whether the pi command is missing from PATH. */
+  missing?: boolean
+  fetches: string[]
+  lists: number
+  piUpdates: { argv: string[]; cwd?: string; timeoutMs?: number }[]
+  /** Put `version` on disk where this copy runs from, as another pi's `pi update` would. */
+  install(version: string): void
+}
+
+/** Start pi with update checks on, the extension installed from npm, and `0.2.0` released. */
+async function withExtension(
+  options: Parameters<typeof startDelta>[0] = {},
+  change: (extension: Extension, kit: Kit) => void | Promise<void> = () => {},
+) {
+  const kit = await startDelta({
+    answers: [NOT_NOW],
+    ...options,
+    env: { PI_OFFLINE: undefined, ...options.env },
+    start: false,
+  })
+  const extension: Extension = {
+    source: `npm:${NAME}`,
+    path: ROOT,
+    latest: '0.2.0',
+    status: 200,
+    fetches: [],
+    lists: 0,
+    piUpdates: [],
+    install: (version) => void kit.disk.content(join(ROOT, 'package.json'), JSON.stringify({ ...MANIFEST, version })),
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: { signal?: AbortSignal }) => {
+      extension.fetches.push(String(url))
+      const aborted = new Promise<never>((_, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new Error('The operation was aborted.')), { once: true }),
+      )
+      await Promise.race([extension.holdFetch, aborted])
+      return extension.status === 200
+        ? Response.json({ name: NAME, version: extension.latest })
+        : new Response('', { status: extension.status })
+    }),
+  )
+  kit.programs.set('pi', async (argv, init) => {
+    if (extension.missing) throw Object.assign(new Error('spawn pi ENOENT'), { code: 'ENOENT' })
+    if (argv[1] === 'list') {
+      extension.lists++
+      return ran(`User packages:\n  ${extension.source}\n    ${extension.path}\n`)
+    }
+    if (argv[1] !== 'update') return undefined
+    extension.piUpdates.push({ argv, cwd: init.cwd, timeoutMs: init.timeoutMs })
+    await extension.holdUpdate
+    if (extension.updateFailure) return ran('', 1, extension.updateFailure)
+    extension.install(extension.latest)
+    return ran(`Updated ${argv[2]}\n`)
+  })
+  await change(extension, kit)
+  await kit.pi.start()
+  if (kit.pi.mode === 'rpc') await kit.until(() => kit.pi.dialogs.length === 1, 'the setup offer')
+  await kit.settle()
+  return { kit, extension }
+}
+
+/** Let the extension's file work under way, such as a background check's, finish. */
+async function quiet(kit: Kit) {
+  for (let touched = -1; touched !== kit.disk.touched().length;) {
+    touched = kit.disk.touched().length
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await kit.settle()
+  }
+}
+
+/** Let `milliseconds` pass, and the work that falls due finish. */
+async function passes(kit: Kit, milliseconds: number) {
+  await kit.advance(milliseconds)
+  await quiet(kit)
+}
+
+/** The extension's notice in the band, if it shows one. */
+const extensionNotice = (kit: Kit) =>
+  /Delta extension \S+ is [^·]+· \/delta-plugin-update[^ ]*( to reload)?/.exec(band(kit))?.[0]
+const announced = (kit: Kit, version: string) =>
+  notices(kit).filter((text) => text.startsWith(`Delta extension ${version} is available (running: ${RUNNING})`))
+
+describe('plugin updates', () => {
+  test('startup and hourly checks notify without installing, and reminders survive another session', async () => {
+    const { kit, extension } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    expect(extension.fetches).toEqual([REGISTRY])
+    expect(extension.piUpdates).toEqual([])
+    expect(announced(kit, '0.2.0')).toEqual([
+      `Delta extension 0.2.0 is available (running: ${RUNNING}). Run /delta-plugin-update to update, or /delta-plugin-update notifications off to stop these notices.`,
+    ])
+    expect(extensionNotice(kit)).toBe('Delta extension 0.2.0 is available · /delta-plugin-update')
+    await passes(kit, HOUR)
+    await kit.until(() => extension.fetches.length === 2, 'the hourly check')
+    await kit.settle()
+    expect(announced(kit, '0.2.0')).toHaveLength(1)
+    expect(extensionNotice(kit)).toBeDefined()
+    const lists = extension.lists
+    await kit.pi.newSessionIn()
+    await quiet(kit)
+    await kit.settle()
+    // Within the hour, another session reuses the check: no request and no pi run; and the reminder
+    // it showed is not repeated there within the day.
+    expect(extension.fetches).toHaveLength(2)
+    expect(extension.lists).toBe(lists)
+    expect(extensionNotice(kit)).toBeUndefined()
+    expect(announced(kit, '0.2.0')).toHaveLength(1)
+    expect(extension.piUpdates).toEqual([])
+  })
+
+  test('the notice snoozes for a day, but a newer release gets its own notice', async () => {
+    const { kit, extension } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    await kit.pi.command('delta-plugin-update', 'later')
+    expect(extensionNotice(kit)).toBeUndefined()
+    await passes(kit, HOUR)
+    expect(extensionNotice(kit)).toBeUndefined()
+    extension.latest = '0.3.0'
+    await passes(kit, HOUR)
+    await kit.until(() => extensionNotice(kit)?.includes('0.3.0'), 'the newer release')
+    await kit.pi.command('delta-plugin-update', 'later')
+    expect(extensionNotice(kit)).toBeUndefined()
+    await passes(kit, DAY)
+    await kit.until(() => extensionNotice(kit), 'the notice once the snooze ends')
+    expect(extension.piUpdates).toEqual([])
+  })
+
+  test('notification opt-out persists and stops background requests, while manual check and re-enabling work', async () => {
+    const { kit, extension } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    await kit.pi.command('delta-plugin-update', 'notifications off')
+    expect(await kit.store.get('plugin-update:notifications')).toBe(false)
+    expect(extensionNotice(kit)).toBeUndefined()
+    await passes(kit, HOUR)
+    expect(extension.fetches).toHaveLength(1)
+    await kit.pi.newSessionIn()
+    await quiet(kit)
+    await passes(kit, 0)
+    expect(extension.fetches).toHaveLength(1)
+    await kit.pi.command('delta-plugin-update', 'check')
+    expect(notices(kit).at(-1)).toContain('0.2.0 is available')
+    expect(extension.fetches).toHaveLength(2)
+    expect(extension.piUpdates).toEqual([])
+    await kit.pi.command('delta-plugin-update', 'notifications on')
+    expect(notices(kit).at(-1)).toContain('are on')
+    await passes(kit, 0)
+    expect(await kit.store.get('plugin-update:notifications')).toBe(true)
+    // Enabling reuses the check that just ran.
+    expect(extension.fetches).toHaveLength(2)
+  })
+
+  for (const command of ['delta', 'delta-plugin-update'] as const)
+    test(`${command} updates at the installed scope and reloads immediately without a question`, async () => {
+      const { kit, extension } = await withExtension({}, async (_, kit) => {
+        await kit.store.set('plugin-update:notifications', false)
+      })
+      delta = kit
+      await passes(kit, 0)
+      // Opted out, nothing checks in the background.
+      expect(extension.fetches).toEqual([])
+      const dialogs = kit.pi.dialogs.length
+      if (command === 'delta') await kit.pi.command('delta', 'plugin-update')
+      else await kit.pi.command('delta-plugin-update')
+      expect(extension.piUpdates).toEqual([
+        { argv: ['pi', 'update', `npm:${NAME}`], cwd: kit.world.checkout, timeoutMs: 600_000 },
+      ])
+      expect(kit.pi.reloads).toBe(1)
+      expect(notices(kit)).toContain('Updated the Delta extension to 0.2.0; reloading.')
+      expect(kit.pi.dialogs).toHaveLength(dialogs)
+      // The command's own check is the one request: the update needs to know there is a newer release.
+      expect(extension.fetches).toEqual([REGISTRY])
+    })
+
+  test('a native download is offered as a reload, without network access or another installation', async () => {
+    // Another pi process installed 0.2.0 where this copy runs from, which still runs the version it loaded.
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.install('0.2.0')
+      extension.status = 503
+    })
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    expect(extensionNotice(kit)).toBe('Delta extension 0.2.0 is installed · /delta-plugin-update to reload')
+    expect(notices(kit)).toContain('Delta extension 0.2.0 is installed and ready. Run /delta-plugin-update to reload.')
+    await kit.pi.command('delta-plugin-update')
+    expect(extension.fetches).toEqual([])
+    expect(extension.piUpdates).toEqual([])
+    expect(kit.pi.reloads).toBe(1)
+  })
+
+  test('a visible notice follows a native download and stays out of the way of a running turn or survey', async () => {
+    const { kit, extension } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    expect(extensionNotice(kit)).toContain('is available')
+    extension.install('0.2.0')
+    await passes(kit, HOUR)
+    await kit.until(() => extensionNotice(kit)?.includes('to reload'), 'the notice to offer a reload')
+    // While a turn runs, the notice gives way and nothing reloads under it.
+    let answer!: (text: string) => void
+    kit.pi.model = () => new Promise((resolve) => (answer = (text) => resolve({ text })))
+    const turn = kit.pi.submit('a long task')
+    await kit.until(() => answer, 'the turn to run')
+    expect(extensionNotice(kit)).toBeUndefined()
+    await kit.pi.command('delta-plugin-update')
+    expect(notices(kit).at(-1)).toContain('Wait for the current pi turn')
+    expect(kit.pi.reloads).toBe(0)
+    answer('Done.')
+    await turn
+    await kit.until(() => extensionNotice(kit), 'the notice once the turn ends')
+    expect(extension.fetches).toHaveLength(1)
+  })
+
+  test('an app installation hides the update row and prevents plugin installation or reload', async () => {
+    const { kit, extension } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    kit.world.release('0.24.0')
+    const release = kit.world.hold('update install')
+    const updating = kit.pi.command('delta', 'update')
+    await kit.until(() => band(kit).includes('45%'), 'the app update to run')
+    expect(extensionNotice(kit)).toBeUndefined()
+    await kit.pi.command('delta', 'plugin-update')
+    expect(notices(kit).at(-1)).toContain('installation update is still running')
+    expect(extension.piUpdates).toEqual([])
+    release()
+    await updating
+    expect(extensionNotice(kit)).toBeDefined()
+    await kit.pi.command('delta', 'plugin-update')
+    expect(extension.piUpdates).toHaveLength(1)
+    expect(kit.pi.reloads).toBe(1)
+  })
+
+  test('a plugin install and its queued reload prevent a concurrent app installation', async () => {
+    let releaseUpdate!: () => void
+    let releaseReload!: () => void
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.holdUpdate = new Promise<void>((resolve) => (releaseUpdate = resolve))
+    })
+    delta = kit
+    kit.world.release('0.24.0')
+    kit.pi.nextReload = new Promise<void>((resolve) => (releaseReload = resolve))
+    const updating = kit.pi.command('delta', 'plugin-update')
+    await kit.until(() => extension.piUpdates.length === 1, 'pi update')
+    await kit.pi.command('delta', 'update')
+    expect(notices(kit).at(-1)).toContain('extension update is in progress')
+    releaseUpdate()
+    await kit.until(() => notices(kit).includes('Updated the Delta extension to 0.2.0; reloading.'), 'the reload')
+    await kit.pi.command('delta-update')
+    expect(notices(kit).at(-1)).toContain('extension update is in progress')
+    expect(updates(kit)).toEqual([])
+    releaseReload()
+    await updating
+    expect(kit.pi.reloads).toBe(1)
+    // Once the reloaded extension runs, the installation is free again.
+    await kit.pi.command('delta', 'update')
+    expect(notices(kit).at(-1)).toBe('Updated Delta to 0.24.0.')
+  })
+
+  test('a missing standalone Claude CLI has actionable advice and leaves background discovery quiet', async () => {
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.missing = true
+    })
+    delta = kit
+    await kit.until(() => debugLog(kit).includes('Delta extension update check:'), 'the failed check')
+    expect(debugLog(kit)).toContain('on PATH')
+    expect(notices(kit).join('\n')).not.toContain('on PATH')
+    await kit.pi.command('delta-plugin-update')
+    expect(notices(kit).at(-1)).toContain('make pi available on PATH')
+    expect(extension.piUpdates).toEqual([])
+  })
+
+  test('a failed check preserves a known release and an existing notice', async () => {
+    const { kit, extension } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    extension.status = 503
+    await passes(kit, HOUR)
+    await kit.until(() => extension.fetches.length === 2, 'the failed check')
+    await kit.settle()
+    expect(((await kit.store.get('plugin-update:check')) as { latest?: string }).latest).toBe('0.2.0')
+    expect(extensionNotice(kit)).toBeDefined()
+  })
+
+  for (const kind of ['headless', 'network disabled', 'development'] as const)
+    test(`background checking leaves ${kind} sessions alone`, async () => {
+      const { kit, extension } = await withExtension(
+        {
+          // Any nonempty value opts out, including one that reads as false.
+          ...(kind === 'network disabled' ? { env: { PI_OFFLINE: '0' } } : {}),
+          ...(kind === 'headless' ? { mode: 'print' as const } : {}),
+        },
+        (extension) => {
+          // This copy runs from a checkout (`pi -e`), while pi's npm installation is elsewhere.
+          if (kind === 'development') extension.path = '/home/ada/.pi/agent/npm/node_modules/' + NAME
+        },
+      )
+      delta = kit
+      await passes(kit, 0)
+      expect(extension.fetches).toEqual([])
+      expect(extension.piUpdates).toEqual([])
+      if (kind !== 'development') expect(extension.lists).toBe(0)
+      if (kind === 'development') {
+        await kit.pi.command('delta-plugin-update')
+        expect(notices(kit).at(-1)).toContain("wasn't installed from npm, so pi leaves it as it is")
+      }
+    })
+
+  test('failed discovery stays quiet and remains throttled', async () => {
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.status = 503
+    })
+    delta = kit
+    await kit.until(() => debugLog(kit).includes('Delta extension update check:'), 'the failed check')
+    expect(debugLog(kit).match(/Delta extension update check:/g)).toHaveLength(1)
+    expect(notices(kit).some((text) => text.includes('update check'))).toBe(false)
+    expect(await kit.pi.prompt('keep working')).toBe('settled')
+    await kit.pi.newSessionIn()
+    await quiet(kit)
+    await passes(kit, 0)
+    expect(extension.fetches).toHaveLength(1)
+    expect(extension.piUpdates).toEqual([])
+  })
+
+  test('a slow check times out, cannot install or notify late, and never overlaps its own timer', async () => {
+    let release!: () => void
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.holdFetch = new Promise<void>((resolve) => (release = resolve))
+    })
+    delta = kit
+    await kit.until(() => extension.fetches.length === 1, 'the check')
+    expect(await kit.pi.prompt('working')).toBe('settled')
+    await passes(kit, 10_000)
+    await kit.until(() => debugLog(kit).includes('timed out'), 'the check to time out')
+    // A new session within the hour does not start another: the attempt counts.
+    await kit.pi.newSessionIn()
+    await quiet(kit)
+    await passes(kit, 0)
+    expect(extension.fetches).toHaveLength(1)
+    release()
+    await kit.settle()
+    expect(notices(kit).some((text) => text.includes('Delta extension 0.2.0'))).toBe(false)
+    expect(extensionNotice(kit)).toBeUndefined()
+    expect(extension.piUpdates).toEqual([])
+  })
+
+  test('ending the session or opting out invalidates an in-flight notice', async () => {
+    let release!: () => void
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.holdFetch = new Promise<void>((resolve) => (release = resolve))
+    })
+    delta = kit
+    await kit.until(() => extension.fetches.length === 1, 'the check')
+    await kit.pi.command('delta-plugin-update', 'notifications off')
+    await kit.pi.newSessionIn()
+    await quiet(kit)
+    release()
+    await kit.settle()
+    await passes(kit, HOUR)
+    expect(extension.fetches).toHaveLength(1)
+    expect(notices(kit).some((text) => text.includes('Delta extension 0.2.0'))).toBe(false)
+    expect(extensionNotice(kit)).toBeUndefined()
+  })
+
+  test('installation failure never reloads, and a surviving watchdog reports a thrown reload failure', async () => {
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.updateFailure = 'npm error 403 Forbidden - PUT https://registry.npmjs.org/'
+    })
+    delta = kit
+    await kit.pi.command('delta-plugin-update')
+    expect(notices(kit).at(-1)).toContain('403 Forbidden')
+    expect(kit.pi.reloads).toBe(0)
+    expect(extension.piUpdates).toHaveLength(1)
+    extension.updateFailure = undefined
+    kit.pi.nextReload = new Error('session was stopped')
+    await kit.pi.command('delta-plugin-update')
+    expect(notices(kit).at(-1)).toContain('session was stopped')
+    expect(notices(kit).at(-1)).toContain('not active in this session yet')
+    expect(kit.pi.reloads).toBe(0)
+    // The installation is not claimed any more: a retry reloads what is installed.
+    await kit.pi.command('delta-plugin-update')
+    expect(kit.pi.reloads).toBe(1)
+    expect(extension.piUpdates).toHaveLength(2)
+  })
+
+  test('an ordinary reload refusal response is not reported as successful activation', async () => {
+    const { kit } = await withExtension()
+    delta = kit
+    await kit.until(() => extensionNotice(kit), 'the notice')
+    // pi's terminal refuses a reload while it compacts, with a warning of its own, and returns.
+    kit.pi.nextReload = 'refuse'
+    await kit.pi.command('delta-plugin-update')
+    expect(kit.pi.reloads).toBe(0)
+    expect(notices(kit).at(-1)).toContain('not active in this session yet')
+    expect(extensionNotice(kit)).toBe('Delta extension 0.2.0 is installed · /delta-plugin-update to reload')
+  })
+
+  test('concurrent explicit requests install once, and a directory transition suppresses the old reload', async () => {
+    let release!: () => void
+    const { kit, extension } = await withExtension({}, (extension) => {
+      extension.holdUpdate = new Promise<void>((resolve) => (release = resolve))
+    })
+    delta = kit
+    const updating = kit.pi.command('delta', 'plugin-update')
+    await kit.until(() => extension.piUpdates.length === 1, 'pi update')
+    await kit.pi.command('delta', 'plugin-update')
+    expect(notices(kit).at(-1)).toContain('already in progress')
+    await kit.pi.newSessionIn(kit.world.base)
+    release()
+    await updating
+    await passes(kit, 0)
+    expect(extension.piUpdates).toHaveLength(1)
+    expect(kit.pi.reloads).toBe(0)
+  })
 })

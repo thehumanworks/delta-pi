@@ -19,6 +19,7 @@ const theme = {
 } as Theme
 const host = {
   clock: { now: () => 0, after: () => ({ cancel() {} }) },
+  session: { idle: () => true },
   ui: { invalidate: vi.fn() },
 } as unknown as Host
 

@@ -34,8 +34,10 @@ function fake() {
       const timer = { delay, run, cancelled: false }
       timers.push(timer)
       return {
+        // A cancelled timer, such as a finished request's deadline, is no longer waiting.
         cancel: () => {
           timer.cancelled = true
+          if (timers.includes(timer)) timers.splice(timers.indexOf(timer), 1)
         },
       }
     },
@@ -84,6 +86,9 @@ function deferred<T>() {
   })
   return { promise, resolve }
 }
+
+/** A reload pi carries out: it ends this runtime, whose session_shutdown stops its update checks. */
+const reloaded = () => vi.fn(async () => stopPluginUpdates())
 
 async function flush() {
   for (let index = 0; index < 30; index++) await Promise.resolve()
@@ -144,7 +149,9 @@ test('failed discovery is throttled across starts, and a known release survives 
   stopPluginUpdates()
   startPluginUpdates(host)
   await timers.at(-1)!.run()
-  expect(pluginUpdateNotice()).toContain('1.1.0')
+  // Another session keeps the known release, without repeating the notice announced within the day.
+  expect(values.get(CHECK)).toMatchObject({ latest: '1.1.0' })
+  expect(pluginUpdateNotice()).toBeUndefined()
   expect(fetch).toHaveBeenCalledTimes(3)
 })
 
@@ -215,7 +222,7 @@ test.each(['delta', NAME])('filtered npm listing annotations are not part of the
   expect(sourceAt(`Project packages:\n  ${source} (filtered)\n    ${ROOT}`, ROOT)).toEqual({ source, name })
   const { host, packages, run } = fake()
   packages.source += ' (filtered)'
-  const reload = vi.fn()
+  const reload = reloaded()
   expect(await pluginUpdateCommand(host, '', { reload })).toEqual({})
   expect(run).toHaveBeenCalledWith(['pi', 'update', `npm:${NAME}`], expect.anything())
   expect(reload).toHaveBeenCalledOnce()
@@ -325,7 +332,7 @@ test('an already installed newer version reloads without network access or anoth
   const { host, packages, run } = fake()
   packages.version = '1.1.0'
   vi.mocked(fetch).mockRejectedValue(new Error('offline'))
-  const reload = vi.fn()
+  const reload = reloaded()
   expect(await pluginUpdateCommand(host, '', { reload })).toEqual({})
   expect(reload).toHaveBeenCalledOnce()
   expect(fetch).not.toHaveBeenCalled()

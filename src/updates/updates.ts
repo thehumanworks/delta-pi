@@ -11,6 +11,8 @@ import { isJsonObject } from '../core/json.ts'
 import { samePath } from '../core/paths.ts'
 import { errorText } from '../core/text.ts'
 import { claimInstallation, installation } from '../core/installation.ts'
+import type { Timer } from '../core/clock.ts'
+import { MINIMUM_PI_VERSION } from '../core/compatibility.ts'
 
 const NOTIFICATIONS = 'plugin-update:notifications'
 const CHECK = 'plugin-update:check'
@@ -27,8 +29,8 @@ type Source = { source: string; name: string }
 /** What the last check found, shared through the store. */
 type Check = { checkedAt: number; root: string; cwd: string; source?: Source; latest?: string; installed?: string }
 
-/** The newer release the band offers, once a check found one. */
-let available: string | undefined
+/** The newer release the band offers, once a check found one: on npm, or `ready`, installed and waiting for a reload. */
+let available: { version: string; ready: boolean } | undefined
 let observer: { timer?: { cancel(): void } } | undefined
 /** Session shutdown also invalidates a command that is still installing. */
 let generation = 0
@@ -64,13 +66,30 @@ function npmSource(source: string): Source | undefined {
   if (name) return { source, name }
 }
 
-/** The band's notice of a newer release, while notifications are on. */
+/** The band's notice of a newer release, while notifications are on and nothing installs. */
 export function pluginUpdateNotice(): string | undefined {
-  return available && !installation() ? `Delta extension ${available} is available · /delta-plugin-update` : undefined
+  if (!available || installation()) return
+  return available.ready
+    ? `Delta extension ${available.version} is installed · /delta-plugin-update to reload`
+    : `Delta extension ${available.version} is available · /delta-plugin-update`
+}
+
+/** Pi lists and installs packages with its own command; without it on PATH, say how to get it there. */
+async function runPi(host: Host, args: string[], init: { cwd: string; timeoutMs: number }) {
+  const advice = `Delta updates this extension with pi's own command: make pi available on PATH (pi ${MINIMUM_PI_VERSION} or newer), then retry /delta-plugin-update.`
+  try {
+    const result = await host.process.run(['pi', ...args], init)
+    if (result.exitCode === 127) throw new Error(`The pi command was not found. ${advice}`)
+    return result
+  } catch (error) {
+    if (/ENOENT|no such file|executable.*not found|command not found/i.test(errorText(error)))
+      throw new Error(`Could not run the pi command. ${advice}`, { cause: error })
+    throw error
+  }
 }
 
 async function installedSource(host: Host, cwd: string): Promise<Source | undefined> {
-  const listed = await host.process.run(['pi', 'list'], { cwd, timeoutMs: CHECK_TIMEOUT_MS })
+  const listed = await runPi(host, ['list'], { cwd, timeoutMs: CHECK_TIMEOUT_MS })
   if (listed.exitCode !== 0 || listed.isStdoutTruncated || listed.isStderrTruncated)
     throw new Error(listed.stderr.trim() || 'pi could not list its packages')
   return sourceAt(listed.stdout, host.plugin.root)
@@ -114,11 +133,26 @@ async function latestVersion(host: Host, source: Source, cwd: string): Promise<s
     if (!latest) throw new Error('npm sent no supported version')
     return latest
   }
-  const response = await fetch(`https://registry.npmjs.org/${source.name.replace('/', '%2F')}/latest`, {
-    signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+  // The deadline is the session's clock, so a check that outlives it neither installs nor notifies.
+  const request = new AbortController()
+  let timer: Timer | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = host.clock.after(CHECK_TIMEOUT_MS, () => {
+      request.abort()
+      reject(new Error('the npm registry did not answer: the extension update check timed out'))
+    })
   })
-  if (!response.ok) throw new Error(`the npm registry answered ${response.status}`)
-  const manifest: unknown = await response.json()
+  let manifest: unknown
+  try {
+    const response = await Promise.race([
+      fetch(`https://registry.npmjs.org/${source.name.replace('/', '%2F')}/latest`, { signal: request.signal }),
+      deadline,
+    ])
+    if (!response.ok) throw new Error(`the npm registry answered ${response.status}`)
+    manifest = await Promise.race([response.json(), deadline])
+  } finally {
+    timer?.cancel()
+  }
   if (
     !isJsonObject(manifest) ||
     manifest.name !== source.name ||
@@ -184,20 +218,38 @@ export function startPluginUpdates(host: Host) {
   if (observer || host.env.get('PI_OFFLINE') || !host.session.interactive()) return
   const current = {}
   observer = current
+  // A check that outlives its session, the person's opt-out or an extension update shows nothing.
+  const stillCurrent = async () =>
+    observer === current && installation()?.kind !== 'plugin' && (await notificationsOn(host))
   const run = async () => {
     try {
       const enabled = await notificationsOn(host)
       if (observer !== current) return
       if (!enabled) return stopPluginUpdates()
-      const { latest } = await check(host)
-      const reminder = await host.store.get(REMINDER)
-      const stillEnabled = await notificationsOn(host)
-      if (observer !== current || !stillEnabled || installation()) return
-      available =
-        latest && compareVersions(latest, host.plugin.version) === 1 && !snoozed(reminder, latest, host.clock.now())
-          ? latest
-          : undefined
+      const { latest, installed } = await check(host)
+      // A check that found no release this copy can take is not evidence that a notice is obsolete.
+      if (!latest || !(await stillCurrent())) return
+      if (compareVersions(latest, host.plugin.version) !== 1) {
+        available = undefined
+        return host.ui.invalidate()
+      }
+      const now = host.clock.now()
+      const release = { version: latest, ready: !!installed && compareVersions(installed, host.plugin.version) === 1 }
+      // A release is announced once a day, in whichever session sees it first; refreshing a notice must
+      // not bring back one this session does not show.
+      if (snoozed(await host.store.get(REMINDER), latest, now)) {
+        if (available) available = release
+        return host.ui.invalidate()
+      }
+      await host.store.set(REMINDER, { version: latest, until: now + REMINDER_INTERVAL_MS })
+      if (!(await stillCurrent())) return
+      available = release
       host.ui.invalidate()
+      host.ui.note(
+        release.ready
+          ? `Delta extension ${latest} is installed and ready. Run /delta-plugin-update to reload.`
+          : `Delta extension ${latest} is available (running: ${host.plugin.version}). Run /delta-plugin-update to update, or /delta-plugin-update notifications off to stop these notices.`,
+      )
     } catch (error) {
       if (observer === current) host.ui.debug(`Delta extension update check: ${errorText(error)}`)
     }
@@ -242,7 +294,7 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
     return { text: `Delta extension update notifications are ${args === 'notifications on' ? 'on' : 'off'}.` }
   }
   if (args === 'later') {
-    const version = available
+    const version = available?.version
     const started = generation
     if (!pluginUpdateNotice() || !version) return { text: 'There is no Delta extension update notice to snooze.' }
     await host.store.set(REMINDER, { version, until: host.clock.now() + REMINDER_INTERVAL_MS })
@@ -296,7 +348,7 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
     const ready = compareVersions(version, host.plugin.version) === 1
     if (!ready) {
       host.ui.note(`Updating the Delta extension to ${latest}…`)
-      const result = await host.process.run(['pi', 'update', source.source], { cwd, timeoutMs: 600_000 })
+      const result = await runPi(host, ['update', source.source], { cwd, timeoutMs: 600_000 })
       if (result.exitCode !== 0)
         return {
           text: `pi couldn't update the Delta extension: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
@@ -319,9 +371,25 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
         ? `Delta extension ${version} is already installed; reloading.`
         : `Updated the Delta extension to ${version}; reloading.`,
     )
-    // Pi replaces this runtime while it reloads; nothing after it may use this session's pi context.
-    await command.reload()
-    return {}
+    // Pi replaces this runtime while it reloads, ending this session first; nothing after a reload may
+    // use this session's pi context. A reload that returns without ending it was refused, as pi's
+    // terminal refuses one while it compacts, with a warning of its own.
+    let failure: unknown
+    try {
+      await command.reload()
+    } catch (error) {
+      failure = error
+    }
+    if (generation !== started) return {}
+    if (await notificationsOn(host)) {
+      available = { version, ready: true }
+      host.ui.invalidate()
+    }
+    return {
+      text: `Delta extension ${version} is installed but not active in this session yet: pi ${
+        failure === undefined ? "didn't reload" : `couldn't reload (${errorText(failure)})`
+      }. Run /reload once pi is idle, or start a new pi session.`,
+    }
   } catch (error) {
     return {
       text: checking
@@ -330,6 +398,8 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
     }
   } finally {
     release?.()
+    // The band's notice gives way while an installation runs.
+    host.ui.invalidate()
   }
 }
 
