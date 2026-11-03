@@ -116,8 +116,12 @@ export async function admitPrompt(host: Host, text: string, steering: boolean): 
     // queued and retry, so the prompt proceeds rather than being dropped. A non-retryable refusal
     // or a local persistence failure still stops it.
     if (!(offline && classifyCommandFailure(error) === 'transient' && !isPaused(runtime))) {
-      // The band names a worktree or directory that is not ready, until a prompt finds it ready.
-      if (error instanceof JoinNotReadyError) pauseCheckout(runtime, 'verification', error.message)
+      // The band names a worktree or directory that is not ready, until a prompt finds it ready; a client
+      // without pi's terminal hears of the change only when the band is redrawn.
+      if (error instanceof JoinNotReadyError) {
+        pauseCheckout(runtime, 'verification', error.message)
+        host.ui.invalidate()
+      }
       return `Delta is not ready for this prompt: ${errorText(error)}. The prompt was not submitted.`
     }
   }

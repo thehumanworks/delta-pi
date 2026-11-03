@@ -764,3 +764,142 @@ test('terminal: repeated join aliases preserve the existing producer and pending
   expect(band(kit)).toContain(LIVE)
   for (const command of ['thread create', 'worktree attach', 'thread share']) expect(ran(kit, command)).toEqual([])
 })
+
+/** The notes about the thread's worktrees the model was given, in order. */
+const worktreeNotes = (kit: Kit) =>
+  kit.pi
+    .contextMessages()
+    .map((message) => String(message.content))
+    .filter((text) => text.startsWith("[Delta] This thread's worktrees changed"))
+/** Whether the extension has added a note about the thread's worktrees to pi's context, from its debug log. */
+const worktreeNoteSent = (kit: Kit) => {
+  const log = join(kit.world.agentDir, 'delta', 'debug.log')
+  return (
+    existsSync(log) &&
+    readFileSync(log, 'utf8').includes("Adding a row to pi's context: [Delta] This thread's worktrees changed")
+  )
+}
+/** Where the fake Delta mounts `thread`'s worktrees for `owner`: the first one's checkout, and the folder of several. */
+const mountPaths = (w: World, thread: string, owner: string) => ({
+  first: join(w.state, 'mounts', thread, owner),
+  folder: join(w.state, 'folders', thread, owner),
+})
+/** Report `thread`'s worktrees on its watch, as Delta does when a teammate attaches or detaches one. */
+function reportWorktrees(w: World, thread: string) {
+  const state = w.delta()
+  const name = (reference: string) => state.worktrees.find((tree: any) => tree.reference === reference)?.name ?? 'repo'
+  w.remote(thread, {
+    type: 'worktrees',
+    worktrees: state.threads[thread].worktrees.map((reference: string) => ({ reference, name: name(reference) })),
+  })
+}
+const mountNames = async (kit: Kit, session: string) =>
+  ((await bindingOf(kit, session)).mounts as { name: string }[]).map((mount) => mount.name)
+
+test('a thread with three worktrees is joined in a thread folder and every worktree is checked before a prompt', async () => {
+  const { kit, thread, session } = await joinedThread({ worktrees: ['delta', 'zed', 'web'] })
+  delta = kit
+  const { first, folder } = mountPaths(kit.world, thread, session)
+  const binding = await bindingOf(kit, session)
+  expect(binding.directory).toBe(folder)
+  expect(binding.mounts.map((mount: any) => [mount.name, mount.directory])).toEqual([
+    ['delta', first],
+    ['zed', `${first}-zed`],
+    ['web', `${first}-web`],
+  ])
+  expect(kit.pi.session.cwd).toBe(folder)
+  const mounts = ran(kit, 'thread mount').length
+  expect(await kit.pi.prompt('all mounted')).toBe('settled')
+  // One worktree that is not mounted blocks the prompt, and both the refusal and the band name it.
+  kit.world.markCheckout(`${first}-zed`, false)
+  expect(await kit.pi.prompt('zed is not mounted')).toBe('handled')
+  const refusal = kit.pi.noticeTexts().at(-1)!
+  expect(refusal).toContain('"zed"')
+  expect(refusal).not.toContain('"delta"')
+  expect(band(kit)).toContain('zed')
+  kit.world.markCheckout(`${first}-zed`, true)
+  expect(await kit.pi.prompt('mounted again')).toBe('settled')
+  expect(band(kit)).not.toContain('zed')
+  expect(band(kit)).toContain(LIVE)
+  // Checking a worktree reads its state; it does not mount anything again.
+  expect(ran(kit, 'thread mount')).toHaveLength(mounts)
+  expect(JSON.stringify(recordsOf(kit, thread))).not.toContain('zed is not mounted')
+})
+
+test('worktrees added and removed live update the mounts, tell Claude and the person, and move Claude to the thread folder once', async () => {
+  const { kit, thread, session, url } = await joinedThread({ worktrees: ['delta'] })
+  delta = kit
+  const { first: own } = mountPaths(kit.world, thread, session)
+  const mounts = () => ran(kit, 'thread mount').length
+  const joinMounts = mounts()
+  // The thread's list is reported again after a reconnect and changes nothing.
+  kit.world.endWatch(thread)
+  await kit.until(() => shown(kit).includes('Connection interrupted'), 'the watch to drop')
+  const watches = ran(kit, 'thread watch').length
+  await kit.advance(1_000)
+  await kit.until(() => ran(kit, 'thread watch').length > watches && band(kit).includes(LIVE), 'the watch to reconnect')
+  await kit.settle()
+  expect(mounts()).toBe(joinMounts)
+  expect(worktreeNotes(kit)).toEqual([])
+
+  // A second worktree: pi stays in the first one's checkout and is told where the other is.
+  addWorktree(kit.world, thread, 'zed')
+  reportWorktrees(kit.world, thread)
+  await kit.until(async () => (await mountNames(kit, session)).length === 2, 'the new worktree to be mounted')
+  await kit.until(() => worktreeNotes(kit).length === 1, 'the model to be told')
+  expect(mounts()).toBe(joinMounts + 1)
+  expect(ran(kit, 'thread mount').map((args) => args.includes('--join'))).toEqual([true, false, false])
+  expect(await bindingOf(kit, session)).toMatchObject({
+    directory: own,
+    mounts: [
+      { name: 'delta', directory: own },
+      { name: 'zed', directory: `${own}-zed` },
+    ],
+  })
+  expect(worktreeNotes(kit)[0]).toContain(`- zed: ${own}-zed`)
+  expect(worktreeNotes(kit)[0]).toContain(`This session's directory is ${own}`)
+  // pi keeps one directory per session: instead of moving it, the band says how to open the thread folder.
+  expect(kit.pi.session.cwd).toBe(own)
+  expect(band(kit)).toContain('Thread worktrees changed: added zed · /delta-join opens the thread folder')
+  expect(await kit.pi.prompt('two worktrees')).toBe('settled')
+
+  // Worktrees come and go; the session stays where it is.
+  const web = addWorktree(kit.world, thread, 'web')
+  reportWorktrees(kit.world, thread)
+  await kit.until(async () => (await mountNames(kit, session)).length === 3, 'web to be mounted')
+  const zed = (await bindingOf(kit, session)).mounts[1].reference
+  kit.world.cli('worktree', 'detach', zed, '--thread', thread)
+  reportWorktrees(kit.world, thread)
+  await kit.until(async () => (await mountNames(kit, session)).join() === 'delta,web', 'zed to be removed')
+  kit.world.cli('worktree', 'detach', web, '--thread', thread)
+  reportWorktrees(kit.world, thread)
+  await kit.until(async () => (await mountNames(kit, session)).join() === 'delta', 'web to be removed')
+  await kit.until(() => worktreeNotes(kit).length === 4, 'the model to be told of each change')
+  expect((await bindingOf(kit, session)).directory).toBe(own)
+  expect(kit.pi.session.cwd).toBe(own)
+  expect(worktreeNotes(kit).at(-1)).toContain('removed web')
+  expect(band(kit)).toContain('removed web')
+  expect(shown(kit)).not.toContain(`Run /delta-join ${url} to continue in the thread folder`)
+  expect(await kit.pi.prompt('back to one')).toBe('settled')
+})
+
+test('a worktree added during a turn waits for the turn to end before telling Claude and moving it', async () => {
+  const { kit, thread, session } = await joinedThread()
+  delta = kit
+  const { first: own } = mountPaths(kit.world, thread, session)
+  const model = heldModel(kit)
+  const turn = kit.pi.submit('running')
+  await kit.until(model.asked, 'the turn to start')
+  addWorktree(kit.world, thread, 'zed')
+  reportWorktrees(kit.world, thread)
+  await kit.until(async () => (await mountNames(kit, session)).length === 2, 'the new worktree to be mounted')
+  await kit.settle()
+  // The note waits for the turn, which it must not interrupt.
+  expect(worktreeNoteSent(kit)).toBe(false)
+  expect(kit.pi.session.cwd).toBe(own)
+  model.release()
+  await turn
+  await kit.until(() => worktreeNotes(kit).length === 1, 'the model to be told once the turn ended')
+  // pi stays in its directory, as it keeps one per session.
+  expect(kit.pi.session.cwd).toBe(own)
+})
