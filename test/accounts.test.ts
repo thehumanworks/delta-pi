@@ -19,6 +19,7 @@ function stream(stdout: string, stderr = '', code = 0): ProcessStream {
     next: async () =>
       pieces.length ? { done: false, value: pieces.shift()! } : { done: true, value: { code, signal: null } },
     return: async () => ({ done: true, value: { code: null, signal: 'SIGTERM' } }),
+    terminate: () => {},
   }
 }
 const ran = (stdout: string, exitCode = 0): RunResult => ({
