@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { generateUnifiedPatch } from '@earendil-works/pi-coding-agent'
+// pi does not export its resolver, so the test reads it from pi's build to follow any change in it.
+import { resolveToCwd } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js'
 import {
+  absolutePath,
   isOwnContext,
   messageUpdates,
   recordedMessage,
@@ -195,5 +198,22 @@ describe('translation', () => {
     expect(diff('old').patch.text).toContain('-zero\n+two\n')
     // A file too large to keep beforehand is named, without a patch.
     expect(diff('big')).toEqual({ type: 'diff', changes: [{ operation: 'modify', path: '/repo/z.txt' }] })
+  })
+})
+
+describe('tool paths', () => {
+  test("a tool's path resolves to the file pi's own tools touch", () => {
+    for (const path of [
+      'src/main.rs',
+      './src/../README.md',
+      '/etc/hosts',
+      '@src/main.rs',
+      '~',
+      '~/notes.txt',
+      'file:///tmp/a.txt',
+      'my\u00A0notes.txt',
+      '@~/x',
+    ])
+      expect(absolutePath(path, '/repo')).toBe(resolveToCwd(path, '/repo'))
   })
 })

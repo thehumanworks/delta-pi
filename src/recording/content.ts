@@ -5,7 +5,9 @@
  * messages, and the remote activity this extension adds) stays out.
  */
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import { isAbsolute, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { isJsonObject, type JsonObject, jsonText } from '../core/json.ts'
 
 type RecordValue = Record<string, unknown>
@@ -125,9 +127,18 @@ function relativePath(path: string, root?: string): string | undefined {
   return base && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : undefined
 }
 
-/** A tool's path argument made absolute against the directory pi resolved it in. */
+/**
+ * A tool's path argument made absolute against the directory pi resolved it in, the way pi's own tools
+ * resolve it (`resolveToCwd`, which pi does not export): Unicode spaces read as spaces, a leading `@`
+ * is dropped, `~` is the home directory, and a `file://` URL is its path.
+ */
 export function absolutePath(path: string, cwd: string): string {
-  return isAbsolute(path) ? path : resolve(cwd, path)
+  let normalized = path.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+  if (normalized.startsWith('@')) normalized = normalized.slice(1)
+  if (normalized === '~') return homedir()
+  if (normalized.startsWith('~/')) normalized = join(homedir(), normalized.slice(2))
+  else if (/^file:\/\//.test(normalized)) normalized = fileURLToPath(normalized)
+  return isAbsolute(normalized) ? normalized : resolve(cwd, normalized)
 }
 
 /** What a write tool call found before it ran: whether the file existed, and its text when it was small. */

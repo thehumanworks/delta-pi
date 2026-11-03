@@ -56,6 +56,7 @@ import { beginShare } from '../sharing/share.ts'
 import { liveFor, rememberStatus } from '../watch/watch.ts'
 import { settleRemote } from '../watch/rows.ts'
 import {
+  absolutePath,
   messageUpdates,
   type PriorFile,
   recordedMessage,
@@ -835,16 +836,17 @@ export async function rememberPriorFile(host: Host, toolCallId: string, input: u
   if (!path) return
   const binding = stateFor(host.session.id()).binding
   if (!binding?.snapshot) return
-  const absolute = path.startsWith('/') ? path : join(host.session.cwd(), path)
+  const absolute = absolutePath(path, host.session.cwd())
   try {
     if (!(await exists(absolute))) {
       priorFiles.set(toolCallId, { existed: false })
       return
     }
-    const { size } = await import('node:fs/promises').then((fs) => fs.stat(absolute))
     priorFiles.set(
       toolCallId,
-      size <= PRIOR_FILE_LIMIT ? { existed: true, text: await readText(absolute) } : { existed: true },
+      (await size(absolute)) <= PRIOR_FILE_LIMIT
+        ? { existed: true, text: await readText(absolute) }
+        : { existed: true },
     )
   } catch {
     priorFiles.set(toolCallId, { existed: true })
