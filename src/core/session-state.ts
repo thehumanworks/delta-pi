@@ -110,6 +110,16 @@ export function stillActive(session: string): () => boolean {
 }
 let queue: Promise<unknown> = Promise.resolve()
 /**
+ * Each session's delivery under way in this pi process, which a later one waits for (see `drain`). A
+ * runtime's delivery can outlast its session, as a slow append does, and two deliveries of one session
+ * would each acknowledge the same records against a binding the other changed. pi evaluates this
+ * module afresh for every runtime, so the registry lives on `globalThis`, as the plugin's one
+ * delivery lives in its one process.
+ */
+export const drains: Map<string, Promise<void>> = ((globalThis as Record<symbol, unknown>)[
+  Symbol.for('pi-delta.drains')
+] ??= new Map()) as never
+/**
  * The join and the share running now, and a share asked for while the session's turn ran, with whom;
  * that one starts when the turn ends.
  */

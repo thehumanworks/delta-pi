@@ -420,6 +420,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const thread = known(state, locator)
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       const producer = state.producers[producerKey(source, external)]
+      // A test detaches the thread's checkouts (`world().detach`), as Delta reports a checkout it stopped syncing.
+      const detached = flag(`detached-${thread.thread_id}`)
       out({
         operation: 'status',
         thread_id: thread.thread_id,
@@ -437,8 +439,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
               .flatMap((tree) =>
                 tree.directories.map((entry) => ({
                   directory: entry.directory,
-                  state: 'attached',
-                  active: entry.state === 'mounted',
+                  state: detached ? 'detached' : 'attached',
+                  active: !detached && entry.state === 'mounted',
                 })),
               ),
           })),

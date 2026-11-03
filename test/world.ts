@@ -124,6 +124,12 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     stopFailing(command: string) {
       rmSync(join(state, `fail-${command.replaceAll(' ', '-')}`), { force: true })
     },
+    /** Make `thread status` report `thread`'s checkouts detached, or, with `false`, attached again. */
+    detach(thread: string, detached = true) {
+      const path = join(state, `detached-${thread}`)
+      if (detached) writeFileSync(path, '')
+      else rmSync(path, { force: true })
+    },
     /** Make `thread watch` report `text` for `thread` as it is, such as a malformed or partial line. */
     remoteRaw(thread: string, text: string) {
       const path = join(state, `events-${thread}.jsonl`)
@@ -150,11 +156,18 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
-    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
+    /**
+     * Hold the runs of `command` after the first `after` until the returned function releases them.
+     * Holding again while runs are held keeps them held and lets the next `after` runs through.
+     */
     hold(command: string, { after = 0 } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
       writeFileSync(path, JSON.stringify({ after }))
       return () => rmSync(path, { force: true })
+    },
+    /** Release every held run of `command`, as the function `hold` returned does. */
+    stopHolding(command: string) {
+      rmSync(join(state, `hold-${command.replaceAll(' ', '-')}`), { force: true })
     },
     cleanup() {
       rmSync(base, { recursive: true, force: true })

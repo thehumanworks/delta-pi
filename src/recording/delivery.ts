@@ -12,6 +12,7 @@ import {
   type Binding,
   boundDirectory,
   digest,
+  drains,
   isPaused,
   load,
   pauseCheckout,
@@ -93,7 +94,6 @@ const LIVE_ACTIVITY_ORIGIN = {
   interaction_surface: 'cli',
 } as const
 type LiveActivityKind = 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'edit'
-let drainTask: Promise<void> | undefined
 /** A Fork & Restore or Discard the person started, so the two cannot both run at once. */
 let resolving = false
 /** The arguments of each recorded tool call and the file each write replaced, until its result is recorded. */
@@ -559,8 +559,13 @@ export async function recoverExecution(host: Host, session: string) {
 
 export async function drain(host: Host, session: string): Promise<void> {
   if (activation.session !== session || isPaused(stateFor(session))) return
-  if (drainTask) {
-    await drainTask
+  // One delivery of a session runs at a time in the pi process, even when the runtime that started it
+  // has ended: two would each acknowledge the same records against a binding the other changed.
+  const running = drains.get(session)
+  if (running) {
+    // A delivery an ended runtime started reports its own failure, if any, where it can; this one
+    // only waits for it.
+    await (ownDrains.has(running) ? running : running.catch(() => undefined))
     if (activation.session !== session || isPaused(stateFor(session))) return
     if ((await serial(() => load(host, session))).pending.length) return drain(host, session)
     return
@@ -578,13 +583,17 @@ export async function drain(host: Host, session: string): Promise<void> {
     },
     (error: unknown) => failDelivery(host, session, error),
   )
-  drainTask = task
+  drains.set(session, task)
+  ownDrains.add(task)
   try {
     await task
   } finally {
-    if (drainTask === task) drainTask = undefined
+    if (drains.get(session) === task) drains.delete(session)
   }
 }
+
+/** The deliveries this runtime started, as opposed to an ended runtime's still under way. */
+const ownDrains = new WeakSet<Promise<void>>()
 
 /**
  * Classify a failed drain, schedule its retry or pause sharing, and show the person why.
