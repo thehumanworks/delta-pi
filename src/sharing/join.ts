@@ -8,9 +8,6 @@
  * stays as it was, ready to resume.
  */
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { SessionManager } from '@earendil-works/pi-coding-agent'
 import type { Host } from '../core/host.ts'
 import { samePath } from '../core/paths.ts'
 import {
@@ -143,7 +140,7 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
       owner: fresh,
       directory: mount.directory,
     }
-    const file = await createSessionFile(fresh, mount.directory, host.session.file())
+    const file = await host.session.create(fresh, mount.directory, host.session.file())
     await save(host, { session: fresh, snapshot: false, next: 1, pending: [], joinTransition: plan })
     joinContracts.set(fresh, contractVersion)
     setProgress(host, "Starting a pi session in the thread's folder…", 'active')
@@ -185,24 +182,6 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
 const joinContracts: Map<string, number> = ((globalThis as Record<symbol, unknown>)[
   Symbol.for('pi-delta.join-contracts')
 ] ??= new Map()) as never
-
-/**
- * Write a session file for `session` whose working directory is `directory`, in pi's own session
- * folder for that directory, so switching to it starts pi there. Only the header is written; pi adds
- * the conversation as it happens.
- */
-async function createSessionFile(session: string, directory: string, parent: string | undefined): Promise<string> {
-  const manager = SessionManager.create(directory, undefined, {
-    id: session,
-    ...(parent ? { parentSession: parent } : {}),
-  })
-  const file = manager.getSessionFile()
-  const header = manager.getHeader()
-  if (!file || !header) throw new Error("pi could not prepare a session in the thread's folder")
-  await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, `${JSON.stringify(header)}\n`, { flag: 'wx' })
-  return file
-}
 
 /** Reconnect a joined session that already works in its thread's folder, keeping its checkouts and producer state. */
 async function reconnect(host: Host, request: JoinRequest) {
@@ -432,7 +411,7 @@ export function refreshMounts(host: Host, session: string, listed: { reference: 
   const runtime = stateFor(session)
   runtime.mountRefresh = (runtime.mountRefresh ?? Promise.resolve())
     .then(() => applyWorktrees(host, session, listed))
-    .catch((error) => {
+    .catch((error: unknown) => {
       if (activation.session !== session) return
       const text = `Delta couldn't update this session's worktrees: ${errorText(error)}`
       setProgress(host, text, 'error')

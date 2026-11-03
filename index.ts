@@ -16,6 +16,7 @@ import {
   type ExtensionContext,
   generateUnifiedPatch,
   getAgentDir,
+  SessionManager,
   VERSION,
 } from '@earendil-works/pi-coding-agent'
 import type { TUI } from '@earendil-works/pi-tui'
@@ -32,6 +33,7 @@ import {
   sessions,
   stateFor,
 } from './src/core/session-state.ts'
+import { writeExclusive } from './src/core/files.ts'
 import { fileStore } from './src/core/store.ts'
 import { errorText } from './src/core/text.ts'
 import { forgetContract } from './src/cli/delta-cli.ts'
@@ -128,6 +130,18 @@ export default function delta(pi: ExtensionAPI) {
         ).length,
       name: () => pi.getSessionName(),
       idle: () => context?.isIdle() ?? true,
+      create: async (id, directory, parent) => {
+        const manager = SessionManager.create(directory, undefined, {
+          id,
+          ...(parent ? { parentSession: parent } : {}),
+        })
+        const file = manager.getSessionFile()
+        const header = manager.getHeader()
+        if (!file || !header) throw new Error("pi could not prepare a session in the thread's folder")
+        // Only the header is written; pi adds the conversation as it happens.
+        await writeExclusive(file, `${JSON.stringify(header)}\n`)
+        return file
+      },
     },
     turn: { abort: () => context?.abort() },
     ui: {

@@ -44,6 +44,12 @@ export async function writePrivate(path: string, text: string): Promise<void> {
   }
 }
 
+/** Create `path` with `text`, failing if it already exists. */
+export async function writeExclusive(path: string, text: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, text, { flag: 'wx' })
+}
+
 /** Write a file someone else owns, such as a repository's settings, keeping the default permissions. */
 export async function writeShared(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })

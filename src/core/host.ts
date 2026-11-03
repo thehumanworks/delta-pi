@@ -49,6 +49,11 @@ export type Host = {
     turns(): number
     name(): string | undefined
     idle(): boolean
+    /**
+     * Write a session file for `id` whose working directory is `directory`, in pi's own session folder
+     * for that directory, so switching to it starts pi there; resolves with its path.
+     */
+    create(id: string, directory: string, parent: string | undefined): Promise<string>
   }
   turn: {
     /** Stop the running agent turn, if any. */
