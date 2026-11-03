@@ -1,6 +1,8 @@
 // The thread watch: its readiness, reconnection and failures, and what ending a session while it starts
 // leaves behind. Ported from the upstream plugin's engine tests (hooks/register.test.ts, "the watch") onto
 // the kit.
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, startDelta } from '../kit/index.ts'
 
@@ -302,3 +304,179 @@ test('ending during status CLI resolution never spawns the obsolete command', as
   expect(statuses(again)).toEqual([])
   expect(again.running()).toEqual([])
 })
+
+/** Change the fake Delta's state as Delta itself would, such as losing what it acknowledged. */
+function editDelta(kit: Kit, change: (state: any) => void) {
+  const path = join(kit.world.state, 'state.json')
+  const state = JSON.parse(readFileSync(path, 'utf8'))
+  change(state)
+  writeFileSync(path, JSON.stringify(state, null, 2))
+}
+
+const appends = (kit: Kit) => kit.commands().filter((args) => args[0] === 'thread' && args[1] === 'append').length
+/** The commands that create, attach or publish a thread or checkout, which a resume never runs again. */
+const setupCommands = (kit: Kit) =>
+  kit
+    .commands()
+    .map((args) => args.slice(0, 2).join(' '))
+    .filter((command) =>
+      ['thread create', 'thread share', 'thread invite', 'worktree create', 'worktree attach'].includes(command),
+    )
+/** The text of the records a binding has staged but Delta has not acknowledged. */
+const stagedText = (pending: { files: string[] }[]) =>
+  pending.flatMap((entry) => entry.files.map((file) => readFileSync(file, 'utf8'))).join('')
+
+test('readiness with lost acknowledged history fails closed without reset or reimport', async () => {
+  const kit = await shared()
+  await end(kit)
+  // Delta lost what it had acknowledged: the session's producer starts again at its first sequence.
+  editDelta(kit, (state) => {
+    for (const producer of Object.values<any>(state.producers)) producer.next = 1
+  })
+  const delivered = structuredClone(records(kit))
+  const again = await resume(kit)
+  await again.until(() => watches(again).length > 0, 'the watch to start')
+  await again.advance(10_000)
+  // A shell command run while Delta disagrees stays in the outbox.
+  await again.pi.shell('echo queued while mismatched')
+  const before = appends(again)
+  expect(await again.pi.prompt('continue')).toBe('handled')
+  expect(appends(again)).toBe(before)
+  expect(records(again)).toEqual(delivered)
+  // Explicit sharing is not a reset either.
+  again.pi.answers.push(SHARE)
+  await again.pi.command('delta', 'share')
+  await again.until(() => !band(again).includes('…'), 'the share to end')
+  expect(again.pi.noticeTexts().some((text) => text.startsWith('Delta: Shared'))).toBe(false)
+  expect(appends(again)).toBe(before)
+  expect(records(again)).toEqual(delivered)
+  expect(setupCommands(again)).toEqual([])
+})
+
+test('unavailable inspection pauses participation and preserves binding and pending files across resume', async () => {
+  const kit = await shared()
+  let answer!: (text: string) => void
+  kit.pi.model = () => new Promise((resolve) => (answer = (text) => resolve({ text })))
+  const turn = kit.pi.submit('inspect')
+  await kit.until(() => records(kit).some((record) => record.update.state === 'running'), 'the turn to start')
+  const original = await binding(kit)
+  const delivered = records(kit).length
+  kit.world.patchStatus({
+    worktrees: {
+      status: 'unavailable',
+      error: { code: 'failed', reason: 'storage', message: 'Attachment storage cannot be read' },
+    },
+  })
+  answer('inspection-pending')
+  await turn
+  const saved = await kit.until(async () => {
+    const current = await binding(kit)
+    return current.pending.length && !kit.running().some((args) => args[1] === 'status') && current
+  }, 'the turn to stay staged')
+  expect(saved).toMatchObject({
+    thread: original.thread,
+    checkout: original.checkout,
+    checkoutReference: original.checkoutReference,
+    next: original.next + saved.pending.length,
+    pending: [{ sequence: original.next }, ...saved.pending.slice(1)],
+  })
+  const files = new Map<string, string>(
+    saved.pending.flatMap((entry: { files: string[] }) =>
+      entry.files.map((file) => [file, readFileSync(file, 'utf8')]),
+    ),
+  )
+  expect(stagedText(saved.pending)).toContain('inspection-pending')
+  expect(await kit.pi.prompt('unsafe inspection')).toBe('handled')
+  expect(kit.pi.noticeTexts().some((text) => text.includes('Attachment storage cannot be read'))).toBe(true)
+  expect(records(kit)).toHaveLength(delivered)
+  expect(await binding(kit)).toEqual(saved)
+  await end(kit)
+  const again = await resume(kit)
+  await again.until(() => watches(again).length > 0, 'the watch to start')
+  await again.advance(10_000)
+  expect(await again.pi.prompt('still unavailable')).toBe('handled')
+  expect(await binding(again)).toEqual(saved)
+  for (const [path, contents] of files) expect(readFileSync(path, 'utf8')).toBe(contents)
+  expect(setupCommands(again)).toEqual([])
+  expect(records(again)).toHaveLength(delivered)
+  await end(again)
+  kit.world.patchStatus(undefined)
+  const recovered = await resume(kit)
+  await recovered.until(() => records(recovered).length > delivered, 'the staged turn to be delivered')
+  expect(JSON.stringify(records(recovered).slice(delivered))).toContain('inspection-pending')
+  await recovered.until(async () => (await binding(recovered)).pending.length === 0, 'the outbox to empty')
+  expect(setupCommands(recovered)).toEqual([])
+})
+
+test('readiness processes turns and items while initial status is pending', async () => {
+  const kit = await shared()
+  await kit.pi.prompt('previous turn')
+  const sequence = records(kit).findLast((record) => record.update.state === 'running').sequence
+  await end(kit)
+  // An execution the session left open, as one that ended mid-turn does: only the watch can close it.
+  const saved = await binding(kit)
+  await kit.store.set(`session:${kit.pi.session.id}`, {
+    ...saved,
+    execution: { sequence, turnId: 'previous-host-turn' },
+  })
+  const release = kit.world.hold('thread status')
+  const again = await resume(kit, false)
+  const starting = again.pi.start()
+  await again.until(() => again.running().some((args) => args[1] === 'status'), 'the inspection to wait')
+  const thread = threadOf(again)
+  again.world.remote(
+    thread,
+    {
+      type: 'item',
+      item: {
+        id: 'changed',
+        kind: 'user_message',
+        after_id: null,
+        turn_id: null,
+        author: { user_id: 'u-ada', name: 'Ada' },
+        created_at: 1,
+        open: false,
+        content: { text: 'Changed during inspection' },
+      },
+    },
+    { type: 'producer.turn', sequence, status: 'superseded' },
+  )
+  const recovered = await again.until(async () => {
+    const current = await binding(again)
+    return current.execution === undefined && current
+  }, 'the superseded execution to be closed')
+  expect(recovered.pending).not.toEqual([])
+  expect(again.running().some((args) => args[1] === 'status')).toBe(true)
+  release()
+  await starting
+  await again.until(async () => (await binding(again)).pending.length === 0, 'the closing record to be delivered')
+  expect(setupCommands(again)).toEqual([])
+})
+
+for (const failure of [false, true])
+  test(`a stopped observer's late status ${failure ? 'error' : 'result'} cannot replace a restarted binding`, async () => {
+    const kit = await shared()
+    await end(kit)
+    const saved = await binding(kit)
+    // A resume clears the end marker, so it is not part of the preserved binding.
+    delete saved.endedAt
+    const release = kit.world.hold('thread status', { times: 1 })
+    const first = await resume(kit, false)
+    const starting = first.pi.start()
+    await first.until(() => first.running().some((args) => args[1] === 'status'), 'the inspection to wait')
+    await end(first)
+    await starting
+    const second = await resume(kit)
+    await second.until(() => band(second).startsWith(LIVE), 'the restarted watch to be live')
+    // The old inspection answers only now, after its observer stopped and a new one took over.
+    if (failure) kit.world.fail('thread status', { code: 'unavailable', retryable: false })
+    else kit.world.patchStatus({ url: 'https://delta.dev/join/old_inspection' })
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    kit.world.stopFailing('thread status')
+    kit.world.patchStatus(undefined)
+    await second.settle()
+    expect(await binding(second)).toEqual(saved)
+    expect(band(second).startsWith(LIVE)).toBe(true)
+    expect(await second.pi.prompt('after inspection restart')).toBe('settled')
+  })
