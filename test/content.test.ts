@@ -216,3 +216,7 @@ describe('tool paths', () => {
       expect(absolutePath(path, '/repo')).toBe(resolveToCwd(path, '/repo'))
   })
 })
+
+test("a malformed file URL is kept as written rather than failing the message's record", () => {
+  expect(absolutePath('file://%ZZ', '/repo')).toBe('/repo/file:/%ZZ')
+})

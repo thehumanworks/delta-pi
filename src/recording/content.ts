@@ -137,7 +137,12 @@ export function absolutePath(path: string, cwd: string): string {
   if (normalized.startsWith('@')) normalized = normalized.slice(1)
   if (normalized === '~') return homedir()
   if (normalized.startsWith('~/')) normalized = join(homedir(), normalized.slice(2))
-  else if (/^file:\/\//.test(normalized)) normalized = fileURLToPath(normalized)
+  else if (/^file:\/\//.test(normalized))
+    try {
+      normalized = fileURLToPath(normalized)
+    } catch {
+      /* a malformed URL names no file pi's tool could open; it is kept as written */
+    }
   return isAbsolute(normalized) ? normalized : resolve(cwd, normalized)
 }
 

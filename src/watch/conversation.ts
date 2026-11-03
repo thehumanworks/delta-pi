@@ -620,6 +620,8 @@ export class RemoteView {
     this.items = new Map()
     this.comments = new Map()
     this.unsettled.clear()
+    // A row the old snapshot produced is not the new one's to add.
+    this.deferred = undefined
     this.snapshotDone = false
     this.tail.clear()
     this.hidden = 0

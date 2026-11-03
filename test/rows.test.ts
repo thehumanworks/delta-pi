@@ -47,3 +47,25 @@ test('a row taken just before a run starts waits for it to end, then reaches the
   expect(String(sent[0]!.text)).toContain('Remote')
   expect(view.settled).toBe(true)
 })
+
+test('a row taken from a snapshot the watch replaced is not added from the new one', async () => {
+  const view = new RemoteView('t', { thread: 't', items: {} })
+  view.upsert({
+    id: 'a',
+    kind: 'user_message',
+    after_id: null,
+    turn_id: null,
+    author: null,
+    created_at: 1,
+    open: false,
+    content: { text: 'Withdrawn' },
+  })
+  view.endSnapshot()
+  const row = await view.nextRow()
+  view.defer(row!)
+  // The watch reconnects, and the new snapshot no longer has the item.
+  view.reset()
+  view.endSnapshot()
+  expect(await view.nextRow()).toBeUndefined()
+  expect(view.settled).toBe(true)
+})
