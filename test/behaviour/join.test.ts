@@ -656,6 +656,24 @@ test("the switch a join makes ends the previous session without releasing the jo
   expect(before).not.toBe(session)
 })
 
+/**
+ * Prompt `text` once a resumed joined session admits prompts. The band reports the restore just before
+ * the session finishes recovering its last turn, while prompts still wait, so a prompt refused only for
+ * that is sent again.
+ */
+async function promptOnceRestored(kit: Kit, text: string) {
+  for (;;) {
+    const notices = kit.pi.notices.length
+    const outcome = await kit.pi.prompt(text)
+    const restoring = kit.pi
+      .noticeTexts()
+      .slice(notices)
+      .some((note) => note.includes("Delta is restoring this thread's worktrees"))
+    if (outcome !== 'handled' || !restoring) return outcome
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
 /** What the band starts with while a recorded session's watch is live. */
 const LIVE = '● Delta · Syncing'
 /** Wait until `session`'s outbox has nothing left to deliver. */
@@ -692,7 +710,7 @@ test('resume mounts again, moves Claude from its launch directory, and records o
     expect(await bindingOf(second, session)).toEqual(binding)
     expect(ran(second, 'thread mount').length).toBeGreaterThan(0)
     expect(ran(second, 'thread mount').every((args) => !args.includes('--join'))).toBe(true)
-    expect(await second.pi.prompt('run echo new local output')).toBe('settled')
+    expect(await promptOnceRestored(second, 'run echo new local output')).toBe('settled')
     await delivered(second, session)
     // Only the new turn is recorded: nothing earlier is exported again.
     const records = recordsOf(second, thread)
@@ -944,14 +962,15 @@ test('Windows mixed separators join and allow subdirectories but not sibling che
         () => band(kit).includes('Restored 1 worktree') || shown(kit).includes("couldn't restore"),
         'the restore',
       )
-      const outcome = await kit.pi.prompt(`from ${cwd}`)
+      const outcome = await promptOnceRestored(kit, `from ${cwd}`)
       kit.expectClean()
       return { outcome, shown: shown(kit) }
     } finally {
       await kit.stop()
     }
   }
-  expect((await resumeIn(`${directory}\\src`)).outcome).toBe('settled')
+  const inside = await resumeIn(`${directory}\\src`)
+  expect(inside.outcome, inside.shown).toBe('settled')
   const outside = await resumeIn(`${directory}-other`)
   expect(outside.outcome).toBe('handled')
   expect(outside.shown).toContain(`pi is working in ${directory}-other, outside this session's folder ${directory}`)
