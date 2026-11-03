@@ -177,3 +177,108 @@ test('a subagent whose checkout setup failed once is still followed for takeover
     "the subagent's turn to be followed",
   )
 })
+
+/** Whether pi stopped the kit's turn for a takeover in Delta. */
+const stoppedTurn = (kit: Kit) => kit.pi.noticeTexts().filter((text) => text.includes("stopped pi's turn"))
+
+/** The binding the subagent's session saved. */
+const savedBinding = async (kit: Kit): Promise<any> => kit.store.get(`session:${kit.pi.session.id}`)
+
+for (const foreground of [false, true]) {
+  test(`a ${foreground ? 'foreground' : 'background'} subagent someone takes over in Delta is stopped`, async () => {
+    const root = await parent()
+    const sub = await child(root)
+    // Someone takes the subagent's first turn over in Delta as it starts.
+    root.world.fence(sub.pi.session.id, 1)
+    // The subagent works until pi stops it, as during a long tool call.
+    sub.pi.model = () => sub.until(() => stoppedTurn(sub).length > 0 && { text: 'Stopped.' }, 'the subagent to stop')
+    if (foreground) {
+      // A foreground subagent runs while its parent's turn waits for it, here inside the parent's model call.
+      let waited: string | undefined
+      root.pi.model = async (messages) => {
+        if (messages.at(-1)?.role !== 'user') return { text: 'Done.' }
+        waited = await sub.pi.prompt('inspect the parser')
+        return { text: 'The subagent stopped.' }
+      }
+      await root.pi.prompt('delegate')
+      expect(waited).toBe('settled')
+    } else {
+      await root.pi.prompt('delegate')
+      await sub.pi.prompt('inspect the parser')
+    }
+    // The subagent's own turn stopped, once; its parent's turn ran to its end.
+    expect(stoppedTurn(sub)).toEqual([
+      "Someone took this subagent's thread over in Delta; stopped pi's turn. Tool effects already performed are not rolled back.",
+    ])
+    expect(stoppedTurn(root)).toEqual([])
+    const finished = await root.until(
+      () => root.thread()?.records.findLast((record: any) => record.update.state === 'idle'),
+      "the parent's finished turn",
+    )
+    expect(finished.update.stopReason).toBe('end_turn')
+  })
+}
+
+test('a subagent queues while Delta is unreachable and is delivered on retry', async () => {
+  const root = await parent()
+  const sub = await child(root)
+  root.world.fail('thread append', { times: 1_000 })
+  await sub.pi.prompt('inspect the parser')
+  await sub.settle()
+  const children = () => Object.values(sub.world.delta().threads).filter((thread) => thread.parent)
+  expect(children().flatMap((thread) => thread.records)).toEqual([])
+  expect((await savedBinding(sub)).pending).toHaveLength(4)
+  root.world.stopFailing('thread append')
+  await sub.advance(60_000)
+  const thread = await sub.until(() => childThread(sub, idle), "the subagent's delivered turn")
+  expect(thread.records.map((record: any) => [record.sequence, record.update.sessionUpdate])).toEqual([
+    [1, 'state_update'],
+    [2, 'user_message'],
+    [3, 'agent_message'],
+    [4, 'state_update'],
+  ])
+  expect((await savedBinding(sub)).pending).toEqual([])
+})
+
+test('a refusal Delta calls permanent stops recording the subagent, once', async () => {
+  const root = await parent()
+  const sub = await child(root)
+  root.world.fail('thread create', { code: 'failed', retryable: false, times: 1_000 })
+  await sub.pi.prompt('inspect the parser')
+  await sub.pi.prompt('and the lexer')
+  await sub.advance(60_000)
+  root.world.stopFailing('thread create')
+  expect(Object.values(sub.world.delta().threads).filter((thread) => thread.parent)).toEqual([])
+  expect(sub.commands().filter((args) => args[0] === 'thread' && args[1] === 'create')).toHaveLength(1)
+  expect(sub.pi.noticeTexts().filter((text) => text.includes('Delta stopped recording the subagent'))).toEqual([
+    'Delta stopped recording the subagent "inspect the parser": thread create: failed: thread create failed as the test asked. Its records stay queued.',
+  ])
+  expect((await savedBinding(sub)).pending.length).toBeGreaterThan(0)
+  // Its parent goes on recording.
+  await root.pi.prompt('carry on')
+  await root.until(
+    () => root.thread()?.records.some((record: any) => JSON.stringify(record.update).includes('Echo: carry on')),
+    "the parent's next turn",
+  )
+})
+
+test("a subagent's run ends only once Delta stops syncing the worktree Claude may then remove", async () => {
+  const root = await parent()
+  const own = worktree(root, join(root.world.base, 'feature'))
+  const sub = await child(root, { cwd: own })
+  await sub.pi.prompt('work on the feature')
+  await sub.until(() => mountState(sub, own) === 'mounted', 'the checkout to be mounted')
+  const release = root.world.holdRelease()
+  let ended = false
+  const ending = sub.pi.shutdown('quit').then(() => (ended = true))
+  // The mount command has ended, but Delta still syncs the directory, so the session's end waits.
+  await sub.until(() => mountState(sub, own) === 'restoring', 'the mount to end')
+  await sub.advance(1_000)
+  expect(ended).toBe(false)
+  release()
+  // The next check of the directory finds it released.
+  await sub.advance(1_000)
+  await sub.until(() => ended, "the subagent's session to end")
+  await ending
+  expect(mountState(sub, own)).toBe('waiting')
+})

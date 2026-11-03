@@ -71,7 +71,7 @@ import {
 } from './src/setup/commands.ts'
 import { TYPE_SOMETHING } from './src/setup/setup.ts'
 import { releaseOnEnd } from './src/sharing/join.ts'
-import { stopChildTurn, withdrawParent } from './src/subagents/subagents.ts'
+import { releaseChildCheckout, stopChildTurn, withdrawParent } from './src/subagents/subagents.ts'
 import { startPluginUpdates, stopPluginUpdates } from './src/updates/updates.ts'
 import type { RemoteDisplay } from './src/watch/rows.ts'
 import { stopWatching } from './src/watch/watch.ts'
@@ -410,12 +410,15 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     cancelRequestsOf(session, event.targetSessionFile)
     withdrawParent(host)
     const runtime = stateFor(session)
+    const binding = runtime.binding
     endActivationOf(session)
     resetRuntime(runtime)
     await stopWatching(session)
     forgetContract(session)
     clearProgress(host)
     if (event.reason !== 'reload') await markEnded(host, session)
+    // A subagent's own checkout is released before its pi exits, so whatever started it may remove it.
+    if (event.reason !== 'reload') await releaseChildCheckout(host, binding)
     await releaseOnEnd(host, session, event.reason)
     sessions.delete(session)
     tui = undefined

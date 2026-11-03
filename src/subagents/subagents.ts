@@ -11,7 +11,15 @@ import { isWithin, samePath } from '../core/paths.ts'
 import { type Binding, key, load, save, serial, stateFor, storedBinding } from '../core/session-state.ts'
 import { errorText } from '../core/text.ts'
 import type { ProcessStream } from '../core/process.ts'
-import { hasWorktreeMount, threadCreate, threadWatch, verifiedContract, watchEvents } from '../cli/delta-cli.ts'
+import {
+  checkoutSyncing,
+  hasWorktreeMount,
+  stopWorktreeMount,
+  threadCreate,
+  threadWatch,
+  verifiedContract,
+  watchEvents,
+} from '../cli/delta-cli.ts'
 import { CHILD_CONTRACT_VERSION } from '../cli/thread-commands.ts'
 import type { RecordedMessage, Update } from '../recording/content.ts'
 import { loseExecution } from '../recording/delivery.ts'
@@ -219,6 +227,44 @@ export async function ensureChildThread(host: Host, binding: Binding, current: (
   return next
 }
 
+/**
+ * How long a subagent's end waits for Delta to stop syncing its own checkout after its mount ends.
+ * Delta bounds the final upload at 5 seconds, then stops watching the directory.
+ */
+const CHILD_RELEASE_BUDGET_MS = 6_000
+/** How often a finishing subagent's checkout is checked for Delta's release. */
+const CHILD_RELEASE_POLL_MS = 100
+
+/**
+ * End the mount of a subagent's own checkout as its session ends, and wait, within a budget, until Delta
+ * no longer syncs it: the code that started the subagent may remove that checkout, such as a Git
+ * worktree it made for it, as soon as the subagent's pi exits. The thread keeps the checkout attached.
+ */
+export async function releaseChildCheckout(host: Host, binding: Binding | undefined) {
+  const checkout = binding?.child ? binding.checkout : undefined
+  if (!binding || !checkout) return
+  try {
+    // Delta finishes a checkout after its mount command ends, so it stops watching the directory first.
+    if (await stopWorktreeMount(binding.session, checkout)) await awaitCheckoutReleased(host, checkout)
+  } catch (error) {
+    host.ui.debug(`Delta could not release this subagent's checkout: ${errorText(error)}`)
+  }
+}
+
+/** Wait until Delta no longer syncs `directory`, within `CHILD_RELEASE_BUDGET_MS`. */
+async function awaitCheckoutReleased(host: Host, directory: string) {
+  const deadline = host.clock.now() + CHILD_RELEASE_BUDGET_MS
+  for (;;) {
+    const remaining = deadline - host.clock.now()
+    if (remaining <= 0)
+      throw new Error(
+        `Delta was still syncing ${directory} ${CHILD_RELEASE_BUDGET_MS / 1000} seconds after its mount ended`,
+      )
+    if (!(await checkoutSyncing(host, directory, remaining))) return
+    await host.clock.sleep(Math.min(CHILD_RELEASE_POLL_MS, remaining))
+  }
+}
+
 async function createChildThread(host: Host, binding: Binding, check: () => Promise<void>): Promise<Binding> {
   const child = binding.child!
   const created = await threadCreate(host, {
@@ -254,6 +300,9 @@ async function gitRoot(host: Host, cwd: string): Promise<string | undefined> {
   }
 }
 
+/** Why pi stops a subagent's turn that someone took over in Delta. */
+export const CHILD_TAKEOVER = "Someone took this subagent's thread over in Delta"
+
 /** The watch that follows a subagent's running turn, so a takeover in Delta stops it at once. */
 let turnWatch: { sequence: number; stop: () => void } | undefined
 
@@ -288,7 +337,7 @@ export function followChildTurn(host: Host, session: string) {
       if (stopped) return
       const turn = event.type === 'producer.turn' ? event : event.type === 'ready' ? event.producer?.turn : undefined
       if (turn?.sequence === sequence && turn.status === 'superseded') {
-        await loseExecution(host, session, sequence, "Someone took this subagent's thread over in Delta")
+        await loseExecution(host, session, sequence, CHILD_TAKEOVER)
         return
       }
     }
