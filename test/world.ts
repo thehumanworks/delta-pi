@@ -126,15 +126,52 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     ) {
       writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
     },
+    /** Let `command` give its own answer again after `answer`. */
+    stopAnswering(command: string) {
+      rmSync(join(state, `answer-${command.replaceAll(' ', '-')}`), { force: true })
+    },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
-    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
-    hold(command: string, { after = 0 } = {}): () => void {
+    /**
+     * Hold the runs of `command` after the first `after`, or only `times` of them, until the returned
+     * function releases them.
+     */
+    hold(command: string, { after = 0, times }: { after?: number; times?: number } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
-      writeFileSync(path, JSON.stringify({ after }))
+      writeFileSync(path, JSON.stringify({ after, ...(times === undefined ? {} : { times }) }))
       return () => rmSync(path, { force: true })
+    },
+    /** Forget what `thread watch` reported for `thread`, so the next watch starts afresh, as after a one-off bad line. */
+    forgetRemote(thread: string) {
+      rmSync(join(state, `events-${thread}.jsonl`), { force: true })
+    },
+    /**
+     * Mark the checkout at `directory` mounted or waiting, as Delta reports it, while its mount command
+     * runs on: a worktree that stops being mounted, or comes back.
+     */
+    markCheckout(directory: string, mounted: boolean) {
+      const path = join(state, 'state.json')
+      const lock = join(state, 'state.lock')
+      for (let attempt = 0; ; attempt++) {
+        try {
+          mkdirSync(lock)
+          break
+        } catch (error) {
+          if (attempt > 2000) throw error
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5)
+        }
+      }
+      try {
+        const current = JSON.parse(readFileSync(path, 'utf8'))
+        for (const tree of current.worktrees)
+          for (const entry of tree.directories)
+            if (entry.directory === directory) entry.state = mounted ? 'mounted' : 'waiting'
+        writeFileSync(path, JSON.stringify(current, null, 2))
+      } finally {
+        rmSync(lock, { recursive: true, force: true })
+      }
     },
     cleanup() {
       rmSync(base, { recursive: true, force: true })

@@ -91,6 +91,10 @@ export async function admitPrompt(host: Host, text: string, steering: boolean): 
     }
   }
   if (steering) {
+    // A dropped watch answers with its last readiness while it is torn down, but sharing paused at the
+    // drop: a prompt into the turn that teardown stops is refused, as one between turns is.
+    if (!offline && !incomplete && isPaused(runtime))
+      return `Delta is not ready for this prompt: ${pauseNotice(runtime)}. The prompt was not submitted.`
     // A prompt queued while pi is still starting its run, before the run's turn began here, joins that
     // run, which opens its own turn; only steering a turn under way needs that turn to own the thread.
     if (runtime.currentTurnId === undefined) return

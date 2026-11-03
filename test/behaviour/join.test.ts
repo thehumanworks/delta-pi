@@ -273,7 +273,9 @@ test('busy and pending transitions refuse prompts and repeated join commands', a
   await delta.pi.command('delta-join', url)
   expect(shown(delta)).toContain('A Delta join is already in progress. Wait for its result.')
   expect(await delta.pi.prompt('no execution')).toBe('handled')
-  expect(shown(delta)).toContain('Delta is joining a shared thread. Wait for the join result before submitting a prompt.')
+  expect(shown(delta)).toContain(
+    'Delta is joining a shared thread. Wait for the join result before submitting a prompt.',
+  )
   release()
   await joining
   expect(delta.pi.session.id).not.toBe(before)
@@ -321,4 +323,131 @@ test('terminal: a refused clear surfaces partial progress without enabling parti
   // The session that stayed is as it was: a prompt runs, and nothing records it.
   expect(await delta.pi.prompt('not shared')).toBe('settled')
   expect(delta.world.delta().threads[thread].records).toEqual([])
+})
+
+/** A pi that joined a teammate's shared thread and finished joining in the session it switched to. */
+async function joinedThread(options: Parameters<typeof sharedThread>[1] = {}) {
+  const kit = await joiner()
+  const shared = sharedThread(kit.world, options)
+  const before = kit.pi.session.id
+  await kit.pi.command('delta-join', shared.url)
+  await kit.until(() => joined(kit), 'the join to finish')
+  return { kit, ...shared, before, session: kit.pi.session.id }
+}
+
+/** The records `thread` holds in the fake Delta. */
+const recordsOf = (kit: Kit, thread: string): any[] => kit.world.delta().threads[thread]?.records ?? []
+/** The turn starts and ends among `records`, by the turn they belong to. */
+const turnStates = (records: any[], state: 'running' | 'idle') =>
+  records
+    .filter((record) => record.update.sessionUpdate === 'state_update' && record.update.state === state)
+    .map((record) => record.turnSequence)
+/** Whether a write is the store's write of `session`'s binding. */
+const bindingWrite = (session: string) => (path: string) =>
+  path.includes('store') && path.includes(`session_${session}`)
+
+test('malformed watch output surfaces failure and reconnects', async () => {
+  const { kit, thread } = await joinedThread()
+  delta = kit
+  kit.world.remoteRaw(thread, '{"type":"item","item":{"id":""}}\n')
+  await kit.until(() => shown(kit).includes('Connection interrupted'), 'the watch to fail')
+  expect(await kit.pi.prompt('invalid')).toBe('handled')
+  expect(shown(kit)).toContain('The Delta watcher is not ready: Connection interrupted')
+  // The bad line was a one-off: the watch Delta starts next reports the thread as it is.
+  kit.world.forgetRemote(thread)
+  await kit.advance(1_000)
+  expect(await kit.pi.prompt('ready after automatic reconnect')).toBe('settled')
+  await kit.until(() => JSON.stringify(recordsOf(kit, thread)).includes('ready after automatic reconnect'), 'the turn')
+})
+
+test('queued lifecycle survives disconnect and reconnect without replaying a prompt', async () => {
+  const { kit, thread, session } = await joinedThread()
+  delta = kit
+  kit.world.fail('thread append', { times: 1_000, code: 'app_unavailable', retryable: true })
+  const model = heldModel(kit)
+  let asked = 0
+  const reply = kit.pi.model
+  kit.pi.model = (messages) => (asked++, reply(messages))
+  const turn = kit.pi.submit('offline')
+  await kit.until(model.asked, 'the turn to start')
+  kit.world.endWatch(thread)
+  await kit.until(() => shown(kit).includes("stopped pi's turn"), 'the drop to stop the turn')
+  model.release()
+  await kit.whileTimePasses(turn)
+  // The turn's start and its end are saved, once each, before anything reaches Delta.
+  const pending = (await bindingOf(kit, session)).pending as { sequence: number }[]
+  expect(pending.length).toBeGreaterThanOrEqual(2)
+  kit.world.stopFailing('thread append')
+  await kit.advance(60_000)
+  await kit.until(async () => !(await bindingOf(kit, session)).pending.length, 'the queue to drain')
+  const records = recordsOf(kit, thread)
+  expect(turnStates(records, 'running')).toHaveLength(1)
+  expect(turnStates(records, 'idle')).toEqual(turnStates(records, 'running'))
+  expect(records.filter((record) => record.update.sessionUpdate === 'user_message')).toHaveLength(1)
+  // Reconnecting replayed nothing to the model.
+  expect(asked).toBe(1)
+  expect(kit.pi.messages().filter((message) => message.role === 'user')).toHaveLength(1)
+})
+
+test('a prompt while a dropped watch is torn down is refused, then accepted once it reconnects', async () => {
+  const { kit, thread, session } = await joinedThread()
+  delta = kit
+  const model = heldModel(kit)
+  const turn = kit.pi.submit('owned')
+  await kit.until(model.asked, 'the turn to start')
+  await kit.until(() => JSON.stringify(recordsOf(kit, thread)).includes('owned'), 'the prompt to be recorded')
+  await kit.settle()
+  // Tearing the drop down marks pi's turn lost before it stops it; holding that write holds the teardown open.
+  const release = kit.disk.hold('write', bindingWrite(session))
+  const writes = kit.disk.touched('write').length
+  kit.world.endWatch(thread)
+  await kit.until(() => kit.disk.touched('write').slice(writes).some(bindingWrite(session)), 'the teardown')
+  // pi's turn still runs, so the person's prompt steers it; sharing paused at the drop.
+  expect(await kit.pi.prompt('during teardown')).toBe('handled')
+  expect(shown(kit)).toContain('checkout sharing is paused')
+  release()
+  await kit.until(() => shown(kit).includes('Connection interrupted'), 'the teardown to finish')
+  model.release()
+  await kit.whileTimePasses(turn)
+  await kit.advance(1_000)
+  expect(await kit.pi.prompt('after reconnect')).toBe('settled')
+  expect(kit.pi.messages().filter((message) => message.role === 'user')).toHaveLength(2)
+})
+
+test('a joined delivery refusal lifts only after explicit successful same-thread join verification', async () => {
+  const { kit, thread, url, session } = await joinedThread()
+  delta = kit
+  kit.world.fail('thread append', { code: 'not_visible', retryable: false })
+  await kit.pi.prompt('run echo still queued')
+  await kit.until(() => shown(kit).includes('Delta sharing paused'), 'the refusal')
+  expect(await kit.pi.prompt('cannot run yet')).toBe('handled')
+  // Watching again cannot lift a refusal.
+  kit.world.endWatch(thread)
+  await kit.until(() => shown(kit).includes('Connection interrupted'), 'the watch to drop')
+  const watches = ran(kit, 'thread watch').length
+  await kit.advance(1_000)
+  await kit.until(() => ran(kit, 'thread watch').length > watches, 'the watch to reconnect')
+  expect(await kit.pi.prompt('reconnect cannot authorize')).toBe('handled')
+  // Nor can a join whose check finds the thread's access not granted.
+  const status = kit.world.cli('thread', 'status', thread, '--source', 'pi', '--external-id', session)
+  const localOnly = { ...status, access: { state: 'local_only', is_owner: null } }
+  kit.world.answer('thread status', { stdout: `${JSON.stringify(localOnly)}\n`, exitCode: 0 }, { times: 20 })
+  await kit.pi.command('delta-join', url)
+  expect(await kit.pi.prompt('failed explicit check')).toBe('handled')
+  kit.world.stopAnswering('thread status')
+  await kit.pi.command('delta-join', url)
+  expect(await kit.pi.prompt('authorized after explicit check')).toBe('settled')
+  await kit.until(
+    () => JSON.stringify(recordsOf(kit, thread)).includes('authorized after explicit check'),
+    'the queued records and the new turn',
+  )
+  const records = recordsOf(kit, thread)
+  // The refused turn's records went once each, and none of the refused prompts did.
+  expect(records.map((record) => record.sequence)).toEqual(records.map((_, index) => index + 1))
+  expect(records.filter((record) => JSON.stringify(record.update).includes('still queued')).length).toBeGreaterThan(0)
+  for (const refused of ['cannot run yet', 'reconnect cannot authorize', 'failed explicit check'])
+    expect(JSON.stringify(records)).not.toContain(refused)
+  expect(ran(kit, 'thread create')).toEqual([])
+  expect(ran(kit, 'thread share')).toEqual([])
+  expect(ran(kit, 'worktree attach')).toEqual([])
 })

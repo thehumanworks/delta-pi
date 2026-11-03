@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 /** One record a producer appended, as the fake keeps it. */
@@ -46,6 +46,8 @@ export type FakeThread = {
 export type FakeWorktree = {
   reference: string
   worktree_id: string
+  /** What Delta calls the worktree: the folder it was created from. */
+  name?: string
   /** Where the worktree is checked out, and, for a thread mount's folder, how many mount commands hold it. */
   directories: { directory: string; state: 'waiting' | 'mounted'; holders?: number }[]
 }
@@ -221,6 +223,10 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   function producerKey(source: string | undefined, external: string | undefined) {
     return `${source}:${external}`
   }
+  /** What Delta calls a worktree: the folder it was created from, or `repo` for one the fake never created. */
+  function worktreeName(state: FakeState, reference: string) {
+    return state.worktrees.find((tree) => tree.reference === reference)?.name ?? 'repo'
+  }
 
   const argv = args.filter((arg) => arg !== '--json')
   const json = args.includes('--json')
@@ -249,7 +255,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     return undefined
   }
   const holding = join(root, `hold-${switchName}`)
-  if (reached(holding)) while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+  const held = reached(holding)
+  // A hold with `times` holds only that many runs; the runs after it pass.
+  if (held && (held.times === undefined || held.times > 0)) {
+    if (held.times !== undefined) writeFileSync(holding, JSON.stringify({ ...held, times: held.times - 1 }))
+    while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
+  }
   const failing = join(root, `fail-${switchName}`)
   const failure = reached(failing)
   if (failure) {
@@ -567,45 +578,57 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       flush()
       out({ type: 'live' })
       out({ type: 'presence', users: [] })
-      out({ type: 'worktrees', worktrees: thread.worktrees.map((reference) => ({ reference, name: 'repo' })) })
+      out({
+        type: 'worktrees',
+        worktrees: thread.worktrees.map((reference) => ({ reference, name: worktreeName(state, reference) })),
+      })
       await io.hold(undefined, flush, ending)
       if (exitCode !== undefined) throw new Exit(exitCode)
       break
     }
     case 'thread mount': {
       const [locator] = rest
-      const owner = option(rest, '--owner')
+      const owner = required(option(rest, '--owner'), '--owner')
       let thread: FakeThread | undefined
-      const directory = update((state) => {
+      // The thread's first worktree is checked out in the owner's folder, and each other one beside it;
+      // a thread of one worktree is worked in at its checkout, one of several in a folder of its own.
+      const placed = update((state) => {
         thread = known(state, locator)
-        const folder = join(root, 'mounts', thread.thread_id, required(owner, '--owner'))
-        mkdirSync(folder, { recursive: true })
-        for (const reference of thread.worktrees) {
+        const first = join(root, 'mounts', thread.thread_id, owner)
+        const worktrees = thread.worktrees.map((reference, index) => {
+          const name = worktreeName(state, reference)
+          return { reference, name, directory: index === 0 ? first : `${first}-${name}` }
+        })
+        const directory = worktrees.length > 1 ? join(root, 'folders', thread.thread_id, owner) : first
+        mkdirSync(directory, { recursive: true })
+        for (const { reference, directory: checkout } of worktrees) {
+          mkdirSync(checkout, { recursive: true })
           let tree = state.worktrees.find((entry) => entry.reference === reference)
           if (!tree) state.worktrees.push((tree = { reference, worktree_id: reference, directories: [] }))
-          const entry = tree.directories.find((candidate) => candidate.directory === folder)
+          const entry = tree.directories.find((candidate) => candidate.directory === checkout)
           if (entry) {
             entry.state = 'mounted'
             entry.holders = (entry.holders ?? 0) + 1
-          } else tree.directories.push({ directory: folder, state: 'mounted', holders: 1 })
+          } else tree.directories.push({ directory: checkout, state: 'mounted', holders: 1 })
         }
-        return folder
+        return { directory, worktrees }
       })
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       out({
         operation: 'mounted',
         thread_id: thread.thread_id,
         owner,
-        directory,
-        worktrees: thread.worktrees.map((reference) => ({ reference, name: 'repo', directory, state: 'mounted' })),
+        directory: placed.directory,
+        worktrees: placed.worktrees.map((tree) => ({ ...tree, state: 'mounted' })),
       })
       // Delta releases an owner's directories once no mount command for them runs; mounting again under
       // the same owner replaces the process and keeps them mounted.
+      const checkouts = placed.worktrees.map((tree) => tree.directory)
       await io.hold(() =>
         update((state) => {
           for (const tree of state.worktrees)
             for (const entry of tree.directories)
-              if (entry.directory === directory && (entry.holders = (entry.holders ?? 1) - 1) <= 0)
+              if (checkouts.includes(entry.directory) && (entry.holders = (entry.holders ?? 1) - 1) <= 0)
                 entry.state = 'waiting'
         }),
       )
@@ -627,7 +650,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const directory = required(rest[0], 'the directory')
       const id = randomUUID()
       update((state) => {
-        state.worktrees.push({ reference: id, worktree_id: id, directories: [{ directory, state: 'waiting' }] })
+        state.worktrees.push({
+          reference: id,
+          worktree_id: id,
+          name: basename(directory),
+          directories: [{ directory, state: 'waiting' }],
+        })
       })
       out({ operation: 'created', worktree_id: id, reference: id })
       break
@@ -639,6 +667,17 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         const thread = known(state, locator)
         if (!thread.worktrees.includes(reference)) thread.worktrees.push(reference)
         return { operation: 'attached', reference, thread_id: thread.thread_id }
+      })
+      out(result)
+      break
+    }
+    case 'worktree detach': {
+      const reference = required(rest[0], 'the worktree')
+      const locator = option(rest, '--thread')
+      const result = update((state) => {
+        const thread = known(state, locator)
+        thread.worktrees = thread.worktrees.filter((attached) => attached !== reference)
+        return { operation: 'detached', reference, thread_id: thread.thread_id }
       })
       out(result)
       break
