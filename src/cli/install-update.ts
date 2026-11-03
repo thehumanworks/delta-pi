@@ -151,7 +151,7 @@ export class InstallationUpdates {
   async update(host: UpdateHost, form: CommandForm): Promise<string> {
     const release = claimInstallation('app')
     if (!release)
-      return installation?.kind === 'plugin'
+      return installation()?.kind === 'plugin'
         ? 'A Delta extension update is in progress. Wait for its result before running /delta-update.'
         : 'A Delta installation update is already in progress. Wait for its result.'
     this.revision++

@@ -317,7 +317,7 @@ test.each(['session', 'cwd', 'shutdown', 'turn'] as const)(
     expect((await command).text).toContain('Run /reload')
     expect(reload).not.toHaveBeenCalled()
     for (const [, init] of run.mock.calls) expect(init?.cwd).toBe('/session/project')
-    expect(installation).toBeUndefined()
+    expect(installation()).toBeUndefined()
   },
 )
 
@@ -349,7 +349,7 @@ test('the app/plugin installation lock covers discovery, installation and pendin
   reloading.resolve()
   await command
   expect(run.mock.calls.filter(([argv]) => argv[1] === 'update')).toHaveLength(1)
-  expect(installation).toBeUndefined()
+  expect(installation()).toBeUndefined()
 })
 
 test.each([
@@ -390,7 +390,7 @@ test.each(['source', 'manifest', 'exit', 'throw', 'reload'] as const)(
     expect(text).toMatch(/couldn't|could not/)
     if (failure !== 'reload') expect(reload).not.toHaveBeenCalled()
     else expect(text).toContain('reload failed')
-    expect(installation).toBeUndefined()
+    expect(installation()).toBeUndefined()
   },
 )
 

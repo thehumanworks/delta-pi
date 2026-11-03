@@ -11,7 +11,8 @@ the conventions, and which of them lint, ast-grep and the tests check.
   (`src/core/host.ts`); nothing else reaches pi or the machine directly.
 - Pi re-evaluates extension modules for every session runtime (jiti `moduleCache: false`), so module state
   is per session. Only what must outlive a session switch lives on `globalThis`: mount processes
-  (`src/cli/delta-cli.ts`) and a join's verified contract (`src/sharing/join.ts`).
+  (`src/cli/delta-cli.ts`), a join's verified contract (`src/sharing/join.ts`) and the installer claim
+  (`src/core/installation.ts`).
 - Delta's recording contract: `delta --json thread contract`; the extension speaks version 8.
 
 Before finishing a change, run `npm run format`, then `npm run verify`: the format check, type check,

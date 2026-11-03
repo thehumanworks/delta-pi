@@ -66,7 +66,7 @@ function npmSource(source: string): Source | undefined {
 
 /** The band's notice of a newer release, while notifications are on. */
 export function pluginUpdateNotice(): string | undefined {
-  return available && !installation ? `Delta extension ${available} is available · /delta-plugin-update` : undefined
+  return available && !installation() ? `Delta extension ${available} is available · /delta-plugin-update` : undefined
 }
 
 async function installedSource(host: Host, cwd: string): Promise<Source | undefined> {
@@ -192,7 +192,7 @@ export function startPluginUpdates(host: Host) {
       const { latest } = await check(host)
       const reminder = await host.store.get(REMINDER)
       const stillEnabled = await notificationsOn(host)
-      if (observer !== current || !stillEnabled || installation) return
+      if (observer !== current || !stillEnabled || installation()) return
       available =
         latest && compareVersions(latest, host.plugin.version) === 1 && !snoozed(reminder, latest, host.clock.now())
           ? latest
@@ -267,7 +267,7 @@ export async function pluginUpdateCommand(host: Host, args: string, command?: Re
   if (!args && !release)
     return {
       text:
-        installation?.kind === 'app'
+        installation()?.kind === 'app'
           ? 'A Delta installation update is still running. Let it finish before updating the extension.'
           : 'A Delta extension update is already in progress. Wait for its result.',
     }
