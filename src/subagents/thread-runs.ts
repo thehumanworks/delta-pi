@@ -166,7 +166,10 @@ async function readThread(host: Host, reference: string): Promise<ThreadRead> {
         if (item)
           items.set(event.id, {
             ...item,
-            content: { ...item.content, text: `${typeof item.content.text === 'string' ? item.content.text : ''}${event.text}` },
+            content: {
+              ...item.content,
+              text: `${typeof item.content.text === 'string' ? item.content.text : ''}${event.text}`,
+            },
           })
       } else if (event.type === 'remove') items.delete(event.id)
       else if (event.type === 'worktrees') worktrees = event.worktrees.map((tree) => tree.reference)
