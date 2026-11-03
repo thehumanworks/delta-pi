@@ -375,7 +375,7 @@ export function requireMounted(mounted: MountedThread, thread: string | undefine
 async function restoreMounts(host: Host, session: string, check: () => Promise<void>) {
   const binding = await serial(() => load(host, session))
   await check()
-  const mounted = await mountThread(host, binding)
+  const mounted = await mountThread(host, binding, { check })
   await check()
   requireMounted(mounted, binding.thread)
   const directory = binding.directory ?? mounted.directory
@@ -467,7 +467,7 @@ async function applyWorktrees(host: Host, session: string, listed: { reference: 
     listed.every((tree) => previous.some((mount) => mount.reference === tree.reference))
   )
     return
-  const mounted = await mountThread(host, binding)
+  const mounted = await mountThread(host, binding, { check: ownership(() => activation.session === session) })
   if (activation.session !== session || mounted.thread_id !== binding.thread) return
   await serial(async () => save(host, { ...(await load(host, session)), mounts: mounted.worktrees }))
   const { added, removed, moves } = worktreeChanges(previous, binding.directory, mounted)
