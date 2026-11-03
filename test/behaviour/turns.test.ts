@@ -139,7 +139,10 @@ test('ownership loss aborts exactly the bound native turn and fences its later o
   )
   await delta.settle()
   expect(pi.aborts).toBe(1)
-  const later = records(delta).filter((record) => record.sequence > sequence!)
+  // The thread's title, recorded once the turn ended, belongs to no turn.
+  const later = records(delta).filter(
+    (record) => record.sequence > sequence! && record.update.sessionUpdate !== 'session_info_update',
+  )
   expect(later.length).toBeGreaterThan(0)
   for (const record of later) expect(record.turnSequence).toBe(sequence)
   expect(records(delta).filter((record) => record.update.sessionUpdate === 'user_message')).toHaveLength(1)
