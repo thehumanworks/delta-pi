@@ -361,7 +361,8 @@ export async function startSession(host: Host, session: string, resumed = false)
         configured: policy.configured,
         newToPlugin: true,
         joined: !!stateFor(session).binding?.joined,
-        joining: !!requests.join,
+        // The session a join switched into finishes that join in a runtime of its own, without its request.
+        joining: !!requests.join || !!stateFor(session).binding?.joinTransition,
       },
       (key) => {
         openOnboarding.set(session, key)

@@ -956,3 +956,27 @@ test('Windows mixed separators join and allow subdirectories but not sibling che
   expect(outside.outcome).toBe('handled')
   expect(outside.shown).toContain(`pi is working in ${directory}-other, outside this session's folder ${directory}`)
 })
+
+test("the session a join switches into is not told it is unrecorded while its mount runs", async () => {
+  delta = await joiner()
+  const { url, thread } = sharedThread(delta.world)
+  // Delta's mounts are Git checkouts of the teammate's repository.
+  const mounts = join(delta.world.state, 'mounts', thread)
+  delta.programs.set('git', (argv, init) =>
+    String(init.cwd ?? '').startsWith(mounts) && argv.includes('--show-toplevel')
+      ? { stdout: `${init.cwd}\n`, stderr: '', exitCode: 0, isStdoutTruncated: false, isStderrTruncated: false }
+      : undefined,
+  )
+  const dialogs = delta.pi.dialogs.length
+  const release = delta.world.hold('thread mount', { after: 1 })
+  await delta.pi.command('delta-join', url)
+  await delta.until(() => ran(delta!, 'thread mount').length === 2, 'the joined session to mount the thread')
+  await delta.settle()
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  expect(band(delta)).not.toMatch(/Not set up|Not syncing/)
+  expect(delta.pi.dialogs.slice(dialogs)).toEqual([])
+  release()
+  await delta.until(() => joined(delta!), 'the join to finish')
+  expect(band(delta)).not.toMatch(/Not set up|Not syncing/)
+  expect(delta.pi.dialogs.slice(dialogs)).toEqual([])
+})
