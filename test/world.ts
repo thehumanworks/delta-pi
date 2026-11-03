@@ -3,7 +3,7 @@
  * CLI's state (test/fake-delta), shared by the end-to-end tests and the in-process kit.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,7 +17,8 @@ export type Event = Record<string, any>
 
 /** A temporary world: a checkout with a remote, a pi agent directory, and the fake CLI's state. */
 export function world(options: { policy?: Record<string, unknown> } = {}) {
-  const base = mkdtempSync(join(tmpdir(), 'pi-delta-e2e-'))
+  // Resolved, as pi's working directory and Git's answers are: macOS's temporary folder is a symlink.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'pi-delta-e2e-')))
   const checkout = join(base, 'repo')
   const agentDir = join(base, 'agent')
   const state = join(base, 'delta')
