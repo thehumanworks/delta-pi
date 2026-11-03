@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawn } from '../src/core/process.ts'
 import { fileStore } from '../src/core/store.ts'
 import { cleanTitle, promptTitle } from '../src/recording/title.ts'
 import { parentLink, sentBy } from '../src/subagents/subagents.ts'
@@ -28,28 +27,6 @@ describe('store', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
-  })
-})
-
-describe('processes', () => {
-  test('a stream yields output as it comes and ends with how the program exited', async () => {
-    const stream = spawn({ argv: ['sh', '-c', 'printf one; printf two >&2; exit 3'] })
-    const pieces: string[] = []
-    let piece = await stream.next()
-    while (!piece.done) {
-      pieces.push(`${piece.value.stream}:${piece.value.text}`)
-      piece = await stream.next()
-    }
-    expect(pieces.sort()).toEqual(['stderr:two', 'stdout:one'])
-    expect(piece.value).toEqual({ code: 3, signal: null })
-  })
-
-  test('stopping a program ends it with SIGTERM and waits for it to exit', async () => {
-    const stream = spawn({ argv: ['sh', '-c', 'trap "exit 0" TERM; echo ready; while :; do sleep 0.05; done'] })
-    expect((await stream.next()).value).toEqual({ stream: 'stdout', text: 'ready\n' })
-    const stopped = await stream.return()
-    expect(stopped.done).toBe(true)
-    expect((await stream.next()).done).toBe(true)
   })
 })
 

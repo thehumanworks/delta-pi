@@ -27,6 +27,8 @@ export type SpawnInit = { argv: string[]; env?: Record<string, string>; cwd?: st
 
 /** Output past this is cut and reported as truncated, as Claude Code's `process.run` does. */
 const CAPTURE_LIMIT = 4 * 1024 * 1024
+/** How long a program has to exit after SIGTERM before it is killed. */
+export const KILL_GRACE_MS = 2_000
 /** How long stopping a program waits for it to exit before leaving it to finish on its own. */
 const STOP_WAIT_MS = 6_000
 
@@ -34,7 +36,11 @@ function environment(env: Record<string, string> | undefined): NodeJS.ProcessEnv
   return env ? { ...process.env, ...env } : process.env
 }
 
-/** Run `argv` to completion, collecting at most {@link CAPTURE_LIMIT} of each output. */
+/**
+ * Run `argv` to completion, collecting at most {@link CAPTURE_LIMIT} of each output. With `timeoutMs`,
+ * the program is sent SIGTERM at its deadline and SIGKILL {@link KILL_GRACE_MS} later, and the run
+ * rejects by then even if a descendant still holds its output open. Descendants are not stopped.
+ */
 export function run(argv: string[], init: RunInit = {}): Promise<RunResult> {
   const [command, ...args] = argv
   if (!command) return Promise.reject(new Error('No command to run'))
@@ -50,6 +56,15 @@ export function run(argv: string[], init: RunInit = {}): Promise<RunResult> {
     let isStdoutTruncated = false
     let isStderrTruncated = false
     let timedOut = false
+    let settled = false
+    const timers: NodeJS.Timeout[] = []
+    const settle = (finish: () => void) => {
+      if (settled) return
+      settled = true
+      for (const timer of timers) clearTimeout(timer)
+      finish()
+    }
+    const timeout = () => new Error(`${command} timed out after ${init.timeoutMs} ms`)
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', (text: string) => {
@@ -64,28 +79,42 @@ export function run(argv: string[], init: RunInit = {}): Promise<RunResult> {
         isStderrTruncated = true
       } else stderr += text
     })
-    const timer =
-      init.timeoutMs !== undefined
-        ? setTimeout(() => {
-            timedOut = true
-            child.kill('SIGTERM')
-          }, init.timeoutMs)
-        : undefined
-    child.on('error', (error) => {
-      if (timer) clearTimeout(timer)
-      reject(error)
+    if (init.timeoutMs !== undefined)
+      timers.push(
+        setTimeout(() => {
+          timedOut = true
+          child.kill('SIGTERM')
+          timers.push(
+            setTimeout(() => {
+              child.kill('SIGKILL')
+              // Output a descendant still holds open would otherwise keep the run waiting for `close`.
+              child.stdout.destroy()
+              child.stderr.destroy()
+              settle(() => reject(timeout()))
+            }, KILL_GRACE_MS),
+          )
+        }, init.timeoutMs),
+      )
+    child.on('error', (error) => settle(() => reject(error)))
+    child.on('close', (code) =>
+      settle(() =>
+        timedOut
+          ? reject(timeout())
+          : resolve({ stdout, stderr, exitCode: code, isStdoutTruncated, isStderrTruncated }),
+      ),
+    )
+    child.stdin.on('error', () => {
+      /* a program that exits without reading its input closes the pipe; its exit says what happened */
     })
-    child.on('close', (code) => {
-      if (timer) clearTimeout(timer)
-      if (timedOut) return reject(new Error(`${command} timed out after ${init.timeoutMs} ms`))
-      resolve({ stdout, stderr, exitCode: code, isStdoutTruncated, isStderrTruncated })
-    })
-    child.stdin.on('error', () => {})
     child.stdin.end(init.stdin ?? '')
   })
 }
 
-/** Start `argv` and stream its output; the caller reads it with `next` and stops it with `return`. */
+/**
+ * Start `argv` and stream its output; the caller reads it with `next` and stops it with `return`.
+ * `return` ends the stream at once, waking a pending `next`, then sends SIGTERM, SIGKILL after
+ * {@link KILL_GRACE_MS}, and resolves with how the program exited, or after {@link STOP_WAIT_MS}.
+ */
 export function spawn(init: SpawnInit): ProcessStream {
   const [command, ...args] = init.argv
   if (!command) throw new Error('No command to run')
@@ -98,7 +127,10 @@ export function spawn(init: SpawnInit): ProcessStream {
   const queue: Output[] = []
   let exit: Exit | undefined
   let failure: Error | undefined
+  /** The reader stopped the stream: no more output is kept, and every read ends it. */
+  let closed = false
   let waiting: (() => void) | undefined
+  let kill: NodeJS.Timeout | undefined
   const wake = () => {
     const resume = waiting
     waiting = undefined
@@ -106,6 +138,7 @@ export function spawn(init: SpawnInit): ProcessStream {
   }
   const exited = new Promise<Exit>((resolve) => {
     child.on('close', (code, signal) => {
+      if (kill) clearTimeout(kill)
       exit = { code, signal }
       resolve(exit)
       wake()
@@ -118,19 +151,19 @@ export function spawn(init: SpawnInit): ProcessStream {
   })
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
-  child.stdout.on('data', (text: string) => {
-    queue.push({ stream: 'stdout', text })
+  const keep = (piece: Output) => {
+    if (closed) return
+    queue.push(piece)
     wake()
-  })
-  child.stderr.on('data', (text: string) => {
-    queue.push({ stream: 'stderr', text })
-    wake()
-  })
-  let stopped = false
+  }
+  child.stdout.on('data', (text: string) => keep({ stream: 'stdout', text }))
+  child.stderr.on('data', (text: string) => keep({ stream: 'stderr', text }))
+  const stopped: Exit = { code: null, signal: 'SIGTERM' }
   const stream: ProcessStream = {
     pid: child.pid,
     async next(): Promise<IteratorResult<Output, Exit>> {
       for (;;) {
+        if (closed) return { done: true, value: exit ?? stopped }
         const piece = queue.shift()
         if (piece) return { done: false, value: piece }
         if (failure !== undefined) {
@@ -145,19 +178,22 @@ export function spawn(init: SpawnInit): ProcessStream {
       }
     },
     async return(): Promise<IteratorResult<Output, Exit>> {
-      if (!exit && !stopped) {
-        stopped = true
-        child.kill('SIGTERM')
+      if (!closed) {
+        closed = true
+        queue.length = 0
+        wake()
+        if (!exit) {
+          child.kill('SIGTERM')
+          kill = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS)
+          kill.unref()
+        }
       }
       const result =
         exit ??
         (await Promise.race([
           exited,
-          new Promise<Exit>((resolve) =>
-            setTimeout(() => resolve({ code: null, signal: 'SIGTERM' }), STOP_WAIT_MS).unref(),
-          ),
+          new Promise<Exit>((resolve) => setTimeout(() => resolve(stopped), STOP_WAIT_MS).unref()),
         ]))
-      queue.length = 0
       return { done: true, value: result }
     },
   }
