@@ -148,3 +148,20 @@ test('a failure keeps its explanation in the band, above the update notice', () 
     expect(lines.findIndex((line) => line.includes('↑'))).toBeGreaterThan(failure)
   }
 })
+
+// Upstream measures its update row's bracketed buttons; pi shows the update as a notice naming its command.
+test('a plugin update notice fits one row at every width', () => {
+  for (const version of ['0.1.25', '10.100.1000']) {
+    const notice = `Delta extension ${version} is available · /delta-plugin-update`
+    vi.mocked(updates.pluginUpdateNotice).mockReturnValue(notice)
+    const widget = new BandWidget(host, () => theme)
+    for (let width = 12; width <= 160; width++) {
+      const lines = widget.render(width)
+      expect(lines).toHaveLength(1)
+      expect(visibleWidth(lines[0]!)).toBeLessThanOrEqual(width)
+      expect(lines[0]).not.toContain('\n')
+      // Where the row holds the whole notice, the command that installs it is on it.
+      if (width >= notice.length + 3) expect(stripVTControlCharacters(lines[0]!)).toContain('/delta-plugin-update')
+    }
+  }
+})

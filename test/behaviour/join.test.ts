@@ -1025,11 +1025,13 @@ test('terminal: a refused cd surfaces partial progress without enabling particip
   const { directory } = saved.joinTransition
   expect(await first.pi.prompt('do not run here')).toBe('handled')
   // Sharing it instead is refused, runs nothing, and points back to the join.
-  const commands = first.commands().length
+  // The startup's background check for a Delta update may land at any time; it is not the share's.
+  const sharing = () => first.commands().filter((args) => args[0] !== 'update')
+  const commands = sharing().length
   await first.pi.command('delta', 'share')
   await first.until(() => shown(first).includes('This session joined an already shared thread'), 'the share refusal')
   expect(shown(first)).toContain(`/delta-join ${url}`)
-  expect(first.commands()).toHaveLength(commands)
+  expect(sharing()).toHaveLength(commands)
   expect(await bindingOf(first, fresh.id)).toEqual(saved)
   expect(recordsOf(first, thread)).toEqual([])
   await first.whileTimePasses(first.pi.shutdown('quit'))

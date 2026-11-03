@@ -117,7 +117,7 @@ export function debugLog(kit: Kit): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
-/** The band's text, as a client without pi's terminal shows it. */
+/** The band's text: the widget pi's terminal draws, or the status line a client without it shows. */
 export function band(kit: Kit): string {
-  return kit.pi.statuses.get('delta') ?? ''
+  return kit.pi.mode === 'tui' ? kit.pi.widget('delta').join('\n') : (kit.pi.statuses.get('delta') ?? '')
 }

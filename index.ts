@@ -180,6 +180,16 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
         (context?.sessionManager.getEntries() ?? []).flatMap((entry) =>
           entry.type === 'message' ? [{ id: entry.id, message: entry.message }] : [],
         ),
+      holds: (details) => {
+        const entry = context?.sessionManager.getLeafEntry()
+        return entry?.type === 'custom_message' && entry.details === details
+      },
+      customMessages: (customType) =>
+        (context?.sessionManager.getEntries() ?? []).flatMap((entry) =>
+          entry.type === 'custom_message' && entry.customType === customType
+            ? [{ content: entry.content, details: entry.details }]
+            : [],
+        ),
       turns: () =>
         (context?.sessionManager.getBranch() ?? []).filter(
           (entry) => entry.type === 'message' && (entry.message.role === 'user' || entry.message.role === 'assistant'),

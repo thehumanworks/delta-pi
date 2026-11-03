@@ -3,6 +3,7 @@
  * added between turns as custom messages the model reads and the person sees drawn under their author.
  */
 import type { Host } from '../core/host.ts'
+import { isJsonObject } from '../core/json.ts'
 import { ledgerKey, stateFor } from '../core/session-state.ts'
 import type { WatchComment, WatchItem } from '../cli/thread-commands.ts'
 import { REMOTE_MESSAGE } from '../recording/content.ts'
@@ -11,6 +12,7 @@ import {
   addRows,
   commentAction,
   commentAuthor,
+  commentKey,
   commentMarkdown,
   commentQuote,
   isDrawnItem,
@@ -18,16 +20,21 @@ import {
   itemAuthor,
   itemMarkdown,
   keyedComment,
+  type Ledger,
+  OMITTED,
   type PendingRow,
   type QuotedLine,
+  type RemoteView,
 } from './conversation.ts'
 import { feed, watchedSession } from './watch.ts'
 
 /**
  * What a remote row draws for the person, saved with the row so it draws the same after a restart or
- * resume. Only what is drawn is kept; the model reads the row's own text.
+ * resume. Only what is drawn is kept; the model reads the row's own text. `id` is the item's, or the
+ * comment's key, and `thread` the thread it is in: while the watch holds that thread, the row draws
+ * the item as it is now (`liveDisplay`), so a teammate's edit or removal redraws it.
  */
-export type RemoteDisplay =
+export type RemoteDisplay = (
   | { kind: 'message'; author: string; person: string; agent: boolean; markdown: string }
   | { kind: 'tool'; author: string; person: string; name: string; detail?: string; status?: string }
   | { kind: 'event'; markdown: string }
@@ -38,10 +45,15 @@ export type RemoteDisplay =
       action: string
       reply: boolean
       routed: boolean
+      /** The quoted context, each passage with up to QUOTE_ROOM of its line around it; drawing fits it to the row. */
       quote: QuotedLine[]
       markdown: string
     }
   | { kind: 'context' }
+) & { id?: string; thread?: string }
+
+/** How much of a quoted passage's line a saved row keeps, more than any terminal row shows. */
+const QUOTE_ROOM = 1_000
 
 /** The pass adding the watched thread's completed items to pi's context, while one runs. */
 export let settling: Promise<void> | undefined
@@ -88,7 +100,8 @@ export function stopRows(): Promise<void> | undefined {
 /** What an item draws for the person, from the view the watch keeps. */
 function itemDisplay(item: WatchItem, thread: string): RemoteDisplay | undefined {
   if (!isDrawnItem(item)) return
-  if (isEventItem(item)) return { kind: 'event', markdown: itemMarkdown(item, thread) }
+  const row = { id: item.id, thread }
+  if (isEventItem(item)) return { kind: 'event', markdown: itemMarkdown(item, thread), ...row }
   const person = personKey(item.author ?? { user_id: null, name: itemAuthor(item) })
   if (item.kind === 'tool_call') {
     const { name, detail, status } = toolCallParts(item)
@@ -99,6 +112,7 @@ function itemDisplay(item: WatchItem, thread: string): RemoteDisplay | undefined
       name,
       ...(detail ? { detail } : {}),
       ...(status ? { status } : {}),
+      ...row,
     }
   }
   return {
@@ -107,13 +121,12 @@ function itemDisplay(item: WatchItem, thread: string): RemoteDisplay | undefined
     person,
     agent: item.kind !== 'user_message',
     markdown: itemMarkdown(item, thread),
+    ...row,
   }
 }
 
 /** What a comment draws for the person: its author and action, the passage it is about, and its text. */
-function commentDisplay(comment: WatchComment): RemoteDisplay | undefined {
-  const view = feed.view
-  if (!view) return
+function commentDisplay(view: RemoteView, comment: WatchComment): RemoteDisplay {
   const parent = view.commentParent(comment)
   const target = view.commentTarget(comment)
   return {
@@ -123,9 +136,40 @@ function commentDisplay(comment: WatchComment): RemoteDisplay | undefined {
     action: commentAction(comment, parent, target),
     reply: comment.chain !== comment.id,
     routed: !!comment.routed_to,
-    quote: commentQuote(comment, parent, target, view.items, 100),
+    quote: commentQuote(comment, parent, target, view.items, QUOTE_ROOM),
     markdown: commentMarkdown(comment, view.thread),
+    id: commentKey(comment.id),
+    thread: view.thread,
   }
+}
+
+/**
+ * What a drawn row shows now. While the watch holds the row's thread, that is the item or comment as
+ * it is now, nothing (`gone`) once it was removed, emptied, or is missing from a complete snapshot,
+ * and what was saved while its snapshot is still arriving. Otherwise, as after a restart before the
+ * watch is back, it is what was saved. `sources` are the objects the answer is made from, so a
+ * renderer works it out again, with `display`, only when one of them was replaced.
+ */
+export function liveDisplay(saved: RemoteDisplay): { sources: unknown[]; display: () => RemoteDisplay | 'gone' } {
+  const view = feed.view
+  const asSaved = { sources: [saved], display: () => saved }
+  const gone = (...sources: unknown[]) => ({ sources, display: () => 'gone' as const })
+  if (!view || saved.id === undefined || saved.thread !== view.thread) return asSaved
+  if (view.wasRemoved(saved.id)) return gone(view, 'removed')
+  const commentId = keyedComment(saved.id)
+  if (commentId !== undefined) {
+    const comment = view.comments.get(commentId)
+    if (!comment) return view.snapshotDone ? gone(view) : asSaved
+    const target = view.commentTarget(comment)
+    const quoted = target?.kind === 'transcript' && target.item_id !== null ? view.items.get(target.item_id) : undefined
+    return {
+      sources: [comment, view.commentParent(comment), view.comments.get(comment.chain), quoted],
+      display: () => commentDisplay(view, comment),
+    }
+  }
+  const item = view.items.get(saved.id)
+  if (!item) return view.snapshotDone ? gone(view) : asSaved
+  return { sources: [item], display: () => itemDisplay(item, view.thread) ?? 'gone' }
 }
 
 /**
@@ -139,18 +183,40 @@ function appendRow(host: Host, row: PendingRow): { deny?: string } {
     const commentId = keyedComment(row.commandItem)
     const comment = commentId === undefined ? undefined : view.comments.get(commentId)
     const item = view.items.get(row.commandItem)
-    display = comment ? commentDisplay(comment) : item ? itemDisplay(item, view.thread) : undefined
+    display = comment ? commentDisplay(view, comment) : item ? itemDisplay(item, view.thread) : undefined
   }
+  const details: RemoteDisplay = display ?? { kind: 'context', id: row.id }
   host.pi.sendMessage<RemoteDisplay>(
-    {
-      customType: REMOTE_MESSAGE,
-      content: row.text,
-      display: display !== undefined,
-      details: display ?? { kind: 'context' },
-    },
+    { customType: REMOTE_MESSAGE, content: row.text, display: display !== undefined, details },
     { triggerTurn: false },
   )
+  // Rows are added only while pi is idle, when it adds them at once; one it failed to add, which it
+  // reports only on its own error channel, is not counted, so the next snapshot offers it again.
+  if (!host.session.holds(details)) return { deny: 'pi did not add it to the session' }
   return {}
+}
+
+/**
+ * The ledger without what pi's session holds no row for, as when pi could not write a row to the
+ * session file: the model of a resumed session never read those, so they are offered again. A row
+ * names its item or comment in its details, or, saved by an earlier version, in its first line.
+ * Snapshot items left out of the model's context have no row of their own and stay as they are.
+ */
+export function heldLedger(ledger: Ledger, rows: { content: unknown; details: unknown }[]): Ledger {
+  const held = new Set<string>()
+  for (const { content, details } of rows) {
+    const id = isJsonObject(details) && typeof details.id === 'string' ? details.id : undefined
+    if (id !== undefined) {
+      held.add(id)
+      continue
+    }
+    const named = /\((item|comment) ([^\s)]+)\)/.exec(typeof content === 'string' ? content.split('\n', 1)[0]! : '')
+    if (named) held.add(named[1] === 'comment' ? commentKey(named[2]!) : named[2]!)
+  }
+  const items = Object.fromEntries(
+    Object.entries(ledger.items).filter(([id, fingerprint]) => fingerprint === OMITTED || held.has(id)),
+  )
+  return { ...ledger, items }
 }
 
 /**

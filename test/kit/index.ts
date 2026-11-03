@@ -19,7 +19,7 @@ import { disk } from './disk.ts'
 import { type Environment, type FakeProgram, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
-export { echoModel, FakeSession, type Model, type Reply } from './pi.ts'
+export { echoModel, FAKE_THEME, FakeSession, type Model, type Reply, themeColor } from './pi.ts'
 export type { FakeProgram } from './processes.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>

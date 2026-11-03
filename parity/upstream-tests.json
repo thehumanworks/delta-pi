@@ -16,8 +16,9 @@
     },
     {
       "upstream": "band/status.test.ts > a plugin update and its bracketed buttons fit one row",
-      "status": "not-applicable",
-      "note": "Measures Claude's native bracketed Button chrome, Reload/Details controls and their GIVE_WAY layout. Pi uses a text notice and slash command, not those controls. The adapted text-notice renderer still needs its own width tests."
+      "status": "covered",
+      "ours": ["test/band.test.ts > a plugin update notice fits one row at every width"],
+      "note": "Upstream measures its update row's bracketed Update/Later/Mute buttons; pi shows the update as one text notice naming /delta-plugin-update, so ours checks that notice stays one row within every width from 12 to 160 columns, whole where the row holds it."
     },
     {
       "upstream": "band/status.test.ts > a recorded session says so beside the name at every width, and an unrecorded one does not",
@@ -1503,17 +1504,17 @@
     {
       "upstream": "register.test.ts > remote activity > a drawn row is found by its own id, even when the transcript kept no arguments for its run",
       "status": "not-applicable",
-      "note": "Depends on Claude Code dropping arguments from queued command runs and the plugin's shownRows lookup. Pi persists custom-message renderer details directly."
+      "note": "Depends on Claude Code storing a queued command run without its arguments, and the plugin finding its drawn row by the run's row id. pi has no command run behind a row: a remote row is a custom message whose details name its item, which pi hands the renderer directly."
     },
     {
       "upstream": "register.test.ts > remote activity > a drawn row the transcript never stores shows the message plainly, and Claude still gets it",
       "status": "not-applicable",
-      "note": "Tests fallback from Claude Code's unacknowledged internal command-output draw to plain notices plus session.append. Pi has no separate command-output draw/store operation; custom-message append confirmation is a different obligation."
+      "note": "Tests the fallback from Claude Code's unacknowledged command-output draw to a plain notice plus session.append. pi has no separate draw to fall back from: the custom message is both the drawn row and the model's copy. A row pi fails to add is covered by remote.test.ts's 'a row pi fails to add is not counted as added, and the next snapshot offers it again'."
     },
     {
       "upstream": "register.test.ts > remote activity > a host that never redraws falls back to the plain notice and still keeps the row for Claude",
       "status": "not-applicable",
-      "note": "Claude's internal draw command needs a ui.render hook context and times out without redraw. Pi sendMessage delivers without requiring a renderer/redraw; the README's custom-message adaptation removes this failure mode."
+      "note": "Claude Code's internal show command needs a ui.render redraw and times out without one. pi draws a custom message through its registered renderer whenever it draws, so there is no redraw to wait for and no timeout to fall back from."
     },
     {
       "upstream": "register.test.ts > remote activity > a message row waits out a local turn and is drawn only after it ends",
@@ -1525,8 +1526,11 @@
     },
     {
       "upstream": "register.test.ts > remote activity > a remote agent's thinking is announced when it completes, but never reaches Claude",
-      "status": "missing",
-      "note": "Formatting/model-exclusion tests exist, but no watch integration verifies exactly one person-only announcement on streamed completion and no announcement on completed resend."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/remote.test.ts > a remote agent's thinking is announced when it completes, but never reaches Claude"
+      ],
+      "note": "A streamed thought, its completion and a re-send: exactly one labelled note, no model row. pi's note is one entry with the label and the folded paragraph on two lines, where upstream logs two."
     },
     {
       "upstream": "register.test.ts > remote activity > a restart repeats no rows from the saved record and corrects what changed while away",
@@ -1538,13 +1542,19 @@
     },
     {
       "upstream": "register.test.ts > remote activity > a snapshot draws completed messages without waiting for children or starting a turn",
-      "status": "missing",
-      "note": "Pure snapshot filtering and /delta-join history delivery are covered separately. Add the integration case with a blocked child inventory, completed/open/unknown items, no notices/no echo and no started run."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/remote.test.ts > a snapshot draws completed messages without waiting for children or starting a turn"
+      ],
+      "note": "Completed, open and unknown snapshot items: only the completed messages become drawn rows, with no notice, no turn and nothing recorded back. The fake Delta never reports children, which stands for an inventory that never arrives."
     },
     {
       "upstream": "register.test.ts > remote activity > a snapshot's comments follow their messages, and a restart repeats none of them",
-      "status": "missing",
-      "note": "The pure snapshot-comment test covers tail selection and ledger deduplication, but not the watch's mixed snapshot item/comment ordering through pi across restart. Add explicit item-before-comment and no-repeat integration assertions."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/remote.test.ts > a snapshot's comments follow their messages, and a restart repeats none of them"
+      ],
+      "note": "A snapshot item and its comment arrive as two rows in that order; a reconnect, and also a new pi process resuming the session, add none again."
     },
     {
       "upstream": "register.test.ts > remote activity > a streaming message draws one command row when it completes, in arrival order",
@@ -1557,43 +1567,54 @@
     },
     {
       "upstream": "register.test.ts > remote activity > an agent's reply draws once, as the reply under the line it answers, and its emptied message adds nothing",
-      "status": "missing",
-      "note": "Pure renderComment/commentQuote tests cover inherited target and parent text, but no integration/renderer test checks the agent reply label, underline, quoted passage and suppressed emptied agent message together."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/remote.test.ts > an agent's reply draws once, as the reply under the line it answers, and its emptied message adds nothing"
+      ],
+      "note": "Four model rows in order; the root comment draws its author, action and the quoted line with the passage underlined at 60 columns, the reply its ↳ marker, author, 'replied to Ada' and the parent's line. The emptied agent message gets no row in pi, rather than a stored row that draws nothing."
     },
     {
       "upstream": "register.test.ts > remote activity > incoming activity never executes or starts a turn, and the band shows only status",
-      "status": "missing",
-      "note": "The happy-path share test verifies no echo, but no integrated test sends a fragmented watch line followed by disconnect and checks no run/execution, no new Delta records, status-only band content and interruption notice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/remote.test.ts > incoming activity never executes or starts a turn, and the band shows only status"
+      ],
+      "note": "An item line written in two pieces, then the watch exits 2: the interruption is noted, the band never shows the item, no turn starts and nothing is recorded. The fake joins the pieces before it writes the line, so the extension's own reassembly is not what this exercises."
     },
     {
       "upstream": "register.test.ts > remote activity > land activity draws from snapshots and live updates without starting a turn or echoing to Delta",
-      "status": "missing",
-      "note": "Pure event conversion/deduplication is ported in conversation.test.ts, but no pi integration test sends snapshot and live land events, checks display versus model-only markup, no run/no echo, and reconnect deduplication."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/remote.test.ts > land activity draws from snapshots and live updates without starting a turn or echoing to Delta"
+      ],
+      "note": "A snapshot and a live subthread event draw without their model-only markup while the model row keeps it; no turn, no record names the child thread, and a reconnect adds nothing."
     },
     {
       "upstream": "register.test.ts > remote activity > supersession aborts the owned turn and remote rows wait until it ends",
-      "status": "missing",
-      "note": "collaboration.test.ts > a turn Delta hands to someone else stops pi's turn, and its late output keeps the lost turn covers abort, and recording.test.ts covers ordinary busy-row holding separately. Add the combined supersession case: unrelated sequence ignored, exact run aborted once, arriving remote row withheld until that aborted run settles."
+      "status": "ported",
+      "ours": ["test/behaviour/remote.test.ts > supersession aborts the owned turn and remote rows wait until it ends"],
+      "note": "Another sequence's supersession is ignored; the running turn's supersession, with Ada's turn running, stops pi's turn once, and Ada's item waits until the stopped run settles, then arrives as the one row."
     },
     {
       "upstream": "register.test.ts > remote activity > the command output row draws its author and the item's own markdown",
-      "status": "missing",
-      "note": "collaboration.test.ts checks stored custom-message details, not renderRemote output. Add actual renderer tests for author/color/person-agent labels, markdown, tool status/input, removal and emptied items. Removal/update parity currently fails as reported."
+      "status": "ported",
+      "ours": ["test/behaviour/remote.test.ts > the command output row draws its author and the item's own markdown"],
+      "note": "The custom message's renderer draws the author bold in their person color with (person)/(agent), the item's own markdown rendered, a failed tool as one line with its flattened input and red status, and nothing once the message or tool is removed. Upstream's checks of another command's row and of a placeholder for an unknown id have no pi counterpart: pi draws only this extension's custom messages with it, each carrying its own details."
     },
     {
       "upstream": "register.test.ts > remote activity > the internal show form is only answered for the plugin itself; typing it gets the usage text",
       "status": "not-applicable",
-      "note": "The private show form exists solely to obtain Claude Code command-output rendering. Pi uses registerMessageRenderer and does not implement this internal command protocol."
+      "note": "The private show form exists only to get Claude Code's command-output rendering. pi draws custom messages through registerMessageRenderer, so the extension has no internal command for a person to type."
     },
     {
       "upstream": "register.test.ts > remote activity > the model's copy is the plugin's own row, and the show run's rows carry nothing",
       "status": "not-applicable",
-      "note": "Tests neutralizing Claude Code's local-command caveat/echo/output records. Pi stores one custom message and has no show-run command records to neutralize; that is the documented adaptation."
+      "note": "Neutralises Claude Code's local-command caveat, echo and output records. pi stores one custom message per row and records no command run alongside it."
     },
     {
       "upstream": "register.test.ts > remote activity > the show run's echo draws as nothing where a surface draws it as a user row",
       "status": "not-applicable",
-      "note": "Depends on Claude Code Desktop drawing a hidden command echo as an empty user row. Pi creates neither the show run nor that echo."
+      "note": "Claude Code Desktop draws a hidden command echo as an empty user row. pi creates neither the show run nor its echo."
     },
     {
       "upstream": "register.test.ts > sharing > a checkout Delta manages for another thread is named in the share failure, which a retry can still finish",
@@ -1841,8 +1862,9 @@
     },
     {
       "upstream": "register.test.ts > the status band > /delta share returns at once and reports in the band before exporting",
-      "status": "missing",
-      "note": "The collaboration e2e verifies completed share status/export, not immediate command return, pre-export progress, deferred export timing or absence of an initial transcript progress row. Hold export and inspect the band before releasing it."
+      "status": "ported",
+      "ours": ["test/behaviour/band.test.ts > /delta share returns at once and reports in the band before exporting"],
+      "note": "The command returns at once with no transcript note; the band says 'Preparing to share' and nothing is exported; with the export's append held, the band has moved on to later steps and still nothing reached Delta; released, the earlier prompts are exported."
     },
     {
       "upstream": "register.test.ts > the status band > a peer joins the band once their arrival settles, and leaves after a grace",
@@ -1855,33 +1877,51 @@
     },
     {
       "upstream": "register.test.ts > the status band > a prompt cannot race a share, and the band reports its progress and success",
-      "status": "missing",
-      "note": "Hold sharing/status discovery, submit input and assert refusal/no turn, then finish and assert later input is admitted. Existing e2e shares only after a settled prompt."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/band.test.ts > a prompt cannot race a share, and the band reports its progress and success"
+      ],
+      "note": "With the share held at thread create (upstream holds status), a prompt is refused and starts no turn, the band shows the share's progress in the warning color, and once it succeeds a prompt is accepted."
     },
     {
       "upstream": "register.test.ts > the status band > animates only while a turn runs, and stops with the turn and with the watcher",
-      "status": "missing",
-      "note": "statusSpinnerRunning's booleans are ported, but no test advances real band timers or checks invalidation counts and teardown cancellation of spinner/progress timers."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/band.test.ts > animates only while a turn runs, and stops with the turn and with the watcher"
+      ],
+      "note": "Drawn in pi's terminal: the spinner's frames advance every 120 ms with one redraw each while another participant's turn runs, none once it is idle; after the session ends with a turn running, or right after a share's success notice, no timer runs at all, a stricter check than upstream's redraw count since pi drops the TUI at teardown."
     },
     {
       "upstream": "register.test.ts > the status band > another participant's agent shows what it is doing once a call or thought has been open half a second",
-      "status": "missing",
-      "note": "No test drives openSince/remoteActivity's 500-ms threshold, short-call suppression, newest thought/tool selection and removal on close. Pure renderBand tests only precomputed doing values."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/band.test.ts > another participant's agent shows what it is doing once a call or thought has been open half a second"
+      ],
+      "note": "A quick call never shows, a slow one appears after half a second with its time, a thought shows as thinking, and both clear when they complete."
     },
     {
       "upstream": "register.test.ts > the status band > another participant's turn names its owner, counts up, and goes quiet only with nothing open",
-      "status": "missing",
-      "note": "The pure agent-layout test accepts precomputed seconds/quiet. No test drives remoteTurn timestamps/open items through statusView to verify elapsed time, last-activity timing and open-item suppression of quiet."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/band.test.ts > another participant's turn names its owner, counts up, and goes quiet only with nothing open"
+      ],
+      "note": "Drawn in pi's terminal: the owner's agent counts up, an open item keeps it from going quiet however long, and 30 s after the last activity with nothing open it says quiet; the idle turn clears it."
     },
     {
       "upstream": "register.test.ts > the status band > another participant's turn takes its owner's name once Delta resolves who requested it",
-      "status": "missing",
-      "note": "Needs repeated watch turn events resolving actor-only to user-ID-only to full name, with persistent person color and corrected owner label. statusCurrentTurn's synthetic inputs do not cover that production transition."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/band.test.ts > another participant's turn takes its owner's name once Delta resolves who requested it"
+      ],
+      "note": "Actor only, then user id only, then the full user: 'An agent' uncolored, then in Ada's person color, then 'Ada's agent' in that color."
     },
     {
       "upstream": "register.test.ts > the status band > child updates preserve siblings and reconnect replaces the inventory while the parent is idle",
-      "status": "missing",
-      "note": "Pure status tests cover child presentation but not production watch inventory mutation. Port incremental upsert/remove, sibling preservation, stale state and readiness clearing/replacement while child discovery is delayed."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/band.test.ts > child updates preserve siblings and reconnect replaces the inventory while the parent is idle"
+      ],
+      "note": "Incremental child updates and removals keep siblings, a drop shows the inventory as unknown, and the reconnected watch, whose snapshot reports no children yet, shows none of the old ones until its own inventory arrives. No turn starts."
     },
     {
       "upstream": "register.test.ts > the status band > the band is a shaded row with the link to copy; it yields to a survey",
@@ -1895,93 +1935,125 @@
     },
     {
       "upstream": "register.test.ts > the watch > a gone thread pauses sharing with its reason instead of reconnecting",
-      "status": "missing",
-      "note": "Feed a non-retryable not_visible/thread_gone frame; verify no reconnect, actionable persistent band/notice text and continued acceptance of local prompts. Decoder coverage alone is insufficient."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > a gone thread pauses sharing with its reason instead of reconnecting"],
+      "note": "The watch ends with not_visible (thread_gone): no reconnect in two minutes, a note naming the reason and /delta-share, the band keeps the reason, and a prompt is still accepted."
     },
     {
       "upstream": "register.test.ts > the watch > a large status bypasses short-command capture",
-      "status": "missing",
-      "note": "No large-status transport/resume test. Feed a status with a 4 MiB diagnostics field through the actual threadStatus stream, then assert readiness and continued recording. command-reader.test.ts only tests timeout."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > a large status bypasses short-command capture"],
+      "note": "A status with a 4 MiB diagnostics field on resume: the watch goes live and a turn is delivered. The kit's process runner now cuts captured output at 4 MiB as the real one does, so a status read through it would fail."
     },
     {
       "upstream": "register.test.ts > the watch > a non-retryable failed watch error pauses participation",
-      "status": "missing",
-      "note": "Exercise the failed/storage non-retryable watch transition, persistent reason and absence of reconnect while local work continues."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > a non-retryable failed watch error pauses participation"],
+      "note": "failed (storage), not retryable: no reconnect, the band shows the code, a prompt is still accepted."
     },
     {
       "upstream": "register.test.ts > the watch > a non-retryable incompatible_app watch error pauses participation",
-      "status": "missing",
-      "note": "Exercise the incompatible_app non-retryable watch transition and actionable pause text, not just envelope classification."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > a non-retryable incompatible_app watch error pauses participation"],
+      "note": "incompatible_app, not retryable: no reconnect, the band shows the code, a prompt is still accepted."
     },
     {
       "upstream": "register.test.ts > the watch > a retryable failed watch error reconnects like any lost connection",
-      "status": "missing",
-      "note": "Feed failed/sync with retryable:true and verify a new watch, readiness and continued prompt admission."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > a retryable failed watch error reconnects like any lost connection"],
+      "note": "failed (sync), retryable: a new watch after a second, live, and the next prompt is delivered."
     },
     {
       "upstream": "register.test.ts > the watch > a status check that cannot reach Delta neither stops a shared session's delivery nor latches a pause",
-      "status": "missing",
-      "note": "Add a shared-session status app_unavailable fault while local appends remain available; assert delivery continues and no persistent verification pause remains."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > a status check that cannot reach Delta neither stops a shared session's delivery nor latches a pause"
+      ],
+      "note": "Every status read fails app_unavailable: a turn with a tool call is still delivered in sequence and nothing stays staged; once Delta answers, the next prompt is delivered and no pause is shown."
     },
     {
       "upstream": "register.test.ts > the watch > a stopped observer's late status error cannot replace a restarted binding",
-      "status": "missing",
-      "note": "Repeat the stale-inspection fencing case with a late failure and verify it cannot fail/pause the replacement watch."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > a stopped observer's late status error cannot replace a restarted binding"
+      ],
+      "note": "A resumed session's inspection is held, the session ends, a new process resumes and goes live, then the held read fails: the binding is unchanged, the band live and a prompt accepted. The kit discards a stopped command's output, as the extension stops listening at cancellation."
     },
     {
       "upstream": "register.test.ts > the watch > a stopped observer's late status result cannot replace a restarted binding",
-      "status": "missing",
-      "note": "Hold an uncancellable old inspection success across stop/restart; release it after the replacement watch starts and assert it cannot overwrite the binding or current status."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > a stopped observer's late status result cannot replace a restarted binding"
+      ],
+      "note": "As the error case, with the held read answering a different URL: the restarted binding keeps its own."
     },
     {
       "upstream": "register.test.ts > the watch > a watch that has never been live says it is reconnecting while it retries",
-      "status": "missing",
-      "note": "Pure band tests accept a supplied retrying state; none exercises repeated pre-ready exits driving watchStatus. Port with a controllable stream and clock."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > a watch that has never been live says it is reconnecting while it retries"
+      ],
+      "note": "Every watch fails before it is ready after a resume: the band says reconnecting (◌), never live, through a retry."
     },
     {
       "upstream": "register.test.ts > the watch > ending during startup store read 1 cannot start the watcher",
-      "status": "missing",
-      "note": "Hold the first startup store read, shut down the session, release it and assert no obsolete watcher starts or retries."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > ending during startup store read 1 cannot start the watcher"],
+      "note": "The resumed session's first read of its binding is held, the session ends, the read is released: no watch or mount starts. This failed before: beginSession activated the ended session after that read; it now stops as upstream's does once the session's start is forgotten."
     },
     {
       "upstream": "register.test.ts > the watch > ending during startup store read 2 cannot start the watcher",
-      "status": "missing",
-      "note": "Repeat startup cancellation with the second store read held, including the saved row ledger path."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > ending during startup store read 2 cannot start the watcher"],
+      "note": "As read 1, with the watch's read of the saved row ledger held: no watch starts."
     },
     {
       "upstream": "register.test.ts > the watch > ending during status CLI resolution never spawns the obsolete command",
-      "status": "missing",
-      "note": "Hold status CLI resolution after watch readiness, end the runtime and verify both cancellation of the watcher and suppression of the stale status spawn."
+      "status": "covered",
+      "ours": ["test/behaviour/watch.test.ts > ending during status CLI resolution never spawns the obsolete command"],
+      "note": "pi's extension finds the CLI once per session runtime, before its first command, so the status read never waits on resolution. Ours holds what it does wait on once the watch is ready, the readiness check's read of the binding, ends the session and releases it: no status read is spawned and the watch is stopped."
     },
     {
       "upstream": "register.test.ts > the watch > ending during watch CLI resolution never spawns the obsolete command",
-      "status": "missing",
-      "note": "Hold CLI resolution before watch spawn, end the runtime and assert no obsolete command is spawned after release."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > ending during watch CLI resolution never spawns the obsolete command"],
+      "note": "The runtime's one CLI resolution, which the watch waits on, is held through the session's end: after release no watch or status read is spawned and nothing keeps running. The contract check, which upstream counts apart, is its first command."
     },
     {
       "upstream": "register.test.ts > the watch > readiness processes turns and items while initial status is pending",
-      "status": "missing",
-      "note": "Hold initial inspection after ready, then deliver item activity and producer.turn supersession; verify observation/lifecycle recovery proceeds before releasing inspection, without setup commands."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > readiness processes turns and items while initial status is pending"],
+      "note": "A resumed session with an open execution and its inspection held: an item and the turn's supersession are processed, the execution closed and its finish staged, while the status read is still held; released, the finish is delivered and no setup command runs."
     },
     {
       "upstream": "register.test.ts > the watch > readiness with lost acknowledged history fails closed without reset or reimport",
-      "status": "missing",
-      "note": "test/thread-commands.test.ts > thread watch > rejects mismatched, reset, or advanced producer state without changing the binding covers the validator only. Add resume/share orchestration assertions for refused participation, unchanged pending records and no reset/reimport."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > readiness with lost acknowledged history fails closed without reset or reimport"
+      ],
+      "note": "Delta's producer is set back to sequence 1 between sessions: on resume a shell command stays queued, a prompt is refused, /delta share does not succeed, and nothing is appended, exported again or set up."
     },
     {
       "upstream": "register.test.ts > the watch > reconnection retries with capped backoff and session end stops the idle child",
-      "status": "missing",
-      "note": "test/command-outcomes.test.ts > reconnecting uses capped backoff tests arithmetic only. Add live drops, grace across retries, renewed --participate, idle-child termination and no retries after shutdown."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > reconnection retries with capped backoff and session end stops the idle child"
+      ],
+      "note": "Live drops reconnect after 1 s then 2 s, each within the band's 4 s grace that counts from the drop; a third watch held before ready makes the band say reconnecting once the grace ends; every watch asks to participate; ending the session stops the idle watch and nothing retries for two minutes."
     },
     {
       "upstream": "register.test.ts > the watch > unavailable inspection pauses participation and preserves binding and pending files across resume",
-      "status": "missing",
-      "note": "Decoder and delivery-policy tests cover unavailable inspection shapes/policy, not preserved binding/outbox across failed resume and later successful recovery. Port the full watch/resume case."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/watch.test.ts > unavailable inspection pauses participation and preserves binding and pending files across resume"
+      ],
+      "note": "Worktree inventory unavailable (failed/storage) after a turn starts: the rest of the turn stays staged with its outbox files, a prompt is refused naming the reason, a resume keeps refusing with the binding and files unchanged and runs no setup command, and once the inventory is back a resume delivers it all. The records are staged by a turn that ends after the fault rather than by a tool call outside one."
     },
     {
       "upstream": "register.test.ts > the watch > watch_reset reconnects for a fresh snapshot",
-      "status": "missing",
-      "note": "Typed watch_reset decoding exists in thread-commands.test.ts, but no test feeds it to consumeConversation and checks a new snapshot/watch plus resumed prompt admission."
+      "status": "ported",
+      "ours": ["test/behaviour/watch.test.ts > watch_reset reconnects for a fresh snapshot"],
+      "note": "The watch ends with watch_reset: the interruption names it, a new watch goes live after a second, and the next prompt is delivered."
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a CLI this plugin cannot record against leaves auto mode off and says which to update",
@@ -3466,13 +3538,20 @@
     },
     {
       "upstream": "watch/row-delivery.test.ts > a live thought is announced on completion, not while streaming or on re-send",
-      "status": "missing",
-      "note": "Port the announceThought before/open/completed/resend assertions against its new location in conversation.ts. Existing thought tests only check formatting and exclusion from model rows."
+      "status": "ported",
+      "ours": [
+        "test/conversation.test.ts > a live thought is announced on completion, not while streaming or on re-send"
+      ],
+      "note": "announceThought's open, completed and re-sent cases, where the port keeps it in conversation.ts."
     },
     {
       "upstream": "watch/row-delivery.test.ts > a run draws once its output row is stored, and is not drawn when it never is",
-      "status": "not-applicable",
-      "note": "Tests DrawQueue.confirm for Claude Code's internal command output rows. Pi has no such command-output acknowledgment path; custom messages replace it. Actual custom-message append failure still needs the separate regression reported above."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/remote.test.ts > a row pi fails to add is not counted as added, and the next snapshot offers it again",
+        "test/behaviour/remote.test.ts > a row the session file never kept is offered again when the session resumes"
+      ],
+      "note": "Upstream confirms a draw once Claude Code stores its output row. pi's sendMessage returns nothing, so a row now counts as added only once pi's session holds it as its latest entry, and one pi did not add is offered again; a row pi held in memory but could not write is offered again when the session resumes."
     },
     {
       "upstream": "watch/row-delivery.test.ts > an item is drawn once across repeated or corrected model-row offers",
@@ -3494,7 +3573,7 @@
     {
       "upstream": "watch/row-delivery.test.ts > unrelated commands and other plugins retain their rows",
       "status": "not-applicable",
-      "note": "Exercises Claude Code command-door echo/output rewriting and plugin origins. Pi custom-message renderers are keyed by customType and do not rewrite command rows; the README explicitly replaces this mechanism."
+      "note": "Exercises rewriting Claude Code's command echo and output rows by origin. pi's custom-message renderers are keyed by customType and draw only this extension's messages; no command rows are rewritten."
     }
   ]
 }

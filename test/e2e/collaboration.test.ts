@@ -95,7 +95,10 @@ test('/delta-share exports the conversation so far, publishes it, and records li
     author: 'Ada',
     agent: false,
     markdown: 'Can you also check the tests?',
+    id: 'remote-1',
   })
+  // pi added the row at once, so the extension counts it as added rather than offering it again.
+  expect(pi.notices().some((text) => text.includes("Couldn't add Delta activity"))).toBe(false)
   // Remote activity is never recorded back into the thread.
   expect(onlyThread(w).records.some((record: any) => JSON.stringify(record).includes('check the tests'))).toBe(false)
 }, 90_000)
