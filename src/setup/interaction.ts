@@ -126,7 +126,7 @@ export function setupEnv(host: Host): SetupEnv {
       if (binding?.joined || (binding?.visibility && binding.visibility !== 'private')) return 'shared'
       return sessionSyncs(binding) ? 'private' : 'none'
     },
-    shareSession: async (audience) => beginShare(host, host.session.id(), { kind: audience }),
+    shareSession: async (audience) => beginShare(host, { session: host.session.id(), audience: { kind: audience } }),
   }
 }
 

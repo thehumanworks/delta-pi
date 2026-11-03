@@ -844,9 +844,9 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
   // Remote rows held back while this turn ran reach the model now, between turns.
   void settleRemote(host, session)?.catch((error: unknown) => report(host, error))
   if (requests.shareAfterTurn?.session === session) {
-    const { audience } = requests.shareAfterTurn
+    const queued = requests.shareAfterTurn
     requests.shareAfterTurn = undefined
-    beginShare(host, session, audience)
+    beginShare(host, queued)
   }
 }
 

@@ -11,7 +11,7 @@ import { InstallationUpdates, type UpdateHost } from '../cli/install-update.ts'
 import { setProgress, showUpdateProgress } from '../band/band.ts'
 import { beginRefusalResolution } from '../recording/delivery.ts'
 import { type SessionSwitch, startJoin } from '../sharing/join.ts'
-import { shareFailureText, startShare } from '../sharing/share.ts'
+import { beginShare, shareFailureText } from '../sharing/share.ts'
 import { pluginUpdateCommand, type Reload } from '../updates/updates.ts'
 import { statusLink } from '../band/band.ts'
 import { activate, refreshReminder } from './activation.ts'
@@ -243,9 +243,10 @@ export async function runDeltaCommand(
       // Progress belongs to the band; a command with no text adds no transcript row.
       return {}
     }
-    if (!host.session.idle()) return { text: 'Wait for the current pi turn to finish before sharing.' }
-    startShare(host, { session, cwd: host.session.cwd(), form, choose: { emails: shareEmails } })
-    return {}
+    // As the share button in Claude Code's band does, a share asked for while a turn runs starts when it ends.
+    if (!beginShare(host, { session, form, choose: { emails: shareEmails } }))
+      return { text: 'Delta is already sharing this session.' }
+    return host.session.idle() ? {} : { text: 'Delta will share this session once the current pi turn ends.' }
   } catch (error) {
     // Only activation can fail here; the share or join itself reports in the band and transcript.
     const text = shareFailureText(

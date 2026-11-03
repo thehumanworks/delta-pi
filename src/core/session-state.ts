@@ -12,7 +12,6 @@ import type { Update } from '../recording/content.ts'
 import type { CleanupPlan } from '../recording/delivery.ts'
 import type { JoinPlan, JoinRequest } from '../sharing/join.ts'
 import type { ShareRequest } from '../sharing/share.ts'
-import type { ShareAudience } from '../sharing/share-audience.ts'
 import type { SyncReminder } from '../band/band.ts'
 import { DeltaSendError, type ThreadMount, type ThreadUpload } from '../cli/thread-commands.ts'
 
@@ -117,7 +116,7 @@ let queue: Promise<unknown> = Promise.resolve()
 export const requests: {
   join?: JoinRequest
   share?: ShareRequest
-  shareAfterTurn?: { session: string; audience?: ShareAudience }
+  shareAfterTurn?: Omit<ShareRequest, 'cwd' | 'cancelled'>
 } = {}
 /**
  * `watcher`: observation is not live; the next live watch connection lifts it.

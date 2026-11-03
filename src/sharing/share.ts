@@ -413,14 +413,18 @@ async function chooseAudience(host: Host, session: string, typed: string[]): Pro
   }
 }
 
-/** Begin the same publication flow `/delta share` runs, for setup and for a share asked for during a turn. */
-export function beginShare(host: Host, session: string, audience?: ShareAudience): boolean {
+/**
+ * Begin the same publication flow `/delta share` runs, for setup, for `/delta share` itself, and for a
+ * share asked for during a turn, which starts when the turn ends. `request` says who sees the session,
+ * or asks.
+ */
+export function beginShare(host: Host, request: Omit<ShareRequest, 'cwd' | 'cancelled'>): boolean {
   if (requests.share) return false
   if (!host.session.idle()) {
-    requests.shareAfterTurn = { session, ...(audience ? { audience } : {}) }
+    requests.shareAfterTurn = request
     host.ui.invalidate()
     return true
   }
-  startShare(host, { session, cwd: '', ...(audience ? { audience } : {}) })
+  startShare(host, { ...request, cwd: '' })
   return true
 }
