@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { AccessRequiredError, type AuthenticationHost, requireAuthentication } from '../src/cli/auth.ts'
+import {
+  AccessRequiredError,
+  type AuthenticationHost,
+  authLoginCommand,
+  requireAuthentication,
+} from '../src/cli/auth.ts'
 import {
   InstallationUpdates,
   parseInstallUpdate,
@@ -187,6 +192,13 @@ describe('sign-in', () => {
     )
     await expect(refusal).rejects.toThrow(
       new AccessRequiredError("Delta isn't signed in. Run /delta-share again to sign in."),
+    )
+  })
+
+  test('reauthentication recovery quotes absolute paths for POSIX shells and PowerShell', () => {
+    expect(authLoginCommand("/apps/Delta's build/$delta", false)).toBe(`'/apps/Delta'"'"'s build/$delta' auth login`)
+    expect(authLoginCommand("C:\\Delta's build\\$delta.exe", true)).toBe(
+      "& 'C:\\Delta''s build\\$delta.exe' auth login",
     )
   })
 

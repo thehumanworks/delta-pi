@@ -131,11 +131,22 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
-    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
+    /**
+     * Hold the runs of `command` after the first `after` until the returned function releases them. An
+     * `answer` set before the release answers a held run instead, as a sign-in that ends another way does.
+     */
     hold(command: string, { after = 0 } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
       writeFileSync(path, JSON.stringify({ after }))
       return () => rmSync(path, { force: true })
+    },
+    /** Make `org list` report these organizations; `org create` adds to them. */
+    organizations(organizations: { id: string; name: string; current: boolean; personal?: boolean }[]) {
+      writeFileSync(join(state, 'organizations.json'), JSON.stringify(organizations))
+    },
+    /** Make `thread invite` refuse these addresses, each with Delta's message for why. */
+    inviteFailures(failures: Record<string, string>) {
+      writeFileSync(join(state, 'invite-failures.json'), JSON.stringify(failures))
     },
     cleanup() {
       rmSync(base, { recursive: true, force: true })

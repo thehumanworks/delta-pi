@@ -38,6 +38,12 @@ export const echoModel: Model = (messages) => {
   return { text: `Echo: ${text}` }
 }
 
+/**
+ * How pi runs: its terminal (`tui`) or an RPC client, both of which show dialogs, or print mode, as
+ * text (`print`) or JSON events (`json`), where nobody can answer one.
+ */
+export type Mode = 'tui' | 'rpc' | 'print' | 'json'
+
 /** A dialog the extension opened. */
 export type Dialog = { method: 'select' | 'input'; title: string; options?: string[] }
 /** How a dialog is answered: a value, a function of the dialog, or undefined to dismiss it. */
@@ -78,6 +84,8 @@ export class FakePi {
   readonly statuses = new Map<string, string | undefined>()
   readonly dialogs: Dialog[] = []
   readonly answers: Answer[] = []
+  /** How a dialog no queued answer is left for is answered, as a person who always answers alike would. */
+  respond: Answer = undefined
   /** What the extension's handlers threw, which pi reports and carries on from. */
   readonly errors: unknown[] = []
   /** Text in the editor, where a refused prompt goes back. */
@@ -98,7 +106,7 @@ export class FakePi {
   constructor(
     readonly platform: Platform,
     cwd: string,
-    readonly mode: 'rpc' | 'print' = 'rpc',
+    readonly mode: Mode = 'rpc',
     session?: FakeSession,
   ) {
     this.session = session ?? this.newSession(cwd)
@@ -394,7 +402,7 @@ export class FakePi {
       },
       get hasUI() {
         active()
-        return mode() === 'rpc'
+        return mode() === 'rpc' || mode() === 'tui'
       },
       get mode() {
         active()
@@ -449,7 +457,7 @@ export class FakePi {
 
   private async ask(dialog: Dialog): Promise<string | undefined> {
     this.dialogs.push(dialog)
-    const answer = this.answers.shift()
+    const answer = this.answers.length ? this.answers.shift() : this.respond
     return typeof answer === 'function' ? answer(dialog) : answer
   }
 
