@@ -1,64 +1,64 @@
-import { describe, expect, test } from "vitest";
-import { cliFixture } from "./cli-fixtures.ts";
-import { type AudienceChoices, chooseShareAudience, threadInvitationsFrom } from "../src/sharing/share-audience.ts";
-import type { Interaction } from "../src/setup/setup.ts";
+import { describe, expect, test } from 'vitest'
+import { cliFixture } from './cli-fixtures.ts'
+import { type AudienceChoices, chooseShareAudience, threadInvitationsFrom } from '../src/sharing/share-audience.ts'
+import type { Interaction } from '../src/setup/setup.ts'
 
 /** Answer the share question with `answer`, recording the options it offered. */
 async function ask(choices: AudienceChoices, answer?: string) {
-  const offered: string[][] = [];
+  const offered: string[][] = []
   const interaction: Interaction = {
     async ask(_question, options) {
-      offered.push([...(options as { options: string[] }).options]);
-      return answer ?? "";
+      offered.push([...(options as { options: string[] }).options])
+      return answer ?? ''
     },
     async log() {},
-  };
-  return { result: await chooseShareAudience(interaction, choices), offered };
+  }
+  return { result: await chooseShareAudience(interaction, choices), offered }
 }
 
-describe("share audience", () => {
-  test("each answer the question can get decides one audience, or none", async () => {
-    const team = "Share with Zed";
-    const justMe = "Just me (sync privately)";
+describe('share audience', () => {
+  test('each answer the question can get decides one audience, or none', async () => {
+    const team = 'Share with Zed'
+    const justMe = 'Just me (sync privately)'
     const cases: { choices: AudienceChoices; answer?: string; result: unknown; offered: string[] }[] = [
       {
-        choices: { team: "Zed", synced: false },
+        choices: { team: 'Zed', synced: false },
         answer: team,
-        result: { kind: "organization" },
+        result: { kind: 'organization' },
         offered: [team, justMe],
       },
-      { choices: { team: "Zed", synced: false }, answer: justMe, result: { kind: "private" }, offered: [team, justMe] },
+      { choices: { team: 'Zed', synced: false }, answer: justMe, result: { kind: 'private' }, offered: [team, justMe] },
       // A synced session can widen its audience or keep it, never become private again.
       {
-        choices: { team: "Zed", synced: true },
-        answer: "Keep current sharing",
-        result: { kind: "unchanged" },
-        offered: [team, "Keep current sharing"],
+        choices: { team: 'Zed', synced: true },
+        answer: 'Keep current sharing',
+        result: { kind: 'unchanged' },
+        offered: [team, 'Keep current sharing'],
       },
       // A personal organization has no team, so "just me" is paired with Cancel.
       {
         choices: { synced: false },
-        answer: "Cancel",
-        result: { kind: "none", reason: "" },
-        offered: [justMe, "Cancel"],
+        answer: 'Cancel',
+        result: { kind: 'none', reason: '' },
+        offered: [justMe, 'Cancel'],
       },
       {
-        choices: { team: "Zed", synced: false },
-        answer: "ada@example.com, bo@example.com",
-        result: { kind: "invite", emails: ["ada@example.com", "bo@example.com"] },
+        choices: { team: 'Zed', synced: false },
+        answer: 'ada@example.com, bo@example.com',
+        result: { kind: 'invite', emails: ['ada@example.com', 'bo@example.com'] },
         offered: [team, justMe],
       },
       {
-        choices: { team: "Zed", synced: false },
-        answer: "ada",
-        result: { kind: "none", reason: expect.stringContaining("No email addresses") },
+        choices: { team: 'Zed', synced: false },
+        answer: 'ada',
+        result: { kind: 'none', reason: expect.stringContaining('No email addresses') },
         offered: [team, justMe],
       },
-    ];
+    ]
     for (const { choices, answer, result, offered } of cases)
-      expect(await ask(choices, answer)).toEqual({ result, offered: [offered] });
-    expect(() => threadInvitationsFrom(cliFixture("invite"), "other-thread")).toThrow(
-      "matching CLI and extension builds",
-    );
-  });
-});
+      expect(await ask(choices, answer)).toEqual({ result, offered: [offered] })
+    expect(() => threadInvitationsFrom(cliFixture('invite'), 'other-thread')).toThrow(
+      'matching CLI and extension builds',
+    )
+  })
+})

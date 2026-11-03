@@ -1,12 +1,12 @@
-import type { RunInit, RunResult } from "../core/process.ts";
-import { errorText } from "../core/text.ts";
-import { installWindows } from "./windows-install.ts";
+import type { RunInit, RunResult } from '../core/process.ts'
+import { errorText } from '../core/text.ts'
+import { installWindows } from './windows-install.ts'
 
-type Run = (argv: string[], init?: RunInit) => Promise<RunResult>;
+type Run = (argv: string[], init?: RunInit) => Promise<RunResult>
 type WindowsDiscovery = {
-  exists(path: string): Promise<boolean>;
-  confirmInstall?: () => Promise<boolean>;
-};
+  exists(path: string): Promise<boolean>
+  confirmInstall?: () => Promise<boolean>
+}
 export class MissingCliError extends Error {}
 
 /** Discovery never starts Delta or downloads anything, including during resume. */
@@ -31,7 +31,7 @@ case "$(uname -s)" in
   *) echo 'Automatic Delta setup supports macOS and Linux only.' >&2; exit 1 ;;
 esac
 exit 3
-`;
+`
 
 /**
  * The installer owns app layout, architecture selection, extraction, and CLI linking. The lock is the
@@ -69,12 +69,12 @@ if cli=$(sh "$work/install.sh" --locate-cli); then
 else
   sh "$work/install.sh" --non-interactive
 fi
-`;
+`
 
 /** Resolve once per extension runtime; failed setup remains retryable. */
 export class DeltaCli {
-  private executable?: string;
-  private pending?: Promise<string>;
+  private executable?: string
+  private pending?: Promise<string>
 
   async resolve(
     run: Run,
@@ -82,23 +82,23 @@ export class DeltaCli {
     progress = (_text: string) => {},
     windows: WindowsDiscovery | false = false,
   ): Promise<string> {
-    if (this.executable) return this.executable;
+    if (this.executable) return this.executable
     if (this.pending) {
       try {
-        return await this.pending;
+        return await this.pending
       } catch (error) {
         // An explicit command can follow an observer's missing-CLI result.
-        if (!allowInstall || !(error instanceof MissingCliError)) throw error;
-        return this.resolve(run, true, progress, windows);
+        if (!allowInstall || !(error instanceof MissingCliError)) throw error
+        return this.resolve(run, true, progress, windows)
       }
     }
-    const pending = this.setup(run, allowInstall, progress, windows);
-    this.pending = pending;
+    const pending = this.setup(run, allowInstall, progress, windows)
+    this.pending = pending
     try {
-      this.executable = await pending;
-      return this.executable;
+      this.executable = await pending
+      return this.executable
     } finally {
-      if (this.pending === pending) this.pending = undefined;
+      if (this.pending === pending) this.pending = undefined
     }
   }
 
@@ -110,91 +110,91 @@ export class DeltaCli {
   ): Promise<string> {
     if (windows) {
       // Restrict lookup to PATH rather than also searching the current checkout.
-      const result = await run(["where.exe", "$PATH:delta.exe"], { timeoutMs: 30_000 });
+      const result = await run(['where.exe', '$PATH:delta.exe'], { timeoutMs: 30_000 })
       if (result.isStdoutTruncated || result.isStderrTruncated)
-        throw new Error("Delta CLI discovery output was truncated; retry.");
-      if (result.exitCode === 0) return this.path(result.stdout.trim().split(/\r?\n/)[0]!, true);
+        throw new Error('Delta CLI discovery output was truncated; retry.')
+      if (result.exitCode === 0) return this.path(result.stdout.trim().split(/\r?\n/)[0]!, true)
       if (result.exitCode !== 1)
         throw new Error(
           `Cannot locate Delta CLI: ${result.stderr.trim()}. Check that where.exe is available and delta.exe is on PATH, then retry.`,
-        );
-      for (const hive of ["HKCU", "HKLM"]) {
+        )
+      for (const hive of ['HKCU', 'HKLM']) {
         // Delta's installer uses the native 64-bit view, even if the host is 32-bit.
         const installed = await run(
-          ["reg.exe", "query", `${hive}\\Software\\Zed Industries\\Delta`, "/v", "InstallFolder", "/reg:64"],
+          ['reg.exe', 'query', `${hive}\\Software\\Zed Industries\\Delta`, '/v', 'InstallFolder', '/reg:64'],
           { timeoutMs: 30_000 },
-        );
+        )
         if (installed.isStdoutTruncated || installed.isStderrTruncated)
-          throw new Error("Delta CLI discovery output was truncated; retry.");
-        if (installed.exitCode !== 0) continue;
-        const folder = installed.stdout.match(/^\s*InstallFolder\s+REG_SZ\s+(.+?)\s*$/m)?.[1];
-        if (!folder) continue;
-        let candidate: string;
+          throw new Error('Delta CLI discovery output was truncated; retry.')
+        if (installed.exitCode !== 0) continue
+        const folder = installed.stdout.match(/^\s*InstallFolder\s+REG_SZ\s+(.+?)\s*$/m)?.[1]
+        if (!folder) continue
+        let candidate: string
         try {
-          candidate = this.path(`${folder.replace(/[\\/]+$/, "")}\\bin\\delta.exe`, true);
+          candidate = this.path(`${folder.replace(/[\\/]+$/, '')}\\bin\\delta.exe`, true)
         } catch {
-          continue;
+          continue
         }
-        if (await windows.exists(candidate)) return candidate;
+        if (await windows.exists(candidate)) return candidate
       }
       if (!allowInstall)
         throw new MissingCliError(
-          "Delta CLI is missing. Run /delta-share or /delta-join <link> explicitly to install Delta and reconnect.",
-        );
+          'Delta CLI is missing. Run /delta-share or /delta-join <link> explicitly to install Delta and reconnect.',
+        )
       if (!(await windows.confirmInstall?.()))
         throw new Error(
-          "Delta was not installed. Retry /delta-setup, /delta-share, or /delta-join <link> to approve installation, or install Delta manually from https://delta.dev.",
-        );
-      progress("Installing Delta. Approve the Windows installer prompt if one appears…");
+          'Delta was not installed. Retry /delta-setup, /delta-share, or /delta-join <link> to approve installation, or install Delta manually from https://delta.dev.',
+        )
+      progress('Installing Delta. Approve the Windows installer prompt if one appears…')
       const installed = await run(
-        ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", installWindows],
+        ['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', installWindows],
         {
           timeoutMs: 600_000,
         },
       ).catch((error) => {
         throw new Error(
           `Delta installation could not finish: ${errorText(error)}. An installer may still be running; let it finish and check the installation before retrying.`,
-        );
-      });
+        )
+      })
       if (installed.exitCode !== 0 || installed.isStdoutTruncated || installed.isStderrTruncated)
         throw new Error(
-          `Delta installation did not finish: ${installed.stderr.trim() || "installer failed or output was truncated"}. Check the installation before retrying /delta-share or /delta-join <link>.`,
-        );
-      return this.setup(run, false, progress, windows);
+          `Delta installation did not finish: ${installed.stderr.trim() || 'installer failed or output was truncated'}. Check the installation before retrying /delta-share or /delta-join <link>.`,
+        )
+      return this.setup(run, false, progress, windows)
     }
-    const result = await run(["sh", "-c", discover], { timeoutMs: 30_000 });
+    const result = await run(['sh', '-c', discover], { timeoutMs: 30_000 })
     if (result.isStdoutTruncated || result.isStderrTruncated)
-      throw new Error("Delta CLI discovery output was truncated; retry.");
-    if (result.exitCode === 0) return this.path(result.stdout);
+      throw new Error('Delta CLI discovery output was truncated; retry.')
+    if (result.exitCode === 0) return this.path(result.stdout)
     if (result.exitCode !== 3)
-      throw new Error(`Cannot locate Delta CLI: ${result.stderr.trim()}. Fix the issue and retry.`);
+      throw new Error(`Cannot locate Delta CLI: ${result.stderr.trim()}. Fix the issue and retry.`)
     if (!allowInstall)
       throw new MissingCliError(
-        "Delta CLI is missing. Run /delta-share or /delta-join <link> explicitly to install Delta and reconnect.",
-      );
-    progress("Installing Delta (full app and windowless client) for this user…");
-    let installed: RunResult;
+        'Delta CLI is missing. Run /delta-share or /delta-join <link> explicitly to install Delta and reconnect.',
+      )
+    progress('Installing Delta (full app and windowless client) for this user…')
+    let installed: RunResult
     try {
-      installed = await run(["sh", "-c", install], { timeoutMs: 600_000 });
+      installed = await run(['sh', '-c', install], { timeoutMs: 600_000 })
     } catch (error) {
       throw new Error(
         `Delta installation could not finish: ${errorText(error)}. Check network access, curl, and disk permissions, then retry /delta-share or /delta-join <link>.`,
-      );
+      )
     }
     if (installed.exitCode !== 0 || installed.isStdoutTruncated || installed.isStderrTruncated)
       throw new Error(
-        `Delta installation failed: ${installed.stderr.trim() || "installer failed or output was truncated"}. Check network access, curl, and disk permissions, then retry /delta-share or /delta-join <link>.`,
-      );
-    return this.path(installed.stdout);
+        `Delta installation failed: ${installed.stderr.trim() || 'installer failed or output was truncated'}. Check network access, curl, and disk permissions, then retry /delta-share or /delta-join <link>.`,
+      )
+    return this.path(installed.stdout)
   }
 
   private path(stdout: string, windows = false): string {
-    const path = stdout.trim();
-    const absolute = windows ? /^[a-z]:[\\/]/i.test(path) || /^\\\\[^\\]+\\[^\\]+\\/.test(path) : path.startsWith("/");
+    const path = stdout.trim()
+    const absolute = windows ? /^[a-z]:[\\/]/i.test(path) || /^\\\\[^\\]+\\[^\\]+\\/.test(path) : path.startsWith('/')
     if (!absolute || /[\r\n\0]/.test(path))
       throw new Error(
-        "Delta setup did not return an absolute CLI path. Fix the installation and retry /delta-share or /delta-join <link>.",
-      );
-    return path;
+        'Delta setup did not return an absolute CLI path. Fix the installation and retry /delta-share or /delta-join <link>.',
+      )
+    return path
   }
 }

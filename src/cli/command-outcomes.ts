@@ -1,60 +1,60 @@
-import { isJsonObject, isNonEmptyString, type JsonObject } from "../core/json.ts";
-import { samePath } from "../core/paths.ts";
-import type { RunResult } from "../core/process.ts";
-import { conversationWebLink } from "../watch/conversation.ts";
-import { commandErrorFromEnvelope, DeltaCommandError } from "./thread-commands.ts";
+import { isJsonObject, isNonEmptyString, type JsonObject } from '../core/json.ts'
+import { samePath } from '../core/paths.ts'
+import type { RunResult } from '../core/process.ts'
+import { conversationWebLink } from '../watch/conversation.ts'
+import { commandErrorFromEnvelope, DeltaCommandError } from './thread-commands.ts'
 
 /** Decode one short command result without assuming success from its exit code alone. */
 export function checkResult(result: RunResult, name: string): JsonObject {
   if (result.isStdoutTruncated || result.isStderrTruncated)
-    throw new Error(`${name}: Delta CLI output truncated; no acknowledgment assumed`);
-  let data: unknown;
+    throw new Error(`${name}: Delta CLI output truncated; no acknowledgment assumed`)
+  let data: unknown
   try {
-    data = JSON.parse(result.stdout.trim());
+    data = JSON.parse(result.stdout.trim())
   } catch {
-    data = undefined;
+    data = undefined
   }
   // Every Delta CLI answer is one JSON object; anything else is not an answer this extension can read.
   if (!isJsonObject(data))
     throw new Error(
       `${name}: expected JSON from a current Delta CLI; install matching Delta CLI and app builds (${result.stderr.trim() || `exit ${result.exitCode}`})`,
-    );
+    )
   if (result.exitCode !== 0 || data.error)
     throw (
       commandErrorFromEnvelope(data.error, name) ??
-      new DeltaCommandError("process_failed", `${name}: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
-    );
-  return data;
+      new DeltaCommandError('process_failed', `${name}: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
+    )
+  return data
 }
 
 /** What `thread create` answers: the thread, and whether this call created it. */
-export type CreationReceipt = { operation: "created"; thread_id: string; created: boolean; reference?: string };
+export type CreationReceipt = { operation: 'created'; thread_id: string; created: boolean; reference?: string }
 /** What a ready `worktree mount` answers: the checkout's reference and directory. */
-export type AttachmentReceipt = { operation: "mounted"; reference: string; directory: string };
+export type AttachmentReceipt = { operation: 'mounted'; reference: string; directory: string }
 /** What `thread share` answers: the shared thread and its link. */
-export type PublicationReceipt = { operation: "shared"; thread_id: string; url: string };
+export type PublicationReceipt = { operation: 'shared'; thread_id: string; url: string }
 
 /** Require an idempotent producer creation receipt before saving its thread identity. */
 export function validateCreationReceipt(created: JsonObject): asserts created is JsonObject & CreationReceipt {
-  if (created.operation !== "created" || !isNonEmptyString(created.thread_id) || typeof created.created !== "boolean")
-    throw new Error("Invalid thread creation receipt; retry the same session without resetting its outbox");
+  if (created.operation !== 'created' || !isNonEmptyString(created.thread_id) || typeof created.created !== 'boolean')
+    throw new Error('Invalid thread creation receipt; retry the same session without resetting its outbox')
 }
 
 /** What `worktree create` answers: the new local worktree, whose reference is its UUID. */
-export type WorktreeCreationReceipt = { operation: "created"; worktree_id: string; reference: string };
+export type WorktreeCreationReceipt = { operation: 'created'; worktree_id: string; reference: string }
 /** What `worktree attach` answers: the worktree's reference and the thread it is now a member of. */
-export type MembershipReceipt = { operation: "attached"; thread_id: string; reference: string };
+export type MembershipReceipt = { operation: 'attached'; thread_id: string; reference: string }
 
 /** Require a new local worktree UUID before saving it in the session binding. */
 export function validateWorktreeCreationReceipt(
   created: JsonObject,
 ): asserts created is JsonObject & WorktreeCreationReceipt {
   if (
-    created.operation !== "created" ||
+    created.operation !== 'created' ||
     !isNonEmptyString(created.worktree_id) ||
     created.reference !== created.worktree_id
   )
-    throw new Error("Invalid worktree creation receipt; the checkout was not attached");
+    throw new Error('Invalid worktree creation receipt; the checkout was not attached')
 }
 
 /** Require the membership receipt for the intended thread and local worktree. */
@@ -64,34 +64,34 @@ export function validateWorktreeMembershipReceipt(
   reference: string,
 ): asserts attached is JsonObject & MembershipReceipt {
   if (
-    attached.operation !== "attached" ||
+    attached.operation !== 'attached' ||
     attached.thread_id !== thread ||
-    typeof attached.reference !== "string" ||
+    typeof attached.reference !== 'string' ||
     worktreeHistory(attached.reference) !== worktreeHistory(reference)
   )
-    throw new Error("Invalid worktree membership receipt; the session was not activated");
+    throw new Error('Invalid worktree membership receipt; the session was not activated')
 }
 
 /** Ignore a timeline selector when comparing references to one worktree. */
 export function worktreeHistory(reference: string): string {
-  return reference.replace(/^delta:\/\/worktree\//, "").split("#")[0]!;
+  return reference.replace(/^delta:\/\/worktree\//, '').split('#')[0]!
 }
 
 /** The references of the local worktrees a `worktree list` answer shows checked out at `directory`. */
 export function localWorktreesAt(listed: JsonObject, directory: string): string[] {
-  if (listed.operation !== "listed" || !Array.isArray(listed.worktrees))
-    throw new Error("Unexpected worktree list result; the checkout was not attached");
+  if (listed.operation !== 'listed' || !Array.isArray(listed.worktrees))
+    throw new Error('Unexpected worktree list result; the checkout was not attached')
   return listed.worktrees.flatMap((worktree: unknown) =>
     isJsonObject(worktree) &&
-    typeof worktree.reference === "string" &&
+    typeof worktree.reference === 'string' &&
     Array.isArray(worktree.directories) &&
     worktree.directories.some(
       (entry: unknown) =>
-        isJsonObject(entry) && typeof entry.directory === "string" && samePath(entry.directory, directory),
+        isJsonObject(entry) && typeof entry.directory === 'string' && samePath(entry.directory, directory),
     )
       ? [worktree.reference]
       : [],
-  );
+  )
 }
 
 /**
@@ -99,8 +99,8 @@ export function localWorktreesAt(listed: JsonObject, directory: string): string[
  * restoring, until Delta has attempted its final upload and stopped watching the directory.
  */
 export function checkoutStillSyncing(listed: JsonObject, directory: string): boolean {
-  if (listed.operation !== "listed" || !Array.isArray(listed.worktrees))
-    throw new Error("Unexpected worktree list result; the checkout may still be syncing");
+  if (listed.operation !== 'listed' || !Array.isArray(listed.worktrees))
+    throw new Error('Unexpected worktree list result; the checkout may still be syncing')
   return listed.worktrees.some(
     (worktree: unknown) =>
       isJsonObject(worktree) &&
@@ -108,11 +108,11 @@ export function checkoutStillSyncing(listed: JsonObject, directory: string): boo
       worktree.directories.some(
         (entry: unknown) =>
           isJsonObject(entry) &&
-          typeof entry.directory === "string" &&
+          typeof entry.directory === 'string' &&
           samePath(entry.directory, directory) &&
-          (entry.state === "mounted" || entry.state === "restoring"),
+          (entry.state === 'mounted' || entry.state === 'restoring'),
       ),
-  );
+  )
 }
 
 /** Require the requested checkout and a usable worktree reference. */
@@ -121,13 +121,13 @@ export function validateAttachmentReceipt(
   directory: string,
 ): asserts attached is JsonObject & AttachmentReceipt {
   if (
-    attached.operation !== "mounted" ||
-    typeof attached.reference !== "string" ||
+    attached.operation !== 'mounted' ||
+    typeof attached.reference !== 'string' ||
     !attached.reference.trim() ||
-    typeof attached.directory !== "string" ||
+    typeof attached.directory !== 'string' ||
     !samePath(attached.directory, directory)
   )
-    throw new Error("Invalid checkout attachment receipt; saved records remain queued");
+    throw new Error('Invalid checkout attachment receipt; saved records remain queued')
 }
 
 /** Require a safe link to the exact thread being published. */
@@ -136,15 +136,15 @@ export function validatePublicationReceipt(
   thread: string | undefined,
 ): asserts shared is JsonObject & PublicationReceipt {
   if (
-    shared.operation !== "shared" ||
+    shared.operation !== 'shared' ||
     shared.thread_id !== thread ||
-    typeof shared.url !== "string" ||
+    typeof shared.url !== 'string' ||
     !conversationWebLink(shared.url)
   )
-    throw new Error("Invalid publication receipt; saved records remain queued");
+    throw new Error('Invalid publication receipt; saved records remain queued')
 }
 
 /** Reconnecting backs off exponentially, capped at thirty seconds. */
 export function reconnectDelay(attempt: number): number {
-  return Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
+  return Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5))
 }

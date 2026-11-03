@@ -1,7 +1,7 @@
-import { isJsonObject, type JsonObject } from "../core/json.ts";
-import type { ProcessStream } from "../core/process.ts";
-import { readCommandStream } from "./command-reader.ts";
-import { commandErrorFromEnvelope } from "./thread-commands.ts";
+import { isJsonObject, type JsonObject } from '../core/json.ts'
+import type { ProcessStream } from '../core/process.ts'
+import { readCommandStream } from './command-reader.ts'
+import { commandErrorFromEnvelope } from './thread-commands.ts'
 
 /**
  * Delta needs something from the person first, such as signing in or accepting its beta terms on
@@ -12,31 +12,31 @@ export class AccessRequiredError extends Error {}
 
 /** What sign-in needs from the session, as values and callbacks, so its tests can stand in for the session. */
 export type AuthenticationHost = {
-  windows: boolean;
-  sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  spawn: (argv: string[]) => ProcessStream;
+  windows: boolean
+  sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>
+  spawn: (argv: string[]) => ProcessStream
   /** Ask the person in pi's own dialog; rejects when they dismiss it or no one can be asked. */
-  ask: (question: string, options: string[]) => Promise<string>;
+  ask: (question: string, options: string[]) => Promise<string>
   /** Open a web page in the person's browser, answering whether it opened. */
-  open: (url: string) => Promise<boolean>;
+  open: (url: string) => Promise<boolean>
   /** Told what sign-in waits on in the browser, and `undefined` once it no longer waits. */
-  waiting: (on: BrowserWait | undefined) => void;
+  waiting: (on: BrowserWait | undefined) => void
   /** Aborted when the person asks to stop waiting on the browser. */
-  stop: AbortSignal;
-};
+  stop: AbortSignal
+}
 
 /** What sign-in can wait on the person to finish in their browser. */
-export type BrowserWait = "sign-in" | "terms";
+export type BrowserWait = 'sign-in' | 'terms'
 
 /** How often, and for how long, sign-in waits for the person to accept the beta terms on the web. */
-const TERMS_POLL_MS = 2_000;
-const TERMS_WAIT_MS = 15 * 60_000;
+const TERMS_POLL_MS = 2_000
+const TERMS_WAIT_MS = 15 * 60_000
 
 /** Quote the resolved executable for a POSIX shell or PowerShell, never PATH lookup. */
 export function authLoginCommand(executable: string, windows: boolean): string {
   return windows
     ? `& '${executable.replace(/'/g, "''")}' auth login`
-    : `'${executable.replace(/'/g, "'\"'\"'")}' auth login`;
+    : `'${executable.replace(/'/g, "'\"'\"'")}' auth login`
 }
 
 /**
@@ -48,29 +48,29 @@ export async function requireAuthentication(
   executable: string,
   check: () => Promise<void>,
   notice: (text: string) => Promise<void>,
-  retry = "/delta-share or /delta-join <link>",
+  retry = '/delta-share or /delta-join <link>',
 ) {
-  const { windows } = host;
-  const recovery = `Resolve access${windows ? ", then run in PowerShell" : ", then run in your shell"}: ${authLoginCommand(executable, windows)}. After signing in again, retry ${retry}.`;
-  const stopped = new AbortController();
+  const { windows } = host
+  const recovery = `Resolve access${windows ? ', then run in PowerShell' : ', then run in your shell'}: ${authLoginCommand(executable, windows)}. After signing in again, retry ${retry}.`
+  const stopped = new AbortController()
   const monitor = async () => {
     while (!stopped.signal.aborted) {
-      await host.sleep(250, stopped.signal);
-      await check();
+      await host.sleep(250, stopped.signal)
+      await check()
     }
-  };
-  void monitor().catch(() => stopped.abort());
-  const stop = () => stopped.abort();
-  host.stop.addEventListener("abort", stop, { once: true });
-  let waitingOn: BrowserWait | undefined;
+  }
+  void monitor().catch(() => stopped.abort())
+  const stop = () => stopped.abort()
+  host.stop.addEventListener('abort', stop, { once: true })
+  let waitingOn: BrowserWait | undefined
   const wait = (on: BrowserWait) => {
-    waitingOn = on;
-    host.waiting(on);
-  };
+    waitingOn = on
+    host.waiting(on)
+  }
   const request = async (args: string[], timeout = 60_000) => {
-    await check();
-    if (stopped.signal.aborted) throw new Error("Delta sign-in stopped");
-    const stream = host.spawn([executable, "--json", "auth", ...args]);
+    await check()
+    if (stopped.signal.aborted) throw new Error('Delta sign-in stopped')
+    const stream = host.spawn([executable, '--json', 'auth', ...args])
     const text = await readCommandStream(
       stream,
       `auth ${args[0]}`,
@@ -79,109 +79,109 @@ export async function requireAuthentication(
       timeout,
       // Auth reports valid signed-out/denied/cancelled outcomes with exit 1.
       (code, stdout) => {
-        if (code === 0) return true;
+        if (code === 0) return true
         try {
-          return code === 1 && typeof JSON.parse(stdout)?.status === "string";
+          return code === 1 && typeof JSON.parse(stdout)?.status === 'string'
         } catch {
-          return false;
+          return false
         }
       },
-    );
-    await check();
-    let value: unknown;
+    )
+    await check()
+    let value: unknown
     try {
-      value = JSON.parse(text);
+      value = JSON.parse(text)
     } catch {
-      throw new Error("Delta returned invalid authentication output; update Delta and retry");
+      throw new Error('Delta returned invalid authentication output; update Delta and retry')
     }
-    const failure = isJsonObject(value) ? commandErrorFromEnvelope(value.error, "authentication") : undefined;
-    if (failure) throw failure;
-    if (!isJsonObject(value) || typeof value.status !== "string")
-      throw new Error("Delta returned no authentication status; update Delta and retry");
-    return value;
-  };
+    const failure = isJsonObject(value) ? commandErrorFromEnvelope(value.error, 'authentication') : undefined
+    if (failure) throw failure
+    if (!isJsonObject(value) || typeof value.status !== 'string')
+      throw new Error('Delta returned no authentication status; update Delta and retry')
+    return value
+  }
   // Unaccepted beta terms need the person on the web, so opening them is offered rather than logged.
   // Here and for sign-in, a dismissed dialog, or a surface that cannot ask, declines like "Not now".
   const resolveAccess = async (value: JsonObject) => {
-    if (value.reason !== "terms_not_accepted") throw authFailure(value, recovery, retry);
-    const url = typeof value.url === "string" ? value.url : "https://zed.dev/delta/terms";
-    const accept = "Open the beta terms";
+    if (value.reason !== 'terms_not_accepted') throw authFailure(value, recovery, retry)
+    const url = typeof value.url === 'string' ? value.url : 'https://zed.dev/delta/terms'
+    const accept = 'Open the beta terms'
     const answer = await host
-      .ask("Delta needs you to accept its beta terms before it can sync. Open them in your browser?", [
+      .ask('Delta needs you to accept its beta terms before it can sync. Open them in your browser?', [
         accept,
-        "Not now",
+        'Not now',
       ])
-      .catch(() => undefined);
-    await check();
+      .catch(() => undefined)
+    await check()
     if (answer !== accept)
       throw new AccessRequiredError(
         `Delta's beta terms aren't accepted. Accept them at ${url}, then run ${retry} again.`,
-      );
-    if (!(await host.open(url))) await notice(`Accept Delta's beta terms in your browser to continue: ${url}`);
-    wait("terms");
+      )
+    if (!(await host.open(url))) await notice(`Accept Delta's beta terms in your browser to continue: ${url}`)
+    wait('terms')
     // The app keeps the denied sign-in and hears when the terms are accepted, so its status turns
     // signed in on its own: continue then, with no retry for the person to run.
     for (let waited = 0; waited < TERMS_WAIT_MS; waited += TERMS_POLL_MS) {
-      await host.sleep(TERMS_POLL_MS, stopped.signal);
-      const status = await request(["status"]);
-      if (status.status === "signed_in") return;
+      await host.sleep(TERMS_POLL_MS, stopped.signal)
+      const status = await request(['status'])
+      if (status.status === 'signed_in') return
       if (
-        status.status === "signing_in" ||
-        (status.status === "access_denied" && status.reason === "terms_not_accepted")
+        status.status === 'signing_in' ||
+        (status.status === 'access_denied' && status.reason === 'terms_not_accepted')
       )
-        continue;
-      throw authFailure(status, recovery, retry);
+        continue
+      throw authFailure(status, recovery, retry)
     }
     throw new AccessRequiredError(
       `Delta's beta terms still aren't accepted. Accept them at ${url}, then run ${retry} again.`,
-    );
-  };
+    )
+  }
   try {
-    const status = await request(["status"]);
-    if (status.status === "signed_in") return;
-    if (status.status === "access_denied") return await resolveAccess(status);
-    if (status.status !== "signed_out" && status.status !== "signing_in") throw authFailure(status, recovery, retry);
+    const status = await request(['status'])
+    if (status.status === 'signed_in') return
+    if (status.status === 'access_denied') return await resolveAccess(status)
+    if (status.status !== 'signed_out' && status.status !== 'signing_in') throw authFailure(status, recovery, retry)
     // Sign-in opens the browser, so it waits for the person to ask for it.
-    const signIn = "Sign in";
+    const signIn = 'Sign in'
     const answer = await host
-      .ask("Delta needs you to sign in before it can sync. Sign in with your browser?", [signIn, "Not now"])
-      .catch(() => undefined);
-    await check();
-    if (answer !== signIn) throw new AccessRequiredError(`Delta isn't signed in. Run ${retry} again to sign in.`);
-    await notice("Signing in to Delta… Complete sign-in in your browser to continue.");
-    const login = await request(["login", "--no-wait"]);
-    if (login.status === "signed_in") return;
-    if (login.status === "access_denied") return await resolveAccess(login);
-    if (login.status !== "pending") throw authFailure(login, recovery, retry);
-    const expires = typeof login.expires_at === "string" ? Date.parse(login.expires_at) : NaN;
+      .ask('Delta needs you to sign in before it can sync. Sign in with your browser?', [signIn, 'Not now'])
+      .catch(() => undefined)
+    await check()
+    if (answer !== signIn) throw new AccessRequiredError(`Delta isn't signed in. Run ${retry} again to sign in.`)
+    await notice('Signing in to Delta… Complete sign-in in your browser to continue.')
+    const login = await request(['login', '--no-wait'])
+    if (login.status === 'signed_in') return
+    if (login.status === 'access_denied') return await resolveAccess(login)
+    if (login.status !== 'pending') throw authFailure(login, recovery, retry)
+    const expires = typeof login.expires_at === 'string' ? Date.parse(login.expires_at) : NaN
     if (
-      typeof login.login_id !== "string" ||
+      typeof login.login_id !== 'string' ||
       !login.login_id ||
-      typeof login.url !== "string" ||
+      typeof login.url !== 'string' ||
       !/^https?:\/\//.test(login.url) ||
       !Number.isFinite(expires)
     )
-      throw new Error("Delta returned an invalid sign-in link; update Delta and retry");
-    await notice(`Finish signing in to Delta in your browser; this link expires at ${login.expires_at}: ${login.url}`);
+      throw new Error('Delta returned an invalid sign-in link; update Delta and retry')
+    await notice(`Finish signing in to Delta in your browser; this link expires at ${login.expires_at}: ${login.url}`)
     // Detached attempts can be shared by other clients. Stop our waiter, never
     // cancel the app's attempt or sign the account out when pi changes session.
-    wait("sign-in");
-    const result = await request(["wait", login.login_id], 16 * 60_000);
-    if (result.status === "access_denied") return await resolveAccess(result);
-    if (result.status !== "signed_in") throw authFailure(result, recovery, retry);
+    wait('sign-in')
+    const result = await request(['wait', login.login_id], 16 * 60_000)
+    if (result.status === 'access_denied') return await resolveAccess(result)
+    if (result.status !== 'signed_in') throw authFailure(result, recovery, retry)
   } catch (error) {
     // Stopping is the person's choice, so it is reported as one, not as a failure.
     if (host.stop.aborted && waitingOn)
       throw new AccessRequiredError(
-        waitingOn === "terms"
+        waitingOn === 'terms'
           ? `Stopped waiting for Delta's beta terms. Run ${retry} again to accept them.`
           : `Stopped waiting for Delta sign-in. Run ${retry} again to sign in.`,
-      );
-    throw error;
+      )
+    throw error
   } finally {
-    stopped.abort();
-    host.stop.removeEventListener("abort", stop);
-    if (waitingOn) host.waiting(undefined);
+    stopped.abort()
+    host.stop.removeEventListener('abort', stop)
+    if (waitingOn) host.waiting(undefined)
   }
 }
 
@@ -189,21 +189,21 @@ export async function requireAuthentication(
 function authFailure(value: JsonObject, recovery: string, retry: string): Error {
   switch (value.status) {
     // `requireAuthentication` offers to open the beta terms before reaching here.
-    case "access_denied":
+    case 'access_denied':
       return new Error(
-        `Delta access denied: ${value.message ?? "account access is required"}.${value.url ? ` ${value.url}` : ""} ${recovery}`,
-      );
-    case "signed_out":
-      return new Error(`Delta signed out before sign-in finished. Retry ${retry}.`);
-    case "wrong_account":
+        `Delta access denied: ${value.message ?? 'account access is required'}.${value.url ? ` ${value.url}` : ''} ${recovery}`,
+      )
+    case 'signed_out':
+      return new Error(`Delta signed out before sign-in finished. Retry ${retry}.`)
+    case 'wrong_account':
       return new Error(
-        "Delta is using another account’s data directory. Resolve the account in Delta and retry; the extension will not switch accounts.",
-      );
-    case "cancelled":
-      return new Error(`Delta sign-in was cancelled. Retry ${retry}.`);
-    case "expired":
-      return new Error(`Delta sign-in expired. Retry ${retry}.`);
+        'Delta is using another account’s data directory. Resolve the account in Delta and retry; the extension will not switch accounts.',
+      )
+    case 'cancelled':
+      return new Error(`Delta sign-in was cancelled. Retry ${retry}.`)
+    case 'expired':
+      return new Error(`Delta sign-in expired. Retry ${retry}.`)
     default:
-      return new Error(`Unsupported Delta authentication status: ${value.status}. Update Delta and retry.`);
+      return new Error(`Unsupported Delta authentication status: ${value.status}. Update Delta and retry.`)
   }
 }

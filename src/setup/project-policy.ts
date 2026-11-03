@@ -6,35 +6,35 @@
  * touches the filesystem or Git, keeping the decisions the wizard and activation make easy to test.
  */
 
-import { isJsonObject } from "../core/json.ts";
-import { errorText } from "../core/text.ts";
+import { isJsonObject } from '../core/json.ts'
+import { errorText } from '../core/text.ts'
 
 /** How a checkout records pi sessions. `manual` records only through `/delta share` or a join. */
-export type ThreadMode = "manual" | "private" | "organization";
+export type ThreadMode = 'manual' | 'private' | 'organization'
 
 /** A checkout's effective recording policy, after validation. */
 export type ProjectPolicy = {
-  mode: ThreadMode;
-  organization?: string;
+  mode: ThreadMode
+  organization?: string
   /** Whether the file deliberately configures a policy, which suppresses the onboarding offer. */
-  configured: boolean;
+  configured: boolean
   /** Why an existing policy could not be used, for a one-time notice. */
-  problem?: string;
-};
+  problem?: string
+}
 
 /** A policy file as read from disk: the effective policy, the raw document, and whether it parsed. */
 export type PolicyFile = {
-  policy: ProjectPolicy;
+  policy: ProjectPolicy
   /** The parsed document, kept whole so a rewrite preserves unknown keys. */
-  document?: Record<string, unknown>;
-  malformed?: boolean;
-};
+  document?: Record<string, unknown>
+  malformed?: boolean
+}
 
-const MODES: readonly ThreadMode[] = ["manual", "private", "organization"];
+const MODES: readonly ThreadMode[] = ['manual', 'private', 'organization']
 
 /** Where a checkout's policy lives, given the checkout root from `git rev-parse --show-toplevel`. */
 export function policyPath(checkoutRoot: string): string {
-  return `${checkoutRoot}/.delta/settings.json`;
+  return `${checkoutRoot}/.delta/settings.json`
 }
 
 /**
@@ -43,49 +43,49 @@ export function policyPath(checkoutRoot: string): string {
  * mode leaves the checkout recording manually with a `problem` a person can act on.
  */
 export function readProjectPolicy(text: string | undefined): PolicyFile {
-  if (text === undefined) return { policy: { mode: "manual", configured: false } };
-  let document: unknown;
+  if (text === undefined) return { policy: { mode: 'manual', configured: false } }
+  let document: unknown
   try {
-    document = JSON.parse(text);
+    document = JSON.parse(text)
   } catch (error) {
     return {
       malformed: true,
-      policy: { mode: "manual", configured: false, problem: `it is not valid JSON (${errorText(error)})` },
-    };
+      policy: { mode: 'manual', configured: false, problem: `it is not valid JSON (${errorText(error)})` },
+    }
   }
   if (!isJsonObject(document))
     return {
       malformed: true,
-      policy: { mode: "manual", configured: false, problem: "it does not contain a JSON object" },
-    };
-  const threads = document.threads;
-  if (threads === undefined) return { document, policy: { mode: "manual", configured: false } };
+      policy: { mode: 'manual', configured: false, problem: 'it does not contain a JSON object' },
+    }
+  const threads = document.threads
+  if (threads === undefined) return { document, policy: { mode: 'manual', configured: false } }
   if (!isJsonObject(threads))
-    return { document, policy: { mode: "manual", configured: false, problem: "its `threads` value is not an object" } };
-  const mode = threads.mode;
-  if (mode === undefined) return { document, policy: { mode: "manual", configured: false } };
-  if (typeof mode !== "string" || !MODES.includes(mode as ThreadMode))
+    return { document, policy: { mode: 'manual', configured: false, problem: 'its `threads` value is not an object' } }
+  const mode = threads.mode
+  if (mode === undefined) return { document, policy: { mode: 'manual', configured: false } }
+  if (typeof mode !== 'string' || !MODES.includes(mode as ThreadMode))
     return {
       document,
-      policy: { mode: "manual", configured: false, problem: `its mode must be one of ${MODES.join(", ")}` },
-    };
-  const organization = threads.organization;
+      policy: { mode: 'manual', configured: false, problem: `its mode must be one of ${MODES.join(', ')}` },
+    }
+  const organization = threads.organization
   // Manual names the organization `/delta share` shares to, when setup chose one.
-  if (mode === "manual")
+  if (mode === 'manual')
     return {
       document,
       policy: {
-        mode: "manual",
+        mode: 'manual',
         configured: true,
-        ...(typeof organization === "string" && organization.trim() ? { organization } : {}),
+        ...(typeof organization === 'string' && organization.trim() ? { organization } : {}),
       },
-    };
-  if (typeof organization !== "string" || !organization.trim())
+    }
+  if (typeof organization !== 'string' || !organization.trim())
     return {
       document,
-      policy: { mode: "manual", configured: false, problem: `mode "${mode}" requires a non-empty organization` },
-    };
-  return { document, policy: { mode: mode as ThreadMode, organization, configured: true } };
+      policy: { mode: 'manual', configured: false, problem: `mode "${mode}" requires a non-empty organization` },
+    }
+  return { document, policy: { mode: mode as ThreadMode, organization, configured: true } }
 }
 
 /**
@@ -97,16 +97,16 @@ export function serializeProjectPolicy(
   mode: ThreadMode,
   organization?: string,
 ): string {
-  const document = isJsonObject(previous) ? { ...previous } : {};
-  const threads = isJsonObject(document.threads) ? { ...document.threads } : {};
-  threads.mode = mode;
-  if (organization === undefined) delete threads.organization;
-  else threads.organization = organization;
-  document.threads = threads;
-  return `${JSON.stringify(document, null, 2)}\n`;
+  const document = isJsonObject(previous) ? { ...previous } : {}
+  const threads = isJsonObject(document.threads) ? { ...document.threads } : {}
+  threads.mode = mode
+  if (organization === undefined) delete threads.organization
+  else threads.organization = organization
+  document.threads = threads
+  return `${JSON.stringify(document, null, 2)}\n`
 }
 
 /** Whether a policy records automatically without an explicit `/delta share`. */
 export function recordsAutomatically(policy: ProjectPolicy): boolean {
-  return policy.mode === "private" || policy.mode === "organization";
+  return policy.mode === 'private' || policy.mode === 'organization'
 }

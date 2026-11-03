@@ -1,0 +1,5 @@
+# The upstream plugin's copies of native CLI output; never edited by hand.
+test/fixtures/
+package-lock.json
+# Prose keeps its own line breaks and tables.
+*.md

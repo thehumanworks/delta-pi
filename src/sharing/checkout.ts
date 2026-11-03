@@ -3,8 +3,8 @@
  * the session's thread, and the `worktree mount` that keeps it synchronized while the session runs,
  * restored when the session resumes.
  */
-import type { Host } from "../core/host.ts";
-import { samePath } from "../core/paths.ts";
+import type { Host } from '../core/host.ts'
+import { samePath } from '../core/paths.ts'
 import {
   activation,
   type Binding,
@@ -14,8 +14,8 @@ import {
   serial,
   sessions,
   stateFor,
-} from "../core/session-state.ts";
-import { errorText } from "../core/text.ts";
+} from '../core/session-state.ts'
+import { errorText } from '../core/text.ts'
 import {
   hasWorktreeMount,
   requireContract,
@@ -23,11 +23,11 @@ import {
   worktreeCreate,
   worktreeList,
   worktreeMount,
-} from "../cli/delta-cli.ts";
-import { finishProgress, setProgress } from "../band/band.ts";
-import { recordsOffline } from "../recording/delivery.ts";
-import { finishRestoredActivation } from "../setup/activation.ts";
-import { startParticipation } from "./join.ts";
+} from '../cli/delta-cli.ts'
+import { finishProgress, setProgress } from '../band/band.ts'
+import { recordsOffline } from '../recording/delivery.ts'
+import { finishRestoredActivation } from '../setup/activation.ts'
+import { startParticipation } from './join.ts'
 
 /** Reuse a checkout already bound on this machine, or create a new local worktree identity. */
 async function checkoutReference(
@@ -36,21 +36,21 @@ async function checkoutReference(
   check?: () => Promise<void>,
   session?: string,
 ): Promise<string> {
-  const pending = session && (await serial(() => load(host, session)).then((binding) => binding.pendingWorktree));
-  if (pending && samePath(pending.directory, directory)) return pending.reference;
-  const matches = await worktreeList(host, directory, check);
+  const pending = session && (await serial(() => load(host, session)).then((binding) => binding.pendingWorktree))
+  if (pending && samePath(pending.directory, directory)) return pending.reference
+  const matches = await worktreeList(host, directory, check)
   if (matches.length > 1)
     throw new Error(
       `${directory} has several local worktree identities; select the intended one in Delta before retrying`,
-    );
-  if (matches.length) return matches[0]!;
-  const created = await worktreeCreate(host, directory, check);
+    )
+  if (matches.length) return matches[0]!
+  const created = await worktreeCreate(host, directory, check)
   if (session)
     await serial(async () => {
-      const binding = await load(host, session);
-      await save(host, { ...binding, pendingWorktree: { directory, reference: created.reference } });
-    });
-  return created.reference;
+      const binding = await load(host, session)
+      await save(host, { ...binding, pendingWorktree: { directory, reference: created.reference } })
+    })
+  return created.reference
 }
 
 /**
@@ -65,8 +65,8 @@ export async function attachWorktree(
   check?: () => Promise<void>,
   session?: string,
 ): Promise<string> {
-  const reference = known ?? (await checkoutReference(host, directory, check, session));
-  return (await worktreeAttach(host, reference, thread, check)).reference;
+  const reference = known ?? (await checkoutReference(host, directory, check, session))
+  return (await worktreeAttach(host, reference, thread, check)).reference
 }
 
 /** Keep an existing user checkout synchronized until the pi session ends. */
@@ -75,16 +75,16 @@ export async function mountCheckout(
   binding: { session: string; checkout?: string; checkoutReference?: string },
   check?: () => Promise<void>,
 ): Promise<{ reference: string; directory: string }> {
-  const { session, checkout, checkoutReference: reference } = binding;
-  if (!checkout || !reference) throw new Error("This session has no attached checkout to mount");
-  return worktreeMount(host, { session, reference, directory: checkout, check });
+  const { session, checkout, checkoutReference: reference } = binding
+  if (!checkout || !reference) throw new Error('This session has no attached checkout to mount')
+  return worktreeMount(host, { session, reference, directory: checkout, check })
 }
 
 /** Whether `binding`'s saved user checkout has no mount command in this process. */
 export function checkoutNeedsMount(session: string, binding: Binding): boolean {
   return (
     !binding.joined && !!binding.checkout && !!binding.checkoutReference && !hasWorktreeMount(session, binding.checkout)
-  );
+  )
 }
 
 /**
@@ -94,47 +94,47 @@ export function checkoutNeedsMount(session: string, binding: Binding): boolean {
  * holding prompts for the mount would hold them for as long as the session is offline.
  */
 export function beginRestoreCheckout(host: Host, session: string) {
-  const runtime = stateFor(session);
-  if (runtime.restoring || runtime.restoringCheckout) return;
-  const background = recordsOffline(session, runtime.binding);
-  if (background) runtime.restoringCheckout = true;
-  else runtime.restoring = true;
-  setProgress(host, "Restoring this checkout’s synchronization…", "active");
-  const owns = () => activation.session === session && sessions.get(session) === runtime;
+  const runtime = stateFor(session)
+  if (runtime.restoring || runtime.restoringCheckout) return
+  const background = recordsOffline(session, runtime.binding)
+  if (background) runtime.restoringCheckout = true
+  else runtime.restoring = true
+  setProgress(host, 'Restoring this checkout’s synchronization…', 'active')
+  const owns = () => activation.session === session && sessions.get(session) === runtime
   host.clock.after(0, async () => {
     try {
-      const binding: Binding = await serial(() => load(host, session));
-      if (!owns()) return;
-      if (!binding.snapshot) await requireContract(host, session);
-      if (!owns()) return;
+      const binding: Binding = await serial(() => load(host, session))
+      if (!owns()) return
+      if (!binding.snapshot) await requireContract(host, session)
+      if (!owns()) return
       await mountCheckout(host, binding, async () => {
-        if (!owns()) throw new Error("The session ended while its checkout was being restored");
-      });
-      if (!owns()) return;
-      runtime.joinFailure = undefined;
+        if (!owns()) throw new Error('The session ended while its checkout was being restored')
+      })
+      if (!owns()) return
+      runtime.joinFailure = undefined
       if (binding.snapshot) {
         try {
-          await startParticipation(host, session, binding, owns);
+          await startParticipation(host, session, binding, owns)
         } catch {
           // The watcher owns reconnects after a transient failure. Its first failed
           // attempt does not mean that restoring the checkout mount failed.
         }
       }
-      if (!owns()) return;
-      finishProgress(host, "Restored checkout synchronization", "done");
-      await finishRestoredActivation(host, session, binding, owns);
+      if (!owns()) return
+      finishProgress(host, 'Restored checkout synchronization', 'done')
+      await finishRestoredActivation(host, session, binding, owns)
     } catch (error) {
-      if (!owns()) return;
+      if (!owns()) return
       // Prompts that record offline keep going, and the next one retries the restore.
       const text = background
         ? `Delta couldn't restore this checkout's synchronization: ${errorText(error)}. Prompts still record locally, and the next one retries.`
-        : `Delta couldn't restore this checkout: ${errorText(error)}. Retry ${recoveryCommand(runtime.binding)}; the prompt was not submitted.`;
-      if (!background) runtime.joinFailure = text;
-      setProgress(host, text, "error");
-      host.ui.note(text, "error");
+        : `Delta couldn't restore this checkout: ${errorText(error)}. Retry ${recoveryCommand(runtime.binding)}; the prompt was not submitted.`
+      if (!background) runtime.joinFailure = text
+      setProgress(host, text, 'error')
+      host.ui.note(text, 'error')
     } finally {
-      if (background) runtime.restoringCheckout = undefined;
-      else runtime.restoring = undefined;
+      if (background) runtime.restoringCheckout = undefined
+      else runtime.restoring = undefined
     }
-  });
+  })
 }
