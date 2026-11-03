@@ -389,9 +389,15 @@ async function restoreMounts(host: Host, session: string, check: () => Promise<v
   const inside = [mounted.directory, ...mounted.worktrees.map((tree) => tree.directory)].some((candidate) =>
     samePath(candidate, directory),
   )
-  if (!inside || !isInDirectory(host, directory))
+  const locator = binding.locator ?? binding.thread
+  if (!inside)
     throw new Error(
-      `this session works in ${directory}, which is no longer where Delta mounts the thread (${mounted.directory}); run /delta-join ${binding.locator ?? binding.thread} to open a session there`,
+      `this session works in ${directory}, which is no longer where Delta mounts the thread (${mounted.directory}); run /delta-join ${locator} to open a session there`,
+    )
+  // pi opens a resumed session in another folder only when its own was missing, and cannot move it.
+  if (!isInDirectory(host, directory))
+    throw new Error(
+      `pi is working in ${host.session.cwd()}, outside this session's folder ${directory}; run /delta-join ${locator} to open a session there`,
     )
   await serial(async () => {
     await check()

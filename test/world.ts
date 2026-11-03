@@ -162,6 +162,10 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     release(version: string) {
       writeFileSync(join(state, 'release.json'), JSON.stringify(version))
     },
+    /** Make `thread mount` place worktrees as Delta does on Windows, under `base` (see test/fake-delta). */
+    windowsMounts(base: string) {
+      writeFileSync(join(state, 'windows-mounts.json'), JSON.stringify({ base }))
+    },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
@@ -187,16 +191,47 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     /**
      * Hold the runs of `command` after the first `after` until the returned function releases them. An
      * `answer` set before the release answers a held run instead, as a sign-in that ends another way does.
-     * `update install` holds an explicit `update` mid-download, once it has reported its progress.
+     * `update install` holds an explicit `update` mid-download, once it has reported its progress. With
+     * `times`, only that many runs are held.
      */
-    hold(command: string, { after = 0 } = {}): () => void {
+    hold(command: string, { after = 0, times }: { after?: number; times?: number } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
-      writeFileSync(path, JSON.stringify({ after }))
+      writeFileSync(path, JSON.stringify({ after, ...(times === undefined ? {} : { times }) }))
       return () => rmSync(path, { force: true })
     },
     /** Make `thread invite` refuse these addresses, each with Delta's message for why. */
     inviteFailures(failures: Record<string, string>) {
       writeFileSync(join(state, 'invite-failures.json'), JSON.stringify(failures))
+    },
+    /** Forget what `thread watch` reported for `thread`, so the next watch starts afresh, as after a one-off bad line. */
+    forgetRemote(thread: string) {
+      rmSync(join(state, `events-${thread}.jsonl`), { force: true })
+    },
+    /**
+     * Mark the checkout at `directory` mounted or waiting, as Delta reports it, while its mount command
+     * runs on: a worktree that stops being mounted, or comes back.
+     */
+    markCheckout(directory: string, mounted: boolean) {
+      const path = join(state, 'state.json')
+      const lock = join(state, 'state.lock')
+      for (let attempt = 0; ; attempt++) {
+        try {
+          mkdirSync(lock)
+          break
+        } catch (error) {
+          if (attempt > 2000) throw error
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5)
+        }
+      }
+      try {
+        const current = JSON.parse(readFileSync(path, 'utf8'))
+        for (const tree of current.worktrees)
+          for (const entry of tree.directories)
+            if (entry.directory === directory) entry.state = mounted ? 'mounted' : 'waiting'
+        writeFileSync(path, JSON.stringify(current, null, 2))
+      } finally {
+        rmSync(lock, { recursive: true, force: true })
+      }
     },
     cleanup() {
       rmSync(base, { recursive: true, force: true })

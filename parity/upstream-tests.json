@@ -2580,38 +2580,41 @@
     },
     {
       "upstream": "sharing/handoff.test.ts > Desktop's new-session link carries the folder and the message, encoded",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off link to build."
     },
     {
       "upstream": "sharing/join.test.ts > joining > Claude's own cd below the joined directory keeps participating, and leaving it pauses",
       "status": "not-applicable",
-      "note": "Exercises Claude's persistent cwd/root changes through its shell and /cd. Pi's session cwd is fixed; shell cd does not move the session. The reusable containment behavior has separate primitive coverage in test/paths.test.ts."
+      "note": "A pi session's directory is fixed by its session header for the session's life: pi has no /cd, and its bash tool runs every command in ctx.cwd, so a cd never moves pi. Containment itself (a subdirectory accepted, a sibling refused) is checked by the Windows test's resumes and test/paths.test.ts."
     },
     {
       "upstream": "sharing/join.test.ts > joining > Windows mixed separators join and allow subdirectories but not sibling checkouts",
-      "status": "missing",
-      "note": "test/paths.test.ts and thread-commands.test.ts cover Windows separator equivalence and containment primitives, but no Windows join verifies the saved binding and subsequent prompt acceptance/refusal. Port with a Host fake and equivalent mounted/reported Windows paths."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > Windows mixed separators join and allow subdirectories but not sibling checkouts"
+      ],
+      "note": "The fake Delta mounts under a C:\\ base and reports the checkout with mixed separators (world().windowsMounts); a SessionManager shim keeps the C:\\ folder as pi on Windows does. Since pi cannot change a live session's directory, the subdirectory and sibling cases resume the joined session there: the first prompt is accepted, the sibling is refused naming the session's folder."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a Desktop tab hands the join to a new session in the thread's folder, changing nothing here",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off to offer."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a conversation Claude continues in a new session (agents overview) records there as the same producer and keeps the mounts",
-      "status": "unsupported",
-      "note": "Following a conversation Claude moves to a background session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no agents overview or /background that moves a live conversation into another session and marks it continued (Claude's continued-in transcript entry). pi's /fork and /clone copy history into a new session while the original stays live and resumable, so recording a copy as the same producer would put two conversations on one sequence."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a conversation Claude continues in a new session (background) records there as the same producer and keeps the mounts",
-      "status": "unsupported",
-      "note": "Following a conversation Claude moves to a background session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no /background or agents overview that moves a live conversation into another session and marks it continued (Claude's continued-in transcript entry). pi's /fork and /clone copy history into a new session while the original stays live and resumable, so recording a copy as the same producer would put two conversations on one sequence."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a disconnected observer held in abort cannot corrupt a restarted live observer or its ready gate",
-      "status": "missing",
-      "note": "Hold an old observer's abort/teardown, restart the joined session/watch, release the old work, and assert the new watch, readiness, band, and context remain unchanged."
+      "status": "not-applicable",
+      "note": "pi's ctx.abort() is synchronous, so a dropped watch's teardown has no await outside the binding queue (marking the turn lost and staging its end); holding it holds the turn's own completion, and pi ends a session only after its turn settles (AgentSessionRuntime.teardownCurrent awaits session.abort()). A restart also gets a fresh copy of the extension's modules, so the old observer cannot reach the new watch, gate or band. The teardown window that does exist is tested by 'a prompt while a dropped watch is torn down is refused, then accepted once it reconnects'."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a failed mount after the clear keeps the fresh session in its saved transition until a retry mounts it",
@@ -2623,18 +2626,22 @@
     },
     {
       "upstream": "sharing/join.test.ts > joining > a hand-off no session joins within 5 minutes is released, saying how to bring it back",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off left waiting; a mount pi never switches into is released at once (… > a switch pi refuses leaves no prepared session or join behind)."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a join stops waiting for Delta after its retry budget and leaves the session as it was",
-      "status": "missing",
-      "note": "Keep status retryable through the 30-second budget; verify terminal error, cleared request, and no session switch or mount."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a join stops waiting for Delta after its retry budget and leaves the session as it was"
+      ],
+      "note": "Status fails retryably on every read; after waits of 2, 4, 8 and 16 seconds the fifth read is the last, the notice says the session and folder were preserved (pi's wording: 'This session…', since nothing switched), nothing is mounted or prepared, and a prompt runs again."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a join waits out a Delta daemon that is still connecting",
-      "status": "missing",
-      "note": "Use a controlled clock and retryable disconnected status response, then a success; assert waiting progress, no premature switch, and eventual successful join."
+      "status": "ported",
+      "ours": ["test/behaviour/join.test.ts > a join waits out a Delta daemon that is still connecting"],
+      "note": "One retryable status failure: the band says it is waiting for Delta, nothing switches or mounts until the clock moves 2 seconds, then the join finishes and binds the thread."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a join's fresh session participates and names its producer",
@@ -2647,108 +2654,161 @@
     },
     {
       "upstream": "sharing/join.test.ts > joining > a joined delivery refusal lifts only after explicit successful same-thread join verification",
-      "status": "missing",
-      "note": "Inject permanent delivery/access refusal in a joined thread. Reconnecting the watch alone must not lift it; failed explicit status must not lift it; successful same-thread join must recover and send the preserved record once."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a joined delivery refusal lifts only after explicit successful same-thread join verification"
+      ],
+      "note": "A non-retryable not_visible append refusal (a published code; upstream's access_denied is not) pauses delivery; a watch reconnect and a /delta-join whose status reports access local_only both leave prompts refused; a /delta-join that verifies lifts it, and the refused turn's records reach the thread once, in order, with none of the refused prompts."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a nonempty fresh producer and a wrong project root never enable a completed binding",
-      "status": "missing",
-      "note": "Frontier primitives are tested, but not completion preserving joinTransition. Inject an advanced fresh producer and a pi cwd outside plan.directory; assert no completed binding, watch, or recording."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a nonempty fresh producer and a wrong project root never enable a completed binding"
+      ],
+      "note": "An earlier record from the joined session's producer makes Delta ahead of its outbox, so the transition stays saved and prompts are refused. pi's project root is its session directory: the session resumed outside the thread's folder (as pi's terminal continues one whose folder is missing) refuses again, with no mount, watch or record."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a prompt while a dropped watch is torn down is refused, then accepted once it reconnects",
-      "status": "missing",
-      "note": "Exercise the dropped-watch teardown phase with a held abort; assert prompt refusal during teardown and acceptance only after a live reconnect."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a prompt while a dropped watch is torn down is refused, then accepted once it reconnects"
+      ],
+      "note": "pi's abort is synchronous, so the teardown is held at its write marking the turn lost; pi's turn still runs, so the person's prompt is a steer. It used to be admitted (the dropped watch answered with its last readiness); src/recording/prompt.ts now refuses a steer while sharing is paused. Accepted after the reconnect."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a session joining a hand-off is not told it is unrecorded while its mount runs",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/join.test.ts > the session a join switches into is not told it is unrecorded while its mount runs"
+      ],
+      "note": "pi has no hand-off; its counterpart is the session a join switches into, which finishes the join in a runtime of its own while its mount runs. That session was offered setup ('Set it up now?') in the thread's folder; src/setup/activation.ts now treats a saved join transition as joining. The band shows no Not set up/Not syncing reminder either."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a session replacement during preflight capability inspection cannot mount or change the replacement cwd",
-      "status": "not-applicable",
-      "note": "The exact suspension point is Claude command.list checking required clear/cd built-ins, a capability check removed by the documented pi adaptation. Pi preflight cancellation should still be tested at its actual async discovery/auth/status points."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a session replacement during preflight capability inspection cannot mount or change the replacement cwd"
+      ],
+      "note": "pi has no command list to inspect, so the hold is the preflight's last await before anything changes, the thread's status read; a new session started meanwhile gets no mount, watch, binding, prepared session or rows, and keeps its directory."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a thread with three worktrees is joined in a thread folder and every worktree is checked before a prompt",
-      "status": "missing",
-      "note": "thread-commands.test.ts tests multi-mount decoding/validation, but not joining or prompt gating. Add an orchestration test with three worktrees, one becoming inactive, and recovery after it becomes ready."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a thread with three worktrees is joined in a thread folder and every worktree is checked before a prompt"
+      ],
+      "note": "The fake Delta now names worktrees and mounts several apart, in a folder of their own. A worktree reported inactive refuses the prompt naming only it, until it is active again, with no mount in between. The band did not name it for a client without pi's terminal; src/recording/prompt.ts now redraws the band. Upstream's Claude-outside-the-directory case has no pi counterpart (fixed session directory)."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a worktree added during a turn waits for the turn to end before telling Claude and moving it",
-      "status": "missing",
-      "note": "The generic teammate-row e2e test does not trigger refreshMounts. Add a mid-turn worktree event; verify its model note waits until settlement and pi does not auto-move."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > a worktree added during a turn waits for the turn to end before telling Claude and moving it"
+      ],
+      "note": "A worktree attached while pi's turn runs is mounted at once, but the model's note is added (per the debug log, not just pi's queue) only once the turn ends; pi is not moved, as it keeps one directory per session."
     },
     {
       "upstream": "sharing/join.test.ts > joining > an incompatible recording contract refuses join before any transition, mount, or clear",
-      "status": "missing",
-      "note": "Contract range parsing is unit-tested, but the join ordering is not. Invoke join against an incompatible CLI and assert no target session file, binding, mount, switch, or watch."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > an incompatible recording contract refuses join before any transition, mount, or clear"
+      ],
+      "note": "Contract 0..0: the notice says to update Delta; the session, its binding, mounts, watch and prepared sessions are untouched."
     },
     {
       "upstream": "sharing/join.test.ts > joining > an invalid join locator (invalid_reference) suggests the share link, not the same locator",
-      "status": "missing",
-      "note": "Inject an invalid_reference status error; assert the notice recommends a share link, does not recommend retrying the invalid locator, and leaves session and mounts untouched."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > an invalid join locator (invalid_reference) suggests the share link, not the same locator"
+      ],
+      "note": "Status answers invalid_reference: the notice recommends the share link and not retrying the locator; nothing switches, mounts or is prepared."
     },
     {
       "upstream": "sharing/join.test.ts > joining > an invalid join locator (invalid_worktree_reference) suggests the share link, not the same locator",
-      "status": "missing",
-      "note": "Exercise invalid_reference with reason invalid_worktree_reference and assert the same preserved-session/share-link advice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > an invalid join locator (invalid_worktree_reference) suggests the share link, not the same locator"
+      ],
+      "note": "Status answers invalid_reference with reason invalid_worktree_reference: the same advice, and nothing changes."
     },
     {
       "upstream": "sharing/join.test.ts > joining > an opening line the person changed before sending goes to Claude and the thread as they wrote it",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off and no opening line: pi's switch sends no prompt."
     },
     {
       "upstream": "sharing/join.test.ts > joining > another session in a joined thread's mount is refused before it snapshots, creates, or attaches",
-      "status": "missing",
-      "note": "Start an unbound pi session in a stored joined mount and attempt sharing. Assert joinedBindingAt refusal occurs before snapshot/create/attach and does not block ordinary local prompts."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > another session in a joined thread's mount is refused before it snapshots, creates, or attaches"
+      ],
+      "note": "/new in the joined thread's folder (a Git checkout, as Delta's are), then /delta share: refused naming /delta-join <link>, with no retry or saved-records advice, no create/attach/share and no binding; a prompt still runs."
     },
     {
       "upstream": "sharing/join.test.ts > joining > background agents refuse join before any native side effect",
       "status": "not-applicable",
-      "note": "Requires Claude's host agent/teammate inventory. Pi subagents are independent processes and the extension API has no equivalent list of managed background teammates."
+      "note": "pi's extension API has no inventory of running background agents or teammates to refuse on (Claude's host.agent.list); pi has none built in, and subagents are separate pi processes. The join already refuses while pi is not idle (… > busy and pending transitions refuse prompts and repeated join commands)."
     },
     {
       "upstream": "sharing/join.test.ts > joining > busy and pending transitions refuse prompts and repeated join commands",
-      "status": "missing",
-      "note": "Test busy pi runs, requests.join, replacement runtime.joining, refused prompts, and repeated commands. Existing e2e joins are idle happy paths."
+      "status": "ported",
+      "ours": ["test/behaviour/join.test.ts > busy and pending transitions refuse prompts and repeated join commands"],
+      "note": "A join while pi's turn runs is refused before any Delta command; while a join waits on Delta, a second /delta-join and a prompt are refused and nothing reaches the model; the join then finishes with one --join mount."
     },
     {
       "upstream": "sharing/join.test.ts > joining > ending the fresh session during status cannot bind, watch, or add rows to its replacement",
-      "status": "missing",
-      "note": "Hold completeJoinTransition checkout status, end/switch the target session, then release it. Assert the saved incomplete transition remains and the replacement gets no binding, watch, remote row, or success notice."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > ending the fresh session during status cannot bind, watch, or add rows to its replacement"
+      ],
+      "note": "The switched-into session's mount check (its status read) is held; /new replaces it; once released, its saved transition remains, the replacement has no binding, watch or rows, keeps its directory, and no join is announced."
     },
     {
       "upstream": "sharing/join.test.ts > joining > joining a different canonical thread preserves the previous joined producer",
-      "status": "missing",
-      "note": "Join a second canonical thread while the first has pending records; verify a fresh target, preserved first binding/outbox, independent producer sequences, and no export/attach."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > joining a different canonical thread preserves the previous joined producer"
+      ],
+      "note": "From a joined session with undelivered records, /delta-join another thread switches to a new session bound to it (next 1, no pending, another folder); the first binding, its pending records and outbox files stay; nothing is exported, created, shared or attached."
     },
     {
       "upstream": "sharing/join.test.ts > joining > malformed watch output surfaces failure and reconnects",
-      "status": "missing",
-      "note": "thread-commands.test.ts rejects malformed events, but no joined lifecycle test asserts interruption notices, prompt refusal, reconnect, and later acceptance."
+      "status": "ported",
+      "ours": ["test/behaviour/join.test.ts > malformed watch output surfaces failure and reconnects"],
+      "note": "A malformed item line drops the watch with a 'Connection interrupted' notice and a refused prompt; the bad line is a one-off (world().forgetRemote), and after a second the reconnected watch accepts and records a prompt."
     },
     {
       "upstream": "sharing/join.test.ts > joining > queued lifecycle survives disconnect and reconnect without replaying a prompt",
-      "status": "missing",
-      "note": "Disconnect a participating joined watch while start/finish records are queued; assert pi aborts, completion is persisted once, reconnect drains the queue, and no prompt is replayed."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > queued lifecycle survives disconnect and reconnect without replaying a prompt"
+      ],
+      "note": "With appends offline, the watch drops mid-turn: pi's turn is stopped, its start and end are saved, and once Delta is back the thread holds exactly one start and one end and one user message, and the model was asked once."
     },
     {
       "upstream": "sharing/join.test.ts > joining > resume mounts again, moves Claude from its launch directory, and records only new rows",
-      "status": "missing",
-      "note": "Adapt to resuming the joined pi session file, whose header supplies cwd; assert remount without --join, preserved producer/receipts, no history re-export or attach/share, and only new activity recorded. The existing session-resume e2e test covers an owned checkout, not a joined thread."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > resume mounts again, moves Claude from its launch directory, and records only new rows"
+      ],
+      "note": "pi resumes the session in the folder its file names, so there is no move: a new pi process remounts without --join while prompts wait (band: restoring), the binding is unchanged, only the new turn is recorded, /delta share points to /delta-join, and resuming again mounts again. Resuming outside the folder is refused (see the Windows test)."
     },
     {
       "upstream": "sharing/join.test.ts > joining > same-thread recovery interrupted during status preserves the replacement session and its live watcher",
-      "status": "missing",
-      "note": "Hold recovery status, replace the pi session, then resolve the obsolete status; assert no stale mount/watch/state/UI work reaches the replacement."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > same-thread recovery interrupted during status preserves the replacement session and its live watcher"
+      ],
+      "note": "A /delta-join reconnect is held at its mount check; the person leaves and resumes the joined session, which restores and watches again; the stale recovery then runs no command, adds no row and leaves the binding and watch alone, and a prompt is accepted."
     },
     {
       "upstream": "sharing/join.test.ts > joining > session end for clear keeps the session's mounts",
-      "status": "not-applicable",
-      "note": "Claude clear intentionally leaves mounts alive during the plugin's same-runtime clear/cd transition. Pi has no such clear phase: it mounts for a fresh target ID before switch and releases outgoing-session mounts on shutdown."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/join.test.ts > the switch a join makes ends the previous session without releasing the joined session's mounts"
+      ],
+      "note": "pi has no /clear; the session end that is the join's own transition is the switch, which ends the session the join started from. The mount it made stays mounted for the joined session, which owns it."
     },
     {
       "upstream": "sharing/join.test.ts > joining > terminal joins in a fresh session and separate exact mount without exporting, attaching, publishing, or executing",
@@ -2760,38 +2820,50 @@
     },
     {
       "upstream": "sharing/join.test.ts > joining > terminal: a refused cd surfaces partial progress without enabling participation in the old cwd",
-      "status": "not-applicable",
-      "note": "The literal scenario requires Claude's /cd command and folder-move trust refusal. Pi uses a new session with header cwd, not an in-session /cd. Applicable incomplete-transition retry safety is inventoried separately."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > terminal: a refused cd surfaces partial progress without enabling participation in the old cwd"
+      ],
+      "note": "pi's counterpart of a refused /cd: pi opens the join's session where it already is (its terminal does this when the session's folder is missing; the kit's nextSwitch { cwd }). The transition stays saved, prompts and /delta share are refused with no command run, a restart there stays blocked naming the folder, another link is refused, and opened in the folder the session finishes the join with two mounts in all."
     },
     {
       "upstream": "sharing/join.test.ts > joining > terminal: a refused clear surfaces partial progress without enabling participation in the old cwd",
-      "status": "missing",
-      "note": "Port the safety behavior using cancelled/rejected pi switchSession rather than /clear. Assert original session preserved, target mount/artifacts cleaned up, explicit failure, and no participation in the wrong directory."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > terminal: a refused clear surfaces partial progress without enabling participation in the old cwd"
+      ],
+      "note": "pi refuses the switch (its counterpart of a refused /clear): the failure is shown in the transcript and band, the session, its directory and store are as they were, nothing is watched, the mount is released, nothing is prepared, and a prompt runs unrecorded."
     },
     {
       "upstream": "sharing/join.test.ts > joining > terminal: repeated join aliases preserve the existing producer and pending immutable records, then deliver once",
-      "status": "missing",
-      "note": "Exercise reconnect by canonical thread ID/share alias with queued records. Assert identical producer, next sequence, execution associations, outbox bytes, remote ledger, session ID, and no duplicated delivery."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > terminal: repeated join aliases preserve the existing producer and pending immutable records, then deliver once"
+      ],
+      "note": "With records queued offline and a known item in the ledger, /delta-join by thread ID leaves the session, binding, outbox files, thread and ledger unchanged and runs only sign-in, mount, status, watch and append; by share ID with Delta back, the queue is delivered once, the binding is the same with nothing pending, and the band is live."
     },
     {
       "upstream": "sharing/join.test.ts > joining > the offering tab exiting releases a hand-off no session joined",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off for an offering tab to release; a join pi never switches into releases its mount at once."
     },
     {
       "upstream": "sharing/join.test.ts > joining > the session started in the thread's folder joins before its opening line, which becomes a one-word turn the thread never records",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off and no opening line: pi's switch sends no prompt, and the session it opens finishes joining before its first prompt."
     },
     {
       "upstream": "sharing/join.test.ts > joining > where the plugin cannot open the link itself, the transcript carries it for the person to open",
-      "status": "unsupported",
-      "note": "Claude Code Desktop's hand-off of a join to a new Desktop session is not ported (README, Not ported)."
+      "status": "not-applicable",
+      "note": "pi has no Claude Code Desktop surface: its ExtensionCommandContext can only replace the session in the same pi process (newSession, fork, switchSession), and pi has no link or API that opens another pi session or window for the person to confirm. The port's join switches this pi straight into a session in the thread's folder on every surface (test/behaviour/join.test.ts > /delta-join mounts a shared thread and continues in a new session in the thread's folder), so there is no hand-off link to open."
     },
     {
       "upstream": "sharing/join.test.ts > joining > worktrees added and removed live update the mounts, tell Claude and the person, and move Claude to the thread folder once",
-      "status": "missing",
-      "note": "Port additions/removals, unchanged reconnect lists, remount counts, binding updates, and model/person notices. Replace the final automatic move assertion with README's pi adaptation: keep cwd and advise /delta-join."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/join.test.ts > worktrees added and removed live update the mounts, tell Claude and the person, and move Claude to the thread folder once"
+      ],
+      "note": "A reconnect's unchanged list remounts nothing; worktrees added and detached live remount without --join, update the binding and tell the model each change. As pi keeps one directory per session, the session is not moved: the band says /delta-join opens the thread folder (PARITY.md's known difference)."
     },
     {
       "upstream": "sharing/lifecycle.test.ts > join checks every required built-in, not commands with matching plugin names",
