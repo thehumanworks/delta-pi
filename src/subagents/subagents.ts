@@ -288,6 +288,7 @@ export function followChildTurn(host: Host, session: string) {
       if (stopped) return
       const turn = event.type === 'producer.turn' ? event : event.type === 'ready' ? event.producer?.turn : undefined
       if (turn?.sequence === sequence && turn.status === 'superseded') {
+        await markTakenOver(host, session, sequence)
         await loseExecution(host, session, sequence, "Someone took this subagent's thread over in Delta")
         return
       }
@@ -298,6 +299,19 @@ export function followChildTurn(host: Host, session: string) {
       watch.stop()
       if (turnWatch === watch) turnWatch = undefined
     })
+}
+
+/**
+ * Remember that Delta took the subagent's turn `sequence` over, so the session that runs the thread
+ * knows its run ended for that, and waits on Delta's turn instead. Nothing is kept for a session that
+ * is not a subagent.
+ */
+export async function markTakenOver(host: Host, session: string, sequence: number) {
+  await serial(async () => {
+    const binding = await load(host, session)
+    if (binding.child && binding.child.takenOver !== sequence)
+      await save(host, { ...binding, child: { ...binding.child, takenOver: sequence } })
+  }).catch((error: unknown) => host.ui.debug(`Delta could not note the subagent's takeover: ${errorText(error)}`))
 }
 
 /** Stop following the subagent's turn, as when it ends. */

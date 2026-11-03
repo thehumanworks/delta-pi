@@ -21,10 +21,12 @@ import type { Platform } from '../../src/core/host.ts'
 /** What the model answers: text, tool calls, and how its reply ended. */
 export type Reply = {
   text?: string
-  calls?: { name: 'bash' | 'write'; arguments: Record<string, unknown> }[]
+  /** Calls of pi's `bash` and `write`, or of a tool an extension registered. */
+  calls?: { name: string; arguments: Record<string, unknown> }[]
   stopReason?: 'stop' | 'length' | 'error'
 }
-export type Model = (messages: AgentMessage[]) => Reply | Promise<Reply>
+/** The model answers the conversation so far; `signal` is aborted when the run is. */
+export type Model = (messages: AgentMessage[], signal: AbortSignal) => Reply | Promise<Reply>
 
 /** The end-to-end tests' faux model: `run <command>` runs it, `write <path> <text>` writes, anything else is echoed. */
 export const echoModel: Model = (messages) => {
@@ -46,6 +48,19 @@ export type Answer = string | undefined | ((dialog: Dialog) => string | undefine
 type Entry = { type: string; id: string; parentId: string | null; timestamp: string; [field: string]: unknown }
 type Handler = (event: Record<string, unknown>, ctx: unknown) => unknown
 type Command = { handler: (args: string, ctx: unknown) => Promise<void> }
+type ToolResult = { content: { type: string; text?: string }[]; isError?: boolean; details?: unknown }
+/** A tool an extension registered, as pi calls it. */
+type Tool = {
+  name: string
+  defaultActive?: boolean
+  execute(
+    id: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+    onUpdate: (partial: ToolResult) => void,
+    ctx: unknown,
+  ): Promise<ToolResult>
+}
 
 /** A pi session: its ID, file, working directory and the entries pi committed. */
 export class FakeSession {
@@ -65,6 +80,7 @@ const STALE = 'This extension ctx is stale after session replacement or reload.'
 class Runtime {
   readonly handlers = new Map<string, Handler[]>()
   readonly commands = new Map<string, Command>()
+  readonly tools = new Map<string, Tool>()
   /** pi invalidates a runtime once its session_shutdown has run: its API and contexts then throw. */
   stale = false
   assertActive() {
@@ -83,6 +99,16 @@ export class FakePi {
   /** Text in the editor, where a refused prompt goes back. */
   editor = ''
   model: Model = echoModel
+  /** The tools declared to the model, as `getActiveTools` reports them. */
+  activeTools: string[] = ['read', 'bash', 'edit', 'write']
+  /** What the extension's tools returned and reported while they ran, by tool name. */
+  readonly toolResults: { name: string; result: ToolResult; updates: ToolResult[] }[] = []
+  /** Prompts the extension sent with `sendUserMessage`. */
+  readonly sentPrompts: string[] = []
+  /** Observers of pi's events, as pi's JSON mode prints them; `message_end` follows each commit. */
+  readonly observers: ((type: string, event: Record<string, unknown>) => void)[] = []
+  private controller = new AbortController()
+  private followUps: string[] = []
   session: FakeSession
   private runtime: Runtime | undefined
   private streaming = false
@@ -122,10 +148,10 @@ export class FakePi {
   }
 
   /** Submit a prompt as the person would, and wait for the run it starts, if any, to settle. */
-  async prompt(text: string): Promise<'handled' | 'steered' | 'settled'> {
+  async prompt(text: string, source: 'rpc' | 'extension' = 'rpc'): Promise<'handled' | 'steered' | 'settled'> {
     const result = await this.emit('input', {
       text,
-      source: 'rpc',
+      source,
       ...(this.streaming ? { streamingBehavior: 'steer' } : {}),
     })
     if (isObject(result) && result.action === 'handled') return 'handled'
@@ -136,6 +162,12 @@ export class FakePi {
     this.run = this.agentRun(user(text))
     await this.run
     return 'settled'
+  }
+
+  /** Stop the running agent turn, as pi's `abort` does. */
+  abort() {
+    this.aborted = true
+    this.controller.abort()
   }
 
   /** Start a prompt without waiting for its run; `settled` waits for it. */
@@ -270,14 +302,32 @@ export class FakePi {
   private async agentRun(first: AgentMessage) {
     this.streaming = true
     this.aborted = false
+    this.controller = new AbortController()
     await this.starting?.()
+    // pi prepares the run, then adds what before_agent_start handlers return after its prompt.
+    const prepared = await this.emit('before_agent_start', {
+      messageType: 'user',
+      prompt: textOf((first as { content?: unknown }).content),
+      systemPrompt: '',
+    })
+    const added = isObject(prepared) && isObject(prepared.message) ? prepared.message : undefined
     await this.emit('agent_start', {})
     let next = [first]
     for (let turn = 0; ; turn++) {
       await this.emit('turn_start', { turnIndex: turn })
       for (const message of next) await this.message(message)
+      if (turn === 0 && added)
+        this.append({
+          type: 'custom_message',
+          customType: added.customType,
+          content: added.content,
+          display: added.display,
+          details: added.details,
+        })
       await this.emit('context', { messages: this.messages() })
-      const reply: Reply = this.aborted ? { stopReason: 'stop' } : await this.model(this.messages())
+      const reply: Reply = this.aborted
+        ? { stopReason: 'stop' }
+        : await this.model(this.messages(), this.controller.signal)
       const assistant = this.assistant(reply)
       await this.message(assistant)
       const results: AgentMessage[] = []
@@ -306,6 +356,9 @@ export class FakePi {
     this.streaming = false
     for (const message of this.pendingShell.splice(0)) this.append({ type: 'message', message })
     await this.emit('agent_settled', { aborted: this.aborted })
+    // A follow-up the extension queued while the run went on starts the next run.
+    const followUp = this.followUps.shift()
+    if (followUp !== undefined) this.run = this.prompt(followUp, 'extension').then(() => {})
   }
 
   /** A message's start and end; pi commits what the end handlers leave. */
@@ -321,6 +374,7 @@ export class FakePi {
       }
     }
     this.append({ type: 'message', message: current })
+    for (const observe of this.observers) observe('message_end', { message: current })
   }
 
   private assistant(reply: Reply): AgentMessage {
@@ -346,6 +400,30 @@ export class FakePi {
   }
 
   private async execute(call: ToolCallBlock): Promise<AgentMessage> {
+    const tool = this.runtime?.tools.get(call.name)
+    if (tool) {
+      const updates: ToolResult[] = []
+      let result: ToolResult
+      try {
+        result = await tool.execute(
+          call.id,
+          call.arguments,
+          this.controller.signal,
+          (partial) => updates.push(partial),
+          this.context(),
+        )
+      } catch (error) {
+        result = {
+          content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
+          isError: true,
+        }
+      }
+      this.toolResults.push({ name: call.name, result, updates })
+      const text = result.content
+        .flatMap((block) => (block.type === 'text' && block.text ? [block.text] : []))
+        .join('\n')
+      return toolResult(call, text, !!result.isError)
+    }
     if (call.name === 'bash') {
       const { stdout, code } = await sh(String(call.arguments.command), this.session.cwd, this.environment())
       return toolResult(call, stdout, code !== 0)
@@ -357,6 +435,7 @@ export class FakePi {
   }
 
   private async emit(type: string, event: Record<string, unknown>): Promise<unknown> {
+    for (const observe of this.observers) observe(type, event)
     let result: unknown
     for (const handler of this.runtime?.handlers.get(type) ?? []) {
       try {
@@ -386,8 +465,14 @@ export class FakePi {
       getEditorText: () => this.editor,
       setEditorText: (text: string) => (this.editor = text),
     }
-    const abort = () => (this.aborted = true)
+    const abort = () => this.abort()
+    const controller = () => this.controller
     return {
+      model: { provider: 'faux', id: 'faux-1' },
+      thinkingLevel: 'off',
+      get signal() {
+        return streaming() ? controller().signal : undefined
+      },
       get cwd() {
         active()
         return session.cwd
@@ -485,6 +570,26 @@ export class FakePi {
       getSessionName: () => {
         runtime.assertActive()
         return this.session.name
+      },
+      registerTool: (tool: Tool) => {
+        runtime.assertActive()
+        runtime.tools.set(tool.name, tool)
+        if (tool.defaultActive !== false && !this.activeTools.includes(tool.name)) this.activeTools.push(tool.name)
+      },
+      getActiveTools: () => {
+        runtime.assertActive()
+        return [...this.activeTools]
+      },
+      setActiveTools: (names: string[]) => {
+        runtime.assertActive()
+        this.activeTools = [...names]
+      },
+      sendUserMessage: (text: string, options?: { deliverAs?: 'steer' | 'followUp' }) => {
+        runtime.assertActive()
+        this.sentPrompts.push(text)
+        if (!this.streaming) this.run = this.prompt(text, 'extension').then(() => {})
+        else if (options?.deliverAs === 'followUp') this.followUps.push(text)
+        else this.steering.push(text)
       },
     }
     return api as unknown as ExtensionAPI

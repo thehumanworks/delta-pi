@@ -13,6 +13,7 @@ import {
   type RunInit,
   type RunResult,
   spawn,
+  type SpawnInit,
 } from '../../src/core/process.ts'
 import { fakeDelta, type FakeIo } from '../fake-delta/cli.ts'
 
@@ -30,9 +31,16 @@ export type FakeProgram = (
   init: RunInit & { env: Record<string, string> },
 ) => RunResult | undefined | Promise<RunResult | undefined>
 
+/**
+ * A long-running program a test stands in for, by its name (`pi`): it answers each start with a
+ * stream, or, returning undefined, lets the real program start.
+ */
+export type FakeStream = (init: SpawnInit & { env: Record<string, string> }) => ProcessStream | undefined
+
 export function kitProcesses(
   environment: () => Environment,
   programs: Map<string, FakeProgram> = new Map(),
+  streams: Map<string, FakeStream> = new Map(),
 ): Host['process'] & { ran: Ran[]; others: Ran[]; busy(): number; stopAll(): Promise<void> } {
   const ran: Ran[] = []
   /** The other programs the extension ran, real or faked. */
@@ -79,7 +87,11 @@ export function kitProcesses(
     },
     spawn(init) {
       const env = merged(init.env)
-      if (!isDelta(init.argv)) return spawn({ ...init, env })
+      if (!isDelta(init.argv)) {
+        others.push({ argv: init.argv, env })
+        const fake = init.argv[0] === undefined ? undefined : streams.get(basename(init.argv[0]))
+        return fake?.({ ...init, env }) ?? spawn({ ...init, env })
+      }
       ran.push({ argv: init.argv, env })
       const stream = deltaStream(init.argv.slice(1), env)
       live.add(stream)
@@ -166,6 +178,13 @@ function deltaStream(args: string[], env: Record<string, string>): ProcessStream
         wake()
       }
       return { done: true, value: exit }
+    },
+    // A fake command keeps nothing to report as it stops, so it stops as at once.
+    terminate() {
+      if (exit) return
+      exit = { code: null, signal: 'SIGTERM' }
+      stop?.()
+      wake()
     },
   }
 }

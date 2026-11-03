@@ -5,7 +5,7 @@
  * Copyright (C) 2026 Zed Industries. Licensed under the GNU Affero General Public License, version 3
  * only (AGPL-3.0-only); see LICENSE.
  */
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -18,6 +18,7 @@ import {
   SessionManager,
   VERSION,
 } from '@earendil-works/pi-coding-agent'
+import { Type } from '@earendil-works/pi-ai'
 import type { TUI } from '@earendil-works/pi-tui'
 import { systemClock } from './src/core/clock.ts'
 import { piVersionWarning } from './src/core/compatibility.ts'
@@ -72,16 +73,48 @@ import {
 import { TYPE_SOMETHING } from './src/setup/setup.ts'
 import { releaseOnEnd } from './src/sharing/join.ts'
 import { stopChildTurn, withdrawParent } from './src/subagents/subagents.ts'
+import { THREAD_TOOL } from './src/subagents/delta-threads.ts'
+import {
+  canRunThreads,
+  endThreadRuns,
+  forgetThreadNotes,
+  messageThread,
+  takeHandoff,
+} from './src/subagents/thread-runs.ts'
+import { deliverNote } from './src/watch/rows.ts'
 import { startPluginUpdates, stopPluginUpdates } from './src/updates/updates.ts'
 import type { RemoteDisplay } from './src/watch/rows.ts'
 import { stopWatching } from './src/watch/watch.ts'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { name: string; version: string }
+/**
+ * How long a subagent's pi, asked to stop, waits for its stopped run to settle, and for an automatic
+ * activation, at its end; with its records' bounded delivery (5 s) it stays well inside the time the
+ * session that stops it gives it (`TERMINATE_GRACE_MS`, 20 s).
+ */
+const SUBAGENT_SETTLE_MS = 3_000
+const SUBAGENT_ACTIVATION_MS = 2_000
 /** The custom entry type of the notes Delta leaves for the person. */
 const NOTE_ENTRY = 'delta-note'
 /** The debug log moves aside to `debug.log.1` past this size. */
 const DEBUG_LOG_LIMIT = 2 * 1024 * 1024
+
+/**
+ * How this pi was started, so a subagent starts the same way: the script node runs, when there is one
+ * (as for npm's `pi`), else the program itself, or `pi` from the PATH.
+ */
+function piLaunch() {
+  const script = process.argv[1]
+  const generic = /^(node|bun)(\.exe)?$/i.test(process.execPath.split(/[\\/]/).at(-1) ?? '')
+  const command =
+    script && !script.startsWith('/$bunfs/') && existsSync(script)
+      ? [process.execPath, script]
+      : generic
+        ? ['pi']
+        : [process.execPath]
+  return { command, args: process.argv.slice(2), cwd: process.cwd() }
+}
 
 /** The machine pi runs on, as the extension uses it. */
 export function nodePlatform(): Platform {
@@ -89,6 +122,7 @@ export function nodePlatform(): Platform {
     dataDir: join(getAgentDir(), 'delta'),
     clock: systemClock,
     process: { run, spawn },
+    launch: piLaunch(),
     env: {
       windows: () => process.platform === 'win32',
       get: (name) => process.env[name],
@@ -158,6 +192,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     clock: platform.clock,
     process: platform.process,
     store: fileStore(join(dataDir, 'store')),
+    launch: platform.launch,
     env: platform.env,
     session: {
       id: () => context?.sessionManager.getSessionId() ?? '',
@@ -249,6 +284,37 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   )
   pi.registerEntryRenderer<Note>(NOTE_ENTRY, (entry, _options, theme) => renderNote(entry.data, theme))
 
+  // Offered only where it can run, which `before_agent_start` decides before each run.
+  pi.registerTool({
+    name: THREAD_TOOL,
+    label: 'Delta thread',
+    description:
+      "Run another thread of this session's Delta conversation here as a subagent: send it a message, and it continues that thread in the thread's worktrees, recorded on that thread, then answers. Name the thread by its name as Delta shows it, its thread id, its reference, or a Delta link. Returns the thread's reply.",
+    promptSnippet: 'Run another thread of this Delta conversation here as a subagent',
+    parameters: Type.Object({
+      thread: Type.String({
+        description: "The thread's name as Delta shows it, its thread id, its reference, or a Delta link",
+      }),
+      message: Type.String({ description: 'The message to send the thread' }),
+    }),
+    defaultActive: false,
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      context = ctx
+      const reply = await messageThread(host, params.thread, params.message, {
+        signal,
+        progress: (text) => onUpdate?.({ content: [{ type: 'text', text }], details: undefined }),
+        model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
+        thinking: ctx.thinkingLevel,
+      })
+      return {
+        content: [{ type: 'text', text: reply.text }],
+        details: reply.details,
+        ...(reply.usage ? { usage: reply.usage } : {}),
+        ...(reply.isError ? { isError: true } : {}),
+      }
+    },
+  })
+
   /** Run a `/delta` action and show what it answered. */
   const answer = async (action: Promise<{ text?: string }>) => {
     try {
@@ -331,6 +397,12 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     try {
       const refusal = await admitPrompt(host, event.text, event.streamingBehavior !== undefined)
       if (refusal === undefined) return { action: 'continue' }
+      // A Delta thread's reply the extension hands pi as a prompt reaches the model as context instead.
+      if (event.source === 'extension' && event.text.startsWith('[Delta] ')) {
+        debug(`A Delta thread's reply could not start a turn (${refusal}); it is added as context.`)
+        await deliverNote(host, ctx.sessionManager.getSessionId(), event.text)
+        return { action: 'handled' }
+      }
       refuse(ctx, event.text, refusal, 'warning')
     } catch (error) {
       refuse(
@@ -357,8 +429,27 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   // Before each model request, which follows the prompt or tool results it answers.
   pi.on('context', recordFrom)
 
+  pi.on('before_agent_start', async (_event, ctx) => {
+    context = ctx
+    const session = ctx.sessionManager.getSessionId()
+    const active = pi.getActiveTools()
+    const offered = canRunThreads(host, session)
+    if (offered !== active.includes(THREAD_TOOL))
+      pi.setActiveTools(offered ? [...active, THREAD_TOOL] : active.filter((name) => name !== THREAD_TOOL))
+    // A thread run by another session adds the thread's history its parent left for this run, which
+    // pi places after the prompt; taking it also tells the parent this run is recorded.
+    if (!stateFor(session).binding?.child?.adopted) return
+    const handoff = await takeHandoff(host, session)
+    if (!handoff?.note) return
+    return {
+      message: { customType: REMOTE_MESSAGE, content: handoff.note, display: false, details: { kind: 'context' } },
+    }
+  })
+
   /** How many messages the session held when the run in progress started. */
   let runStart = 0
+  /** A stopping subagent waits for its aborted run to settle. */
+  const settled: (() => void)[] = []
   pi.on('agent_start', async (_event, ctx) => {
     context = ctx
     // Shell commands run between turns belong before the turn that starts now.
@@ -387,19 +478,32 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     await completeTurn(host, stop)
     // pi may have switched sessions meanwhile, which makes ctx stale; the title is the session's own.
     if (context === ctx) await recordTitle(host, session)
+    for (const resolve of settled.splice(0)) resolve()
   })
 
   pi.on('session_shutdown', async (event, ctx) => {
     context = ctx
     const session = ctx.sessionManager.getSessionId()
+    const child = !!stateFor(session).binding?.child
+    // pi tells a stopping subagent of its end before it stops the run, so the run would go on working
+    // meanwhile: it is stopped here, and its turn recorded as cancelled once it settles.
+    if (child && !ctx.isIdle()) {
+      const settling = new Promise<void>((resolve) => settled.push(resolve))
+      ctx.abort()
+      await Promise.race([settling, host.clock.sleep(SUBAGENT_SETTLE_MS).catch(() => {})])
+      if (stateFor(session).currentTurnId !== undefined) await completeTurn(host, 'cancelled')
+    }
     await recordCommitted(host)
     stopPluginUpdates()
     stopChildTurn()
+    // The threads this session runs stop first, and their mounts go only once they have exited.
+    await endThreadRuns(host, session, stateFor(session).binding)
+    forgetThreadNotes(session)
     // Records still queued get a bounded chance to reach Delta before pi switches or exits, once an
     // automatic activation still connecting the session has finished; the outbox keeps whatever is
     // left for the session's next activation.
     if (activation.session === session) {
-      await settleActivation(host, session, 10_000)
+      await settleActivation(host, session, child ? SUBAGENT_ACTIVATION_MS : 10_000)
       // Records a failed write kept in memory go to the outbox first; this runtime ends with the session.
       await flushUnsaved(host, session).catch((error: unknown) =>
         debug(`Delta records not yet saved were lost with the session: ${errorText(error)}`),

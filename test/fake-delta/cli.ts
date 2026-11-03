@@ -98,6 +98,14 @@ function takeAnswer(args: string[], io: FakeIo): FakeAnswer | undefined {
   return value
 }
 
+/**
+ * The actor Delta records a producer's output as, which its items' `author.actor_id` names: one per
+ * external ID here, so a test can write a producer's own items.
+ */
+export function actorOf(external: string | undefined): string | null {
+  return external ? `actor-${external}` : null
+}
+
 /** Ends a run of the fake with an exit code. */
 class Exit extends Error {
   code: number
@@ -428,7 +436,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         producer: {
           source,
           external_id: external,
-          actor_id: null,
+          actor_id: actorOf(external),
           next_sequence: producer?.thread === thread.thread_id ? producer.next : 1,
           turn: null,
         },
@@ -533,7 +541,13 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         type: 'ready',
         thread_id: thread.thread_id,
         producer: source
-          ? { source, external_id: external, actor_id: null, next_sequence: producer?.next ?? 1, turn: null }
+          ? {
+              source,
+              external_id: external,
+              actor_id: actorOf(external),
+              next_sequence: producer?.next ?? 1,
+              turn: null,
+            }
           : null,
       })
       const eventsPath = join(root, `events-${thread.thread_id}.jsonl`)

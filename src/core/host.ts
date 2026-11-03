@@ -7,6 +7,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import type { Clock } from './clock.ts'
 import type { ProcessStream, RunInit, RunResult, SpawnInit } from './process.ts'
 import type { Store } from './store.ts'
+import type { Launch } from '../subagents/pi-child.ts'
 
 /** One answer a question offers, with a short hint shown beside it. */
 export type AskRequest = {
@@ -31,6 +32,8 @@ export type Host = {
     spawn(init: SpawnInit): ProcessStream
   }
   store: Store
+  /** How this pi was started, so a Delta thread it runs as a subagent starts the same way. */
+  launch: Launch
   env: {
     windows(): boolean
     /** An environment variable of this pi process, which the programs it starts inherit. */
@@ -102,6 +105,7 @@ export type Platform = {
   dataDir: string
   clock: Clock
   process: Host['process']
+  launch: Launch
   env: Host['env']
   /** Write to the terminal's error stream, which print mode shows. */
   stderr(text: string): void

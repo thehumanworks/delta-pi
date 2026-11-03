@@ -56,6 +56,7 @@ import {
   ensureChildThread,
   exportParent,
   followChildTurn,
+  markTakenOver,
   stopChildTurn,
 } from '../subagents/subagents.ts'
 import { beginShare } from '../sharing/share.ts'
@@ -352,9 +353,9 @@ async function drainPending(host: Host, session: string): Promise<boolean> {
     // on the stop, so a slow or failed abort cannot hold up the outbox.
     const running = binding.execution?.sequence
     if (running !== undefined && fenced.includes(running))
-      void loseExecution(host, session, running, 'Shared execution was superseded').catch((error: unknown) =>
-        report(host, error),
-      )
+      void markTakenOver(host, session, running)
+        .then(() => loseExecution(host, session, running, 'Shared execution was superseded'))
+        .catch((error: unknown) => report(host, error))
     if (failure) throw failure
   }
   return false

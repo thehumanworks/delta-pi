@@ -16,11 +16,11 @@ import { flush, MockClock } from './clock.ts'
 import { type Answer, FakePi, type FakeSession } from './pi.ts'
 import { fileStore } from '../../src/core/store.ts'
 import { disk } from './disk.ts'
-import { type Environment, type FakeProgram, kitProcesses } from './processes.ts'
+import { type Environment, type FakeProgram, type FakeStream, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
 export { echoModel, FakeSession, type Model, type Reply } from './pi.ts'
-export type { FakeProgram } from './processes.ts'
+export type { FakeProgram, FakeStream } from './processes.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
 
@@ -41,6 +41,8 @@ export async function startDelta(
     start?: boolean
     /** Whether the machine is Windows, as `Platform.env.windows` tells the extension. */
     windows?: boolean
+    /** The arguments pi was started with, as a subagent it starts keeps some of them. */
+    args?: string[]
   } = {},
 ) {
   const w = options.world ?? world({ ...(options.policy ? { policy: options.policy } : {}) })
@@ -56,13 +58,16 @@ export async function startDelta(
     ...options.env,
   }
   const programs = new Map<string, FakeProgram>()
-  const processes = kitProcesses(() => env, programs)
+  const streams = new Map<string, FakeStream>()
+  const processes = kitProcesses(() => env, programs, streams)
   const stderr: string[] = []
   const copied: string[] = []
   const platform: Platform = {
     dataDir: join(w.agentDir, 'delta'),
     clock,
     process: processes,
+    // A subagent this pi starts is the fake `pi` a test stands in for (`kit.spawned`).
+    launch: { command: ['pi'], args: options.args ?? [], cwd: options.cwd ?? w.checkout },
     env: {
       windows: () => options.windows ?? false,
       get: (name) => env[name],
@@ -95,6 +100,8 @@ export async function startDelta(
      * Every other program runs for real.
      */
     programs,
+    /** Long-running programs other than `delta` a test stands in for, by name, such as a subagent's `pi`. */
+    streams,
     /** The other programs the extension ran, as full argument lists. */
     others: () => processes.others.map((call) => call.argv),
     /** The delta commands the extension ran, as argument lists without the program. */
