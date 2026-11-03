@@ -282,3 +282,64 @@ test("a subagent's run ends only once Delta stops syncing the worktree Claude ma
   await ending
   expect(mountState(sub, own)).toBe('waiting')
 })
+
+test("a nested subagent's thread is under its parent subagent's, which prompts it, and shares that parent's checkout", async () => {
+  const root = await parent()
+  const own = worktree(root, join(root.world.base, 'feature'))
+  const sub = await child(root, { cwd: own })
+  // The subagent starts a subagent of its own in its worktree, and waits for it.
+  let nested: Kit | undefined
+  sub.pi.model = async (messages) => {
+    if (messages.at(-1)?.role !== 'user') return { text: 'Done.' }
+    nested = await child(sub, { cwd: own })
+    await nested.pi.prompt('check the lexer')
+    return { text: 'The lexer is fine.' }
+  }
+  await sub.pi.prompt('inspect the parser')
+  const threads = () => Object.values(root.world.delta().threads)
+  const outer = await root.until(
+    () => threads().find((thread) => thread.parent === root.thread()?.thread_id && thread.records.some(idle)),
+    "the subagent's finished turn",
+  )
+  const inner = await root.until(
+    () => threads().find((thread) => thread.parent === outer.thread_id && thread.records.some(idle)),
+    "the nested subagent's finished turn",
+  )
+  // The subagent attached its own worktree; the nested one works there too, so it shares that worktree.
+  expect(outer.worktrees).toHaveLength(1)
+  expect(outer.worktrees).not.toEqual(root.thread()?.worktrees)
+  expect(inner.worktrees).toEqual(outer.worktrees)
+  const create = nested!.commands().find((args) => args[0] === 'thread' && args[1] === 'create')
+  expect(create).toContain('--shared-worktrees')
+  expect(create?.[create.indexOf('--parent') + 1]).toBe(outer.reference)
+  expect(nested!.commands().filter((args) => args[0] === 'worktree')).toEqual([])
+  // The subagent sent the nested one its prompt.
+  const prompt = inner.records.find((record: any) => record.update.sessionUpdate === 'user_message')
+  expect(prompt.update._meta.delta.sender).toEqual({ external_id: sub.pi.session.id })
+})
+
+test("a subagent's subagent that starts before that subagent's thread exists records under it once it does", async () => {
+  const root = await parent()
+  const sub = await child(root)
+  const release = root.world.hold('thread create')
+  void sub.pi.submit('inspect the parser')
+  await sub.until(
+    () => sub.commands().some((args) => args[0] === 'thread' && args[1] === 'create'),
+    "the subagent's thread to be created",
+  )
+  const nested = await child(sub)
+  await nested.pi.prompt('check the lexer')
+  // Its records wait for its parent's thread, rather than going under the session above.
+  expect(nested.commands().some((args) => args[0] === 'thread' && args[1] === 'create')).toBe(false)
+  release()
+  const outer = await root.until(() => childThread(root, idle), "the subagent's finished turn")
+  await nested.advance(60_000)
+  const inner = await root.until(
+    () =>
+      Object.values(root.world.delta().threads).find(
+        (thread) => thread.parent === outer.thread_id && thread.records.some(idle),
+      ),
+    "the nested subagent's finished turn",
+  )
+  expect(inner.name).toBe('check the lexer')
+})

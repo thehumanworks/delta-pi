@@ -126,6 +126,8 @@ export async function activate(host: Host, session: string, isCurrent = () => tr
         if (ownsActivation()) report(host, error)
         return
       }
+      // The subagents this one starts hang under it, even before its thread exists.
+      if (ownsActivation()) exportParent(host, binding)
       // A subagent that ended with its turn open, as when its process was stopped, closes that turn;
       // delivering it mounts the subagent's own checkout again.
       if (ownsActivation()) await recoverExecution(host, session)
