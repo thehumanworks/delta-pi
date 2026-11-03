@@ -15,7 +15,7 @@ afterEach(async () => {
 async function parent() {
   const kit = await startDelta({ policy: { mode: 'organization', organization: 'org-1' } })
   kits.push(kit)
-  await kit.until(() => kit.env.DELTA_PI_PARENT, 'the parent to export its thread')
+  await kit.until(() => kit.env.DELTA_PI_PARENT?.includes('"thread"'), 'the parent to export its thread')
   return kit
 }
 
@@ -178,8 +178,11 @@ test('a subagent whose checkout setup failed once is still followed for takeover
   )
 })
 
-/** Whether pi stopped the kit's turn for a takeover in Delta. */
-const stoppedTurn = (kit: Kit) => kit.pi.noticeTexts().filter((text) => text.includes("stopped pi's turn"))
+/** The notes saying pi stopped the kit's turn for a takeover in Delta; print mode writes them to stderr. */
+const stoppedTurn = (kit: Kit) =>
+  [...kit.pi.noticeTexts(), ...kit.stderr]
+    .filter((text) => text.includes("stopped pi's turn"))
+    .map((text) => text.trim())
 
 /** The binding the subagent's session saved. */
 const savedBinding = async (kit: Kit): Promise<any> => kit.store.get(`session:${kit.pi.session.id}`)
@@ -342,4 +345,116 @@ test("a subagent's subagent that starts before that subagent's thread exists rec
     "the nested subagent's finished turn",
   )
   expect(inner.name).toBe('check the lexer')
+})
+
+/** Dismiss the setup offer a session not recorded is shown. */
+const NOT_NOW = (dialog: { title: string }) => (dialog.title.includes('Set it up now?') ? 'Not now' : undefined)
+
+/** A session in a repository that does not sync on its own, not recorded until it is shared. */
+async function unrecorded() {
+  const kit = await startDelta({ answers: [NOT_NOW] })
+  kits.push(kit)
+  await kit.until(() => kit.pi.dialogs.length === 1, 'the setup offer')
+  return kit
+}
+
+/** Share the session, as `/delta share` with Zed does, and wait until it is shared. */
+async function share(kit: Kit) {
+  kit.pi.answers.push((dialog) =>
+    dialog.title.includes('Who should see this session?') ? 'Share with Zed' : undefined,
+  )
+  await kit.pi.command('delta', 'share')
+  await kit.until(() => kit.pi.noticeTexts().some((text) => text.startsWith('Delta: Shared')), 'the share to finish')
+}
+
+test('a subagent running when sharing starts stops when Delta takes it over, and its own checkout reaches Delta', async () => {
+  const root = await unrecorded()
+  const own = worktree(root, join(root.world.base, 'feature'))
+  // A subagent pi runs in a worktree of its own, as subagent extensions do, in print mode.
+  const sub = await startDelta({
+    world: root.world,
+    cwd: own,
+    mode: 'print',
+    env: { DELTA_PI_PARENT: root.env.DELTA_PI_PARENT! },
+  })
+  kits.push(sub)
+  root.world.fence(sub.pi.session.id, 1)
+  // It runs a command while its parent is shared, then works until pi stops it.
+  let shared!: () => void
+  const sharing = new Promise<void>((resolve) => (shared = resolve))
+  sub.pi.model = async (messages) => {
+    if (messages.at(-1)?.role !== 'user')
+      return sub.until(() => stoppedTurn(sub).length > 0 && { text: 'Stopped.' }, 'the subagent to stop')
+    await sharing
+    return { calls: [{ name: 'bash', arguments: { command: 'true' } }] }
+  }
+  const run = sub.pi.submit('fix the lexer')
+  await share(root)
+  shared()
+  await run
+  // Someone took it over in Delta as it began recording: its run stopped.
+  expect(stoppedTurn(sub)).toEqual([
+    "Someone took this subagent's thread over in Delta; stopped pi's turn. Tool effects already performed are not rolled back.",
+  ])
+  const thread = Object.values(root.world.delta().threads).find((candidate) => candidate.parent)
+  expect(thread?.parent).toBe(root.thread()?.thread_id)
+  expect(thread?.name).toBe('fix the lexer')
+  expect(sub.commands().find((args) => args[0] === 'thread' && args[1] === 'create')).not.toContain(
+    '--shared-worktrees',
+  )
+  // Its run ends in its own checkout: the mount stops, and the checkout stays attached to its thread.
+  await sub.stop()
+  kits.splice(kits.indexOf(sub), 1)
+  const tree = root.world.delta().worktrees.find((entry) => entry.directories.some((dir: any) => dir.directory === own))
+  expect(thread?.worktrees).toEqual([tree.reference])
+  expect(mountState(root, own)).toBe('waiting')
+})
+
+test("a subagent whose parent is shared while it runs records its run so far in that run's turn, and what ran before as history", async () => {
+  const root = await unrecorded()
+  const sub = await startDelta({
+    world: root.world,
+    mode: 'print',
+    env: { DELTA_PI_PARENT: root.env.DELTA_PI_PARENT! },
+  })
+  kits.push(sub)
+  await sub.pi.prompt('read the docs')
+  // Its next run is under way, waiting on its model, when its parent is shared.
+  let answer!: (text: string) => void
+  sub.pi.model = (messages) =>
+    messages.at(-1)?.role === 'user'
+      ? { calls: [{ name: 'bash', arguments: { command: 'echo tests pass' } }] }
+      : new Promise((resolve) => (answer = (text) => resolve({ text })))
+  const run = sub.pi.submit('run the tests')
+  await sub.until(() => answer, 'the run to wait on its model')
+  await share(root)
+  expect(Object.values(root.world.delta().threads).filter((thread) => thread.parent)).toEqual([])
+  answer('Tests pass.')
+  await run
+  const thread = await root.until(() => childThread(root, idle), "the subagent's finished run")
+  expect(thread.parent).toBe(root.thread()?.thread_id)
+  expect(thread.name).toBe('read the docs')
+  expect(thread.worktrees).toEqual(root.thread()?.worktrees)
+  const rows: unknown[][] = thread.records.map((record: any) => [
+    record.update.sessionUpdate,
+    record.update.state ?? record.update.content?.text ?? record.update.title ?? record.update.status,
+    record.turnSequence,
+  ])
+  // The run under way when its parent was shared is its turn; the one before is history. A prompt is its parent's.
+  const turn = thread.records.find((record: any) => record.update.state === 'running').turnSequence
+  expect(rows.filter((row) => row[2] === undefined).map((row) => row[0])).toEqual(['user_message', 'agent_message'])
+  expect(rows.filter((row) => row[2] === turn).map((row) => row[0])).toEqual([
+    'state_update',
+    'user_message',
+    'tool_call_update',
+    'tool_call_update',
+    'agent_message',
+    'state_update',
+  ])
+  expect(rows.at(-1)).toEqual(['state_update', 'idle', turn])
+  const prompts = thread.records.filter((record: any) => record.update.sessionUpdate === 'user_message')
+  expect(prompts.map((record: any) => record.update._meta.delta.sender)).toEqual([
+    { external_id: root.pi.session.id },
+    { external_id: root.pi.session.id },
+  ])
 })

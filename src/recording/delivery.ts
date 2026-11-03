@@ -912,6 +912,38 @@ export function recordFromNow(host: Host) {
 }
 
 /**
+ * Begin recording part way through the session, as a subagent does once the session that started it
+ * records: `adopt` makes the session recorded, then what pi committed so far is recorded, earlier runs
+ * as history and the run going on now, from its first message at `runStart`, in a turn of its own. It
+ * runs in order with the recording of committed messages, so nothing is recorded twice or missed.
+ */
+export function recordFromStart(
+  host: Host,
+  session: string,
+  runStart: number,
+  adopt: () => Promise<boolean>,
+): Promise<void> {
+  const step = recording.then(async () => {
+    if (!(await adopt())) return
+    const runtime = stateFor(session)
+    const turnId = runtime.currentTurnId
+    const committed = host.session.committed()
+    seenMessages = Math.max(seenMessages, committed.length)
+    const record = (id: string, message: AgentMessage) => recordMessage(host, message, `${session}:${id}`)
+    for (const { id, message } of turnId === undefined ? committed : committed.slice(0, runStart))
+      await record(id, message)
+    if (turnId !== undefined) {
+      await beginExecution(host, session, turnId)
+      for (const { id, message } of committed.slice(runStart)) await record(id, message)
+    }
+    void drain(host, session).catch((error: unknown) => report(host, error))
+    if (turnId !== undefined && runtime.binding?.child) followChildTurn(host, session)
+  })
+  recording = step.catch(() => {})
+  return step
+}
+
+/**
  * Record, in order, each message pi committed to the session since the last call. Pi commits a message
  * once every extension's `message_end` has run, so this records what the session keeps, as any
  * extension redacted or replaced it, and the shell commands the person ran, which have no `message_end`.

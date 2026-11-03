@@ -58,7 +58,13 @@ import {
 } from './src/recording/delivery.ts'
 import { admitPrompt } from './src/recording/prompt.ts'
 import { recordTitle } from './src/recording/title.ts'
-import { beginSession, forgetSessionStart, settleActivation, useDataDirectory } from './src/setup/activation.ts'
+import {
+  beginSession,
+  forgetSessionStart,
+  recordUnderParent,
+  settleActivation,
+  useDataDirectory,
+} from './src/setup/activation.ts'
 import {
   COMMANDS,
   DELTA_USAGE,
@@ -363,8 +369,15 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     context = ctx
     // Shell commands run between turns belong before the turn that starts now.
     await recordCommitted(host)
+    await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
     runStart = host.session.committed().length
     await startTurn(host)
+  })
+
+  // A subagent whose parent is shared while it runs records from its next turn's end.
+  pi.on('turn_end', async (_event, ctx) => {
+    context = ctx
+    await recordUnderParent(host, ctx.sessionManager.getSessionId(), runStart)
   })
 
   pi.on('tool_call', async (event, ctx) => {
@@ -378,6 +391,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     context = ctx
     const session = ctx.sessionManager.getSessionId()
     await recordCommitted(host)
+    await recordUnderParent(host, session, runStart)
     // Why the run's last reply ended, as pi committed it, after every extension's message_end.
     const reply = host.session
       .committed()

@@ -39,6 +39,7 @@ import {
   collectAcknowledgedOutbox,
   drain,
   endDeliveryFailures,
+  recordFromStart,
   recordsOffline,
   recoverExecution,
   scheduleOutboxCleanup,
@@ -46,7 +47,14 @@ import {
 import { attachWorktree, beginRestoreCheckout, checkoutNeedsMount, mountCheckout } from '../sharing/checkout.ts'
 import { beginRestore, completeJoinTransition, startParticipation } from '../sharing/join.ts'
 import { checkoutRoot, joinedBindingAt } from '../sharing/share.ts'
-import { beginChild, childLink, exportParent } from '../subagents/subagents.ts'
+import {
+  awaitParent,
+  beginChild,
+  childLink,
+  exportParent,
+  exportSession,
+  recordedParent,
+} from '../subagents/subagents.ts'
 import { followUpload, startConversation, stopConversation } from '../watch/watch.ts'
 import { authenticationHost, interaction, notifyOnce, setupEnv } from './interaction.ts'
 import { listOrganizations, organizationName } from './organizations.ts'
@@ -256,15 +264,19 @@ export async function beginSession(host: Host, session: string) {
     host.ui.debug('This session was started by a Delta session that has ended, so Delta does not record it.')
     return
   }
-  if (link) {
+  if (link?.parent) {
     try {
-      await beginChild(host, session, link)
+      await beginChild(host, session, { link: link.link, parent: link.parent })
       await activate(host, session)
     } catch (error) {
       report(host, error)
     }
     return
   }
+  // A session started by one that does not record yet goes its own way meanwhile, and becomes that
+  // one's subagent once it records (`recordUnderParent`).
+  if (link) awaitParent(link.link)
+  exportSession(host, session)
   const stored = await serial(() => load(host, session)).catch(() => undefined)
   // A join that switched into this session decides what it records.
   if (fresh && !stored?.joinTransition && !stored?.joined && !stored?.child) beginCaptureDecision(session)
@@ -280,6 +292,23 @@ export async function beginSession(host: Host, session: string) {
       decideCapture(session)
       report(host, error)
     })
+  })
+}
+
+/**
+ * Between its turns, a session that another started before that one recorded checks whether it records
+ * now, and if so becomes its subagent: its thread is created under that one's, and what it said so far
+ * is recorded, the run going on now, which began with the committed message at `runStart`, in a turn
+ * of its own.
+ */
+export function recordUnderParent(host: Host, session: string, runStart: number): Promise<void> {
+  return recordFromStart(host, session, runStart, async () => {
+    const found = await recordedParent(host, stateFor(session).binding)
+    if (!found || activation.session !== session) return false
+    host.ui.debug('The session that started this one records now, so this one records as its subagent.')
+    await beginChild(host, session, found)
+    await activate(host, session)
+    return !!stateFor(session).binding?.child
   })
 }
 

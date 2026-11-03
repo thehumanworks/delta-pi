@@ -23,7 +23,7 @@ import {
 import { CHILD_CONTRACT_VERSION, DeltaCommandError } from '../cli/thread-commands.ts'
 import type { RecordedMessage, Update } from '../recording/content.ts'
 import { loseExecution } from '../recording/delivery.ts'
-import { cleanTitle, promptTitle } from '../recording/title.ts'
+import { cleanTitle, firstPromptTitle, promptTitle } from '../recording/title.ts'
 import { attachWorktree, mountCheckout } from '../sharing/checkout.ts'
 
 /** The environment variable a recorded session passes its thread to the sessions it starts in. */
@@ -46,19 +46,33 @@ export type ParentLink = {
 /** The value this runtime put in the environment, so it only ever withdraws its own. */
 let exported: string | undefined
 
+/** Put `link` in the environment the programs this session starts inherit; whether it changed. */
+function exportLink(host: Host, link: ParentLink): boolean {
+  const value = JSON.stringify(link)
+  if (host.env.get(PARENT_ENV) === value) return false
+  host.env.set(PARENT_ENV, value)
+  exported = value
+  return true
+}
+
+/**
+ * Tell the sessions this one starts which session it is, from its start and whether or not it records:
+ * a session it starts before it records becomes its subagent once it does (see `awaitParent`).
+ */
+export function exportSession(host: Host, session: string) {
+  if (exported === undefined) exportLink(host, { sender: session })
+}
+
 /**
  * Tell the sessions this one starts that they are its subagents, once its CLI records children. A
- * top-level session does once its thread exists. A subagent does from its start, in place of the link
- * it inherited, so a subagent it starts hangs under its thread, which that one's creation waits for.
+ * top-level session names its thread once that exists. A subagent tells from its start, in place of
+ * the link it inherited, so a subagent it starts hangs under its thread, which that one's creation
+ * waits for.
  */
 export function exportParent(host: Host, binding: Binding | undefined) {
   if (!binding?.snapshot || (!binding.thread && !binding.child)) return
   if ((verifiedContract(binding.session) ?? 0) < CHILD_CONTRACT_VERSION) return
-  const link: ParentLink = { sender: binding.session, ...(binding.thread ? { thread: binding.thread } : {}) }
-  const value = JSON.stringify(link)
-  if (host.env.get(PARENT_ENV) === value) return
-  host.env.set(PARENT_ENV, value)
-  exported = value
+  if (!exportLink(host, { sender: binding.session, ...(binding.thread ? { thread: binding.thread } : {}) })) return
   host.ui.debug(
     binding.thread
       ? `Sessions this one starts record under Delta thread ${binding.thread}.`
@@ -90,15 +104,54 @@ export function parentLink(value: string | undefined): ParentLink | undefined {
 export type ChildParent = { link: ParentLink; parent: Binding }
 
 /**
- * The recorded session that started this one, when it is still live, or `stale` when the link is left
- * in an environment that outlived its session, as a long-running worker's is.
+ * The session that started this one, with its binding when it records, as long as it is live; or
+ * `stale` when the link is left in an environment that outlived its session, as a long-running
+ * worker's is.
  */
-export async function childLink(host: Host, session: string): Promise<ChildParent | 'stale' | undefined> {
+export async function childLink(
+  host: Host,
+  session: string,
+): Promise<{ link: ParentLink; parent?: Binding } | 'stale' | undefined> {
   const link = parentLink(host.env.get(PARENT_ENV))
   if (!link || link.sender === session) return
   const parent = await storedBinding(host, key(link.sender))
-  if (!parent?.snapshot || parent.endedAt !== undefined) return 'stale'
-  if (link.thread !== undefined && parent.thread !== link.thread) return 'stale'
+  if (parent?.endedAt !== undefined) return 'stale'
+  // A link names the thread its session recorded into; one whose session's binding is gone, or
+  // records elsewhere now, is left from an ended session.
+  if (link.thread !== undefined && parent?.thread !== link.thread) return 'stale'
+  return { link, ...(parent?.snapshot ? { parent } : {}) }
+}
+
+/** The session not recorded yet that started this one, which it records under once that one is. */
+let awaited: ParentLink | undefined
+
+/**
+ * Remember that the session `link` names, which started this one, does not record yet. Pi keeps no
+ * list of the subagents a session ran, so this one finds out for itself, between its turns, when
+ * that session is shared (`recordedParent`).
+ */
+export function awaitParent(link: ParentLink) {
+  awaited = link
+}
+
+/**
+ * The session this one awaits, once it records: this session then becomes its subagent. A session
+ * that records on its own, or whose parent ended unrecorded, stops waiting.
+ */
+export async function recordedParent(host: Host, binding: Binding | undefined): Promise<ChildParent | undefined> {
+  const link = awaited
+  if (!link) return
+  if (binding?.snapshot) {
+    awaited = undefined
+    return
+  }
+  const parent = await storedBinding(host, key(link.sender))
+  if (parent?.endedAt !== undefined) {
+    awaited = undefined
+    return
+  }
+  if (!parent?.snapshot || awaited !== link) return
+  awaited = undefined
   return { link, parent }
 }
 
@@ -163,10 +216,13 @@ export async function beginChild(host: Host, session: string, { link, parent }: 
   )
 }
 
-/** The name the extension that started the subagent gave it, or the default its first prompt replaces. */
+/**
+ * The name the extension that started the subagent gave it, or the default its first prompt replaces;
+ * a subagent recorded part way through its run is named for the prompt it began with.
+ */
 function childName(host: Host): { name: string; named?: true } {
   const name = cleanTitle(host.env.get(NAME_ENV), 80)
-  return name ? { name, named: true } : { name: DEFAULT_NAME }
+  return name ? { name, named: true } : { name: firstPromptTitle(host) ?? DEFAULT_NAME }
 }
 
 /** How a subagent's records differ: where paths are shown from, and who its prompts come from. */
