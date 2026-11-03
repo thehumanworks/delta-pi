@@ -94,6 +94,9 @@ What an audit of the port against upstream found and this port has not changed, 
   both, since the prior contents are read when each call starts, not in pi's mutation queue.
 - **Records a failing disk could not save** are flushed when the session ends; if the disk still fails,
   they are lost with the session's runtime. Upstream keeps them for the life of the process.
+- **A joined session is not moved when its thread's worktrees change.** It is told their new paths;
+  `/delta-join` again opens a session in the thread's folder. pi keeps one directory per session, where
+  Claude Code moves its own.
 - **The once-per-repository setup offer** is claimed by a read and a write, so two sessions starting at
   the same moment may both offer it. Inherited from upstream.
 

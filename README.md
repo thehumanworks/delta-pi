@@ -36,8 +36,8 @@ budget) and tells you when one is available. `/delta-update` installs it.
 
 The extension also checks npm hourly for a newer release of itself, when pi installed it from npm and
 `PI_OFFLINE` is unset. The band then offers `/delta-plugin-update`, which runs `pi update <source>` and
-reloads. `/delta-plugin-update check` only checks; `/delta-plugin-update notifications off` (or `on`)
-turns the notices off.
+reloads. `/delta-plugin-update check` only checks, `/delta-plugin-update later` hides the notice of
+that release for a day, and `/delta-plugin-update notifications off` (or `on`) turns the notices off.
 
 ## Usage
 
@@ -64,6 +64,7 @@ JSON modes) never open a browser.
 `/delta-share` asks who should see the session: your team, just you, or people you name by email
 address. `/delta-share ada@example.com` invites them directly. The conversation so far, its whole
 branch, compaction or not, is exported to the thread first; from then on each turn is recorded live.
+Asked while pi is working, the share starts once the current turn ends.
 
 `/delta link` prints the current thread’s URL in the transcript, clickable in terminals that support
 links. It works over SSH without a clipboard and does not change who can see the thread: a private
@@ -94,10 +95,11 @@ Pi runs subagents as separate pi sessions, usually separate `pi` processes start
 A recorded session passes its thread to everything it starts through the `DELTA_PI_PARENT`
 environment variable. A pi session that starts empty with that variable set, while the session that
 started it is still live, records into a child thread under the parent's, named for its first prompt
-(or `DELTA_PI_SUBAGENT_NAME`), with its prompts shown as sent by the parent. A child working inside
-the parent's checkout shares its worktrees; one working in a checkout of its own, such as a Git
-worktree, attaches that checkout to its thread while it runs. A link left in an environment that
-outlives its session, as a long-running worker's does, records nothing once that session has ended.
+(or `DELTA_PI_SUBAGENT_NAME`), with its prompts shown as sent by the parent. A child working in the
+parent's checkout shares its worktrees; one working in a checkout of its own, such as a Git worktree,
+even one inside the parent's checkout, attaches that checkout to its thread while it runs. A subagent's
+own subagents record under the top-level session's thread. A link left in an environment that outlives
+its session, as a long-running worker's does, records nothing once that session has ended.
 
 ### Commands
 
@@ -110,7 +112,7 @@ menu of these actions.
 | `/delta-join <link>` | Join a shared thread in a new session in the thread's folder |
 | `/delta-setup` | Choose this repository's team and which sessions sync |
 | `/delta-update` | Update the installed Delta app and CLI |
-| `/delta-plugin-update [check \| notifications on\|off]` | Update this extension and reload, check its version, or control update notices |
+| `/delta-plugin-update [check \| later \| notifications on\|off]` | Update this extension and reload, check its version, snooze a release's notice, or control update notices |
 | `/delta-org list` | List your Delta teams |
 | `/delta-org current` | Show the selected team |
 | `/delta-org switch <ID>` | Select a different team |
@@ -120,7 +122,8 @@ menu of these actions.
 | `/delta copy` | Copy the thread's link |
 | `/delta resolve` | Choose Fork & Restore or Discard for offline changes Delta refused |
 
-Sharing, joining and setup need pi's interactive terminal or an RPC client that shows dialogs.
+Sharing, joining and setup need pi's interactive terminal or an RPC client that shows dialogs. In print
+mode (`pi -p`), Delta's notes and command answers go to stderr, leaving stdout to the model.
 
 ## Privacy
 
@@ -140,42 +143,34 @@ holds each session's binding to its thread, `outbox/` the records not yet confir
 ## How it differs from the Claude Code plugin
 
 The recording, delivery, retry, watch, share, setup and sign-in logic is the plugin's, ported with
-its tests. What Claude Code's host provides differently is adapted:
-
-| Claude Code plugin | This extension |
-| --- | --- |
-| `turn.start` / `turn.complete` hooks | A Delta turn runs from pi's `agent_start` to `agent_settled` |
-| `session.append` rows and `tool.call` results | pi's `message_end` messages; tool details (edit patches) come with the result |
-| `prompt.submit` drop | pi's `input` event; a refused prompt goes back into the editor |
-| Remote rows drawn as the plugin's own command output | Custom messages with a renderer, held until pi settles |
-| The band's buttons (copy link, share, Fork & Restore, Discard) | `/delta copy`, `/delta share`, `/delta resolve` |
-| `/clear` then `/cd` into the thread folder on join | A new pi session whose working directory is the thread folder |
-| Title Claude chose for the session | pi's session name, else the first prompt's first line |
-| Claude's `Agent` subagents | pi processes started by a recorded session (see Subagents) |
-| Marketplace self-update | npm check and `pi update <source>` |
-
-Not ported, for want of a pi equivalent: Claude Code Desktop's hand-off of a join to a new Desktop
-session, following a conversation Claude moves to a background session (`/background`), running a
-Delta thread as a Claude subagent through `SendMessage`, and recording subagents that finished before
-a session was shared. A joined session whose thread's worktrees
-change is told their new paths but is not moved to the thread folder; `/delta-join` again opens a
-session there.
+its tests. Where Claude Code's host and pi differ, the behaviour is adapted: a Delta turn runs from pi's
+`agent_start` to `agent_settled`, Delta records the messages pi commits to the session, a join opens a
+new pi session in the thread's folder, the band's buttons are `/delta` commands, and the extension
+updates through npm and `pi update`. [PARITY.md](PARITY.md) lists each adaptation, what is not ported
+(Claude Code Desktop's join hand-off, `/background`, running a Delta thread through `SendMessage`, and
+recording subagents that started before the session was recorded), the known differences, and how each
+of the plugin's tests is covered here.
 
 ## Development
 
 ```sh
-npm install
-npm run check   # tsc --noEmit
-npm test        # vitest: unit tests and end-to-end tests, on Node
+npm ci
+npm run verify         # format check, type check, ESLint, ast-grep rules, and every test
+npm run test:unit      # one layer of tests: unit, behaviour or e2e
+npm run test:package   # install the packed release into a throwaway pi and run a command through it
 ```
 
-The unit tests in `test/` are mostly the Claude Code plugin's own, ported; `test/fixtures/cli` holds the
-Delta CLI's output examples that the plugin keeps in step with the native CLI.
+[docs/architecture.md](docs/architecture.md) maps the code and its two seams, `Host` and `Platform`;
+[docs/style-guide.md](docs/style-guide.md) gives the conventions and which checks enforce them. On NixOS
+without nix-ld, run the checks in `nix shell nixpkgs#ast-grep`.
 
-The end-to-end tests in `test/e2e` run the real `pi --mode rpc` with this extension and a faux model
-(`faux-model.ts`) in a throwaway checkout and agent directory, against a fake `delta` CLI
-(`bin/delta`) that answers in the fixtures' shapes and keeps its state in a folder the test reads. Set
-`PI_E2E_DEBUG=1` to see pi's stderr. To try the extension by hand the same way:
+The tests come in layers. Unit tests in `test/` are mostly the Claude Code plugin's own, ported.
+Behaviour tests in `test/behaviour` run the whole extension in process through the kit in `test/kit`: a
+fake pi raising pi's events, on a clock the test moves. End-to-end tests in `test/e2e` run the real
+`pi --mode rpc`, with a faux model (`faux-model.ts`), in a throwaway checkout and agent directory. Both
+use one fake Delta CLI, `test/fake-delta/cli.ts`, which answers in the shapes of the CLI's own output
+(`test/fixtures/cli`) and keeps its state in a folder the test reads; no test touches a real Delta
+account. Set `PI_E2E_DEBUG=1` to see pi's stderr. To try the extension by hand the same way:
 
 ```sh
 PATH=$PWD/test/e2e/bin:$PATH FAKE_DELTA_STATE=/tmp/fake-delta PI_CODING_AGENT_DIR=/tmp/pi-agent \
@@ -198,10 +193,10 @@ npm whoami                          # confirm the publishing account
 npm publish                         # public access is configured in package.json
 ```
 
-`npm publish` runs the type check and the full test suite through `prepublishOnly` and stops
-if either fails. Tests use a fake Delta CLI, never a real Delta account. npm may ask for
+`npm publish` runs `npm run verify` (format, type check, lint and every test) through `prepublishOnly`
+and stops if any fails; run `npm run test:package` first to install the packed release into a throwaway pi. Tests use a fake Delta CLI, never a real Delta account. npm may ask for
 second-factor authentication. The package includes only `index.ts`, `src/`, `README.md`,
-`LICENSE`, and npm\'s required `package.json`; tests and local credentials are not shipped.
+`LICENSE`, and npm's required `package.json`; tests and local credentials are not shipped.
 
 For subsequent releases, commit your changes, run `npm version patch` (or `minor` / `major`),
 then `npm publish` and `git push --follow-tags`. Published versions cannot be overwritten.
