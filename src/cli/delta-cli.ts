@@ -462,9 +462,18 @@ async function drainOutput(process: MountProcess) {
  */
 export async function threadMount(
   host: Host,
-  mount: { session: string; thread: string; locator: string; owner: string; join?: boolean; form?: CommandForm },
+  mount: {
+    session: string
+    thread: string
+    locator: string
+    owner: string
+    join?: boolean
+    form?: CommandForm
+    /** Throws once the mount is no longer wanted; checked before it starts and once it is ready. */
+    check?: () => Promise<void>
+  },
 ): Promise<MountedThread> {
-  const { session, thread, locator, owner, join } = mount
+  const { session, thread, locator, owner, join, check } = mount
   return mountCommand(
     host,
     {
@@ -473,6 +482,7 @@ export async function threadMount(
       name: 'thread mount',
       args: ['thread', 'mount', locator, '--owner', owner, ...(join ? ['--join'] : [])],
       env: join ? commandFormEnv(mount.form) : {},
+      ...(check ? { check } : {}),
     },
     (line) => parseThreadMount(line, owner),
   )

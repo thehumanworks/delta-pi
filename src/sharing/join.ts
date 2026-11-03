@@ -8,6 +8,7 @@
  * stays as it was, ready to resume.
  */
 import { randomUUID } from 'node:crypto'
+import { remove } from '../core/files.ts'
 import type { Host } from '../core/host.ts'
 import { samePath } from '../core/paths.ts'
 import {
@@ -80,6 +81,8 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
   requests.join = request
   setProgress(host, 'Checking access to the shared thread…', 'active')
   let mounted: { owner: string; thread: string } | undefined
+  /** The session the join prepared to switch to, until pi has switched to it. */
+  let prepared: { session: string; file: string } | undefined
   let switched = false
   try {
     assertJoinSession(host, request.session, request)
@@ -98,6 +101,20 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
       host.ui.note(text)
     })
     await check()
+    // A session a join switched into that could not finish joining retries in place, with the owner and
+    // folder it was started for, rather than starting yet another session.
+    const transition = pending.joinTransition
+    if (transition) {
+      if (runtime.joining) throw new Error('This session is still joining its thread; wait for that to finish')
+      if (transition.locator !== request.locator)
+        throw new Error(`This session is joining ${transition.locator}; retry /delta-join with that link`)
+      const owns = () => !request.cancelled && activation.session === request.session
+      const joining = completeJoinTransition(host, request.session, transition, owns)
+      runtime.joining = joining
+      await joining
+      if (runtime.joining === joining) runtime.joining = undefined
+      return
+    }
     let status = pending.joined ? await readJoinStatus(host, request) : undefined
     assertJoinSession(host, request.session, request)
     // A joined session working in its thread's folder reconnects in place.
@@ -127,6 +144,7 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
       owner: fresh,
       join: true,
       form: request.form,
+      check,
     })
     mounted = { owner: fresh, thread: status.thread_id }
     await check()
@@ -140,27 +158,26 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
       owner: fresh,
       directory: mount.directory,
     }
-    const file = await host.session.create(fresh, mount.directory, host.session.file())
+    prepared = { session: fresh, file: await host.session.create(fresh, mount.directory, host.session.file()) }
     await save(host, { session: fresh, snapshot: false, next: 1, pending: [], joinTransition: plan })
     joinContracts.set(fresh, contractVersion)
     setProgress(host, "Starting a pi session in the thread's folder…", 'active')
     host.ui.debug(
       `Joining Delta in pi session ${fresh} at ${mount.directory}. Resume the previous session ${request.session} with /resume from ${request.cwd}.`,
     )
-    // Pi tears this runtime down while it switches: nothing below may use this session's pi context.
+    // Pi shuts this session down while it switches, which cancels this request: from then on the new
+    // session owns the mount, and nothing below may use this session's pi context. A switch that fails
+    // or is refused before that leaves this session as it was.
+    const outcome = await replace.switchSession(prepared.file).catch((error: unknown) => {
+      if (request.cancelled) return { cancelled: false }
+      throw error
+    })
+    if (outcome.cancelled) throw new Error("pi did not switch to the thread's session")
     switched = true
-    const outcome = await replace.switchSession(file)
-    if (outcome.cancelled) {
-      switched = false
-      await host.store.delete(key(fresh))
-      throw new Error("pi did not switch to the thread's session")
-    }
   } catch (error) {
-    if (switched || request.cancelled) {
-      if (mounted && !switched) await unmountThread(host, mounted.thread, mounted.owner)
-      return
-    }
+    if (switched || request.cancelled) return
     if (mounted) await unmountThread(host, mounted.thread, mounted.owner)
+    if (prepared) await abandonPrepared(host, prepared)
     const invalidLocator = error instanceof DeltaCommandError && error.code === 'invalid_reference'
     // Sign-in runs before anything changes, so an access requirement leaves nothing to preserve.
     const text =
@@ -176,6 +193,13 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
   } finally {
     if (requests.join === request) requests.join = undefined
   }
+}
+
+/** Remove what a join prepared for a session pi never switched to: its binding, contract and session file. */
+async function abandonPrepared(host: Host, prepared: { session: string; file: string }) {
+  joinContracts.delete(prepared.session)
+  await host.store.delete(key(prepared.session))
+  await remove(prepared.file)
 }
 
 /** The contract the session that joined verified, for the session it switched into. */
@@ -233,7 +257,11 @@ export async function completeJoinTransition(host: Host, session: string, plan: 
     if (!isInDirectory(host, plan.directory))
       throw new Error(`pi did not start in the thread's folder ${plan.directory}; participation remains paused`)
     // Mounting again under the same owner is idempotent; it replaces the joining session's process.
-    const mounted = await mountThread(host, { session, thread: plan.thread, locator: plan.locator, owner: plan.owner })
+    const mounted = await mountThread(
+      host,
+      { session, thread: plan.thread, locator: plan.locator, owner: plan.owner },
+      { check: ownership(owns) },
+    )
     if (!owns()) return
     requireMounted(mounted, plan.thread)
     const binding: Binding = {
@@ -311,7 +339,7 @@ function assertJoinSession(host: Host, session: string, request: JoinRequest) {
 export async function mountThread(
   host: Host,
   binding: { session: string; thread?: string; locator?: string; owner?: string },
-  options: { reportJoin?: boolean; form?: CommandForm } = {},
+  options: { reportJoin?: boolean; form?: CommandForm; check?: () => Promise<void> } = {},
 ): Promise<MountedThread> {
   const locator = binding.locator ?? binding.thread
   if (!locator) throw new Error('This session has no thread to mount')
@@ -322,7 +350,15 @@ export async function mountThread(
     owner: binding.owner ?? binding.session,
     join: !!options.reportJoin,
     form: options.form,
+    ...(options.check ? { check: options.check } : {}),
   })
+}
+
+/** A mount's check that its session still owns it; one that no longer does is stopped, not kept. */
+function ownership(owns: () => boolean): () => Promise<void> {
+  return async () => {
+    if (!owns()) throw new Error('The session ended while its thread was being mounted')
+  }
 }
 
 /** What a mount that joining or restoring can use: the right thread, and something to work in. */
