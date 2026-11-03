@@ -126,11 +126,18 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     ) {
       writeFileSync(join(state, `answer-${command.replaceAll(' ', '-')}`), JSON.stringify({ ...answer, times, after }))
     },
+    /** Offer Delta `version` as a newer release: `update --check` reports it, and `update` installs it. */
+    release(version: string) {
+      writeFileSync(join(state, 'release.json'), JSON.stringify(version))
+    },
     /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
     contract(min: number, max: number) {
       writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
-    /** Hold the runs of `command` after the first `after` until the returned function releases them. */
+    /**
+     * Hold the runs of `command` after the first `after` until the returned function releases them.
+     * `update install` holds an explicit `update` mid-download, once it has reported its progress.
+     */
     hold(command: string, { after = 0 } = {}): () => void {
       const path = join(state, `hold-${command.replaceAll(' ', '-')}`)
       writeFileSync(path, JSON.stringify({ after }))

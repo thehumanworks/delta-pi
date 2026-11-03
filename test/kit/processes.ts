@@ -22,13 +22,22 @@ export type Environment = Record<string, string | undefined>
 export type Ran = { argv: string[]; env: Environment }
 
 /**
- * A program a test stands in for, by its name (`pi`, `npm`, `git`): it answers each run, or, returning
- * undefined, lets the real program run.
+ * A program a test stands in for, by its name (`pi`, `npm`, `git`, `where.exe`): it answers each run, or,
+ * returning undefined, lets the real program run. A spawned program's answer is streamed, stderr first;
+ * a fake can instead return the stream itself, to report as it goes, hold, or see itself stopped.
  */
 export type FakeProgram = (
   argv: string[],
   init: RunInit & { env: Record<string, string> },
-) => RunResult | undefined | Promise<RunResult | undefined>
+) => RunResult | ProcessStream | undefined | Promise<RunResult | ProcessStream | undefined>
+
+/** A program's name, from a POSIX or Windows path: `delta` for `C:\Delta\bin\delta.exe`. */
+const programName = (path: string | undefined) =>
+  path
+    ?.split(/[\\/]/)
+    .pop()
+    ?.replace(/\.exe$/i, '')
+const isStream = (value: RunResult | ProcessStream): value is ProcessStream => 'next' in value
 
 export function kitProcesses(
   environment: () => Environment,
@@ -45,7 +54,11 @@ export function kitProcesses(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     )
-  const isDelta = (argv: string[]) => argv[0] !== undefined && basename(argv[0]) === 'delta'
+  const isDelta = (argv: string[]) => programName(argv[0]) === 'delta'
+  const fakeFor = (argv: string[]) => {
+    const name = argv[0] === undefined ? undefined : basename(argv[0])
+    return (name ? programs.get(name) : undefined) ?? programs.get(programName(argv[0]) ?? '')
+  }
   return {
     ran,
     others,
@@ -55,8 +68,9 @@ export function kitProcesses(
       const env = merged(init.env)
       if (!isDelta(argv)) {
         others.push({ argv, env })
-        const fake = argv[0] === undefined ? undefined : programs.get(basename(argv[0]))
-        return (await fake?.(argv, { ...init, env })) ?? run(argv, { ...init, env })
+        const answer = await fakeFor(argv)?.(argv, { ...init, env })
+        if (!answer) return run(argv, { ...init, env })
+        return isStream(answer) ? collect(answer) : answer
       }
       ran.push({ argv, env })
       busy++
@@ -79,7 +93,12 @@ export function kitProcesses(
     },
     spawn(init) {
       const env = merged(init.env)
-      if (!isDelta(init.argv)) return spawn({ ...init, env })
+      if (!isDelta(init.argv)) {
+        const fake = fakeFor(init.argv)
+        if (!fake) return spawn({ ...init, env })
+        others.push({ argv: init.argv, env })
+        return answered(Promise.resolve(fake(init.argv, { ...init, env })), () => spawn({ ...init, env }))
+      }
       ran.push({ argv: init.argv, env })
       const stream = deltaStream(init.argv.slice(1), env)
       live.add(stream)
@@ -94,6 +113,45 @@ export function kitProcesses(
     async stopAll() {
       for (const stream of [...live]) await stream.return()
     },
+  }
+}
+
+/** A fake program's answer as the stream `spawn` returns: its own stream, its output, or the real program's. */
+function answered(answer: Promise<RunResult | ProcessStream | undefined>, real: () => ProcessStream): ProcessStream {
+  const stream = answer.then((value) => {
+    if (!value) return real()
+    if (isStream(value)) return value
+    const pieces: Output[] = [
+      ...(value.stderr ? [{ stream: 'stderr' as const, text: value.stderr }] : []),
+      ...(value.stdout ? [{ stream: 'stdout' as const, text: value.stdout }] : []),
+    ]
+    const exit: Exit = { code: value.exitCode, signal: null }
+    return {
+      pid: undefined,
+      next: async () => {
+        const piece = pieces.shift()
+        return piece ? { done: false, value: piece } : { done: true, value: exit }
+      },
+      return: async () => ({ done: true, value: exit }),
+    } satisfies ProcessStream
+  })
+  return {
+    pid: undefined,
+    next: async () => (await stream).next(),
+    return: async (value) => (await stream).return(value),
+  }
+}
+
+/** A fake program's stream run to its end, as `run` answers it. */
+async function collect(stream: ProcessStream): Promise<RunResult> {
+  let stdout = ''
+  let stderr = ''
+  for (;;) {
+    const piece = await stream.next()
+    if (piece.done)
+      return { stdout, stderr, exitCode: piece.value.code, isStdoutTruncated: false, isStderrTruncated: false }
+    if (piece.value.stream === 'stdout') stdout += piece.value.text
+    else stderr += piece.value.text
   }
 }
 
