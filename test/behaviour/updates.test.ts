@@ -430,6 +430,10 @@ const ROOT = join(import.meta.dirname, '..', '..')
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { name: string; version: string }
 const NAME = MANIFEST.name
 const RUNNING = MANIFEST.version
+/** The releases after the one running, whatever version that is. */
+const [MAJOR, MINOR] = RUNNING.split('.').map(Number) as [number, number]
+const NEXT = `${MAJOR}.${MINOR + 1}.0`
+const LATER = `${MAJOR}.${MINOR + 2}.0`
 const REGISTRY = `https://registry.npmjs.org/${NAME.replace('/', '%2F')}/latest`
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -456,7 +460,7 @@ type Extension = {
   install(version: string): void
 }
 
-/** Start pi with update checks on, the extension installed from npm, and `0.2.0` released. */
+/** Start pi with update checks on, the extension installed from npm, and the next minor release out. */
 async function withExtension(
   options: Parameters<typeof startDelta>[0] = {},
   change: (extension: Extension, kit: Kit) => void | Promise<void> = () => {},
@@ -470,7 +474,7 @@ async function withExtension(
   const extension: Extension = {
     source: `npm:${NAME}`,
     path: ROOT,
-    latest: '0.2.0',
+    latest: NEXT,
     status: 200,
     fetches: [],
     lists: 0,
@@ -538,14 +542,14 @@ describe('plugin updates', () => {
     await kit.until(() => extensionNotice(kit), 'the notice')
     expect(extension.fetches).toEqual([REGISTRY])
     expect(extension.piUpdates).toEqual([])
-    expect(announced(kit, '0.2.0')).toEqual([
-      `Delta extension 0.2.0 is available (running: ${RUNNING}). Run /delta-plugin-update to update, or /delta-plugin-update notifications off to stop these notices.`,
+    expect(announced(kit, NEXT)).toEqual([
+      `Delta extension ${NEXT} is available (running: ${RUNNING}). Run /delta-plugin-update to update, or /delta-plugin-update notifications off to stop these notices.`,
     ])
-    expect(extensionNotice(kit)).toBe('Delta extension 0.2.0 is available · /delta-plugin-update')
+    expect(extensionNotice(kit)).toBe(`Delta extension ${NEXT} is available · /delta-plugin-update`)
     await passes(kit, HOUR)
     await kit.until(() => extension.fetches.length === 2, 'the hourly check')
     await kit.settle()
-    expect(announced(kit, '0.2.0')).toHaveLength(1)
+    expect(announced(kit, NEXT)).toHaveLength(1)
     expect(extensionNotice(kit)).toBeDefined()
     const lists = extension.lists
     await kit.pi.newSessionIn()
@@ -556,7 +560,7 @@ describe('plugin updates', () => {
     expect(extension.fetches).toHaveLength(2)
     expect(extension.lists).toBe(lists)
     expect(extensionNotice(kit)).toBeUndefined()
-    expect(announced(kit, '0.2.0')).toHaveLength(1)
+    expect(announced(kit, NEXT)).toHaveLength(1)
     expect(extension.piUpdates).toEqual([])
   })
 
@@ -568,9 +572,9 @@ describe('plugin updates', () => {
     expect(extensionNotice(kit)).toBeUndefined()
     await passes(kit, HOUR)
     expect(extensionNotice(kit)).toBeUndefined()
-    extension.latest = '0.3.0'
+    extension.latest = LATER
     await passes(kit, HOUR)
-    await kit.until(() => extensionNotice(kit)?.includes('0.3.0'), 'the newer release')
+    await kit.until(() => extensionNotice(kit)?.includes(LATER), 'the newer release')
     await kit.pi.command('delta-plugin-update', 'later')
     expect(extensionNotice(kit)).toBeUndefined()
     await passes(kit, DAY)
@@ -592,7 +596,7 @@ describe('plugin updates', () => {
     await passes(kit, 0)
     expect(extension.fetches).toHaveLength(1)
     await kit.pi.command('delta-plugin-update', 'check')
-    expect(notices(kit).at(-1)).toContain('0.2.0 is available')
+    expect(notices(kit).at(-1)).toContain(`${NEXT} is available`)
     expect(extension.fetches).toHaveLength(2)
     expect(extension.piUpdates).toEqual([])
     await kit.pi.command('delta-plugin-update', 'notifications on')
@@ -625,22 +629,24 @@ describe('plugin updates', () => {
         { argv: ['pi', 'update', `npm:${NAME}`], cwd: kit.world.checkout, timeoutMs: 600_000 },
       ])
       expect(kit.pi.reloads).toBe(1)
-      expect(notices(kit)).toContain('Updated the Delta extension to 0.2.0; reloading.')
+      expect(notices(kit)).toContain(`Updated the Delta extension to ${NEXT}; reloading.`)
       expect(kit.pi.dialogs).toHaveLength(dialogs)
       // The command's own check is the one request: the update needs to know there is a newer release.
       expect(extension.fetches).toEqual([REGISTRY])
     })
 
   test('a native download is offered as a reload, without network access or another installation', async () => {
-    // Another pi process installed 0.2.0 where this copy runs from, which still runs the version it loaded.
+    // Another pi process installed the next release where this copy runs from, which still runs the version it loaded.
     const { kit, extension } = await withExtension({}, (extension) => {
-      extension.install('0.2.0')
+      extension.install(NEXT)
       extension.status = 503
     })
     delta = kit
     await kit.until(() => extensionNotice(kit), 'the notice')
-    expect(extensionNotice(kit)).toBe('Delta extension 0.2.0 is installed · /delta-plugin-update to reload')
-    expect(notices(kit)).toContain('Delta extension 0.2.0 is installed and ready. Run /delta-plugin-update to reload.')
+    expect(extensionNotice(kit)).toBe(`Delta extension ${NEXT} is installed · /delta-plugin-update to reload`)
+    expect(notices(kit)).toContain(
+      `Delta extension ${NEXT} is installed and ready. Run /delta-plugin-update to reload.`,
+    )
     await kit.pi.command('delta-plugin-update')
     expect(extension.fetches).toEqual([])
     expect(extension.piUpdates).toEqual([])
@@ -655,7 +661,7 @@ describe('plugin updates', () => {
     delta = kit
     await kit.until(() => extensionNotice(kit), 'the notice')
     expect(extensionNotice(kit)).toContain('is available')
-    extension.install('0.2.0')
+    extension.install(NEXT)
     await passes(kit, HOUR)
     await kit.until(() => extensionNotice(kit)?.includes('to reload'), 'the notice to offer a reload')
     // While a turn runs, the notice gives way and nothing reloads under it.
@@ -707,7 +713,7 @@ describe('plugin updates', () => {
     await kit.pi.command('delta', 'update')
     expect(notices(kit).at(-1)).toContain('extension update is in progress')
     releaseUpdate()
-    await kit.until(() => notices(kit).includes('Updated the Delta extension to 0.2.0; reloading.'), 'the reload')
+    await kit.until(() => notices(kit).includes(`Updated the Delta extension to ${NEXT}; reloading.`), 'the reload')
     await kit.pi.command('delta-update')
     expect(notices(kit).at(-1)).toContain('extension update is in progress')
     expect(updates(kit)).toEqual([])
@@ -740,7 +746,7 @@ describe('plugin updates', () => {
     await passes(kit, HOUR)
     await kit.until(() => extension.fetches.length === 2, 'the failed check')
     await kit.settle()
-    expect(((await kit.store.get('plugin-update:check')) as { latest?: string }).latest).toBe('0.2.0')
+    expect(((await kit.store.get('plugin-update:check')) as { latest?: string }).latest).toBe(NEXT)
     expect(extensionNotice(kit)).toBeDefined()
   })
 
@@ -805,7 +811,7 @@ describe('plugin updates', () => {
     expect(extension.fetches).toHaveLength(1)
     release()
     await kit.settle()
-    expect(notices(kit).some((text) => text.includes('Delta extension 0.2.0'))).toBe(false)
+    expect(notices(kit).some((text) => text.includes(`Delta extension ${NEXT}`))).toBe(false)
     expect(extensionNotice(kit)).toBeUndefined()
     expect(extension.piUpdates).toEqual([])
   })
@@ -824,7 +830,7 @@ describe('plugin updates', () => {
     await kit.settle()
     await passes(kit, HOUR)
     expect(extension.fetches).toHaveLength(1)
-    expect(notices(kit).some((text) => text.includes('Delta extension 0.2.0'))).toBe(false)
+    expect(notices(kit).some((text) => text.includes(`Delta extension ${NEXT}`))).toBe(false)
     expect(extensionNotice(kit)).toBeUndefined()
   })
 
@@ -858,7 +864,7 @@ describe('plugin updates', () => {
     await kit.pi.command('delta-plugin-update')
     expect(kit.pi.reloads).toBe(0)
     expect(notices(kit).at(-1)).toContain('not active in this session yet')
-    expect(extensionNotice(kit)).toBe('Delta extension 0.2.0 is installed · /delta-plugin-update to reload')
+    expect(extensionNotice(kit)).toBe(`Delta extension ${NEXT} is installed · /delta-plugin-update to reload`)
   })
 
   test('concurrent explicit requests install once, and a directory transition suppresses the old reload', async () => {
