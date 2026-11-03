@@ -90,8 +90,10 @@ describe('offline recording', () => {
     // The records stay queued and pi keeps working: the pause stops delivery, not the turn.
     expect((await binding(delta)).pending.length).toBeGreaterThan(0)
     expect(aborted(delta)).toEqual([])
-    // pi's band has no buttons: it names both choices and the command that offers them.
+    // The band says why delivery stopped and, having no buttons in pi, names both choices and the command
+    // that offers them.
     await delta.until(() => band(delta!).includes('Fork & Restore or Discard: /delta resolve'), 'both controls')
+    expect(band(delta)).toContain(refusal)
     // A further prompt is accepted and its records stay queued, not lost.
     expect(await delta.pi.prompt('still here')).toBe('settled')
     expect((await binding(delta)).pending.length).toBeGreaterThan(0)
