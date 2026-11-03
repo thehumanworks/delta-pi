@@ -67,6 +67,8 @@ async function shared(before?: (kit: Kit) => void) {
   await kit.pi.command('delta', 'share')
   await kit.until(() => kit.pi.noticeTexts().some((text) => text.startsWith('Delta: Shared')), 'the share to finish')
   await kit.until(() => kit.pi.statuses.get('delta')?.startsWith('●'), 'the watch to be live')
+  // The share's success notice clears from the band, which then lists the thread's children again.
+  await kit.advance(4_000)
   return kit
 }
 
@@ -89,6 +91,21 @@ function drawn(kit: Kit, id: string, width = 100, raw = false) {
     .drawnRows(width, raw)
     .find((entry) => String(entry.content).split('\n', 1)[0]!.endsWith(`${named}:`))
   return row?.lines
+}
+let markers = 0
+/**
+ * Report `events` on the thread's watch, then wait until the extension has taken in everything up to
+ * them: the watch reports lines in order and the extension applies each before the next, so a marker
+ * reported after them, a child the band then lists, shows they were applied.
+ */
+async function deliver(kit: Kit, ...events: Record<string, unknown>[]) {
+  const name = `marker-${++markers}`
+  kit.world.remote(THREAD, ...events, {
+    type: 'children',
+    children: [{ thread_id: name, reference: `${THREAD}#s=${name}`, kind: 'subagent', name, status: 'queued' }],
+  })
+  await kit.until(() => kit.pi.statuses.get('delta')?.includes(name), 'the events to be applied')
+  await kit.settle()
 }
 /** How many prompts started a turn: incoming activity never does. */
 const turns = (kit: Kit) => kit.pi.messages().filter((message) => message.role === 'user').length
@@ -357,19 +374,20 @@ test('incoming activity never executes or starts a turn, and the band shows only
 test("a remote agent's thinking is announced when it completes, but never reaches Claude", async () => {
   const kit = await shared()
   const thought = item('Weighing', { id: 'thought', kind: 'agent_thought', author: CLAUDE, open: true })
-  kit.world.remote(
-    THREAD,
+  const completed = { ...thought, open: false, content: { text: 'Weighing two approaches\nso far' } }
+  const announced = () => kit.pi.noticeTexts().filter((text) => text.startsWith('Claude (thinking)'))
+  await deliver(
+    kit,
     { type: 'item', item: thought },
     { type: 'item.append', id: 'thought', text: ' two approaches\nso far' },
   )
-  const completed = { ...thought, open: false, content: { text: 'Weighing two approaches\nso far' } }
-  kit.world.remote(THREAD, { type: 'item', item: completed })
-  // A later re-send of the completed thought is not announced again.
-  kit.world.remote(THREAD, { type: 'item', item: { ...completed, after_id: 'moved' } })
-  const announced = () => kit.pi.noticeTexts().filter((text) => text.startsWith('Claude (thinking)'))
-  await kit.until(() => announced().length, 'the thought to be announced')
-  await new Promise((resolve) => setTimeout(resolve, 200))
-  await kit.settle()
+  expect(announced()).toEqual([])
+  await deliver(
+    kit,
+    { type: 'item', item: completed },
+    // A later re-send of the completed thought is not announced again.
+    { type: 'item', item: { ...completed, after_id: 'moved' } },
+  )
   // The person sees the whole thought, labelled, and never the model.
   expect(announced()).toEqual(['Claude (thinking)\nWeighing two approaches so far'])
   expect(rows(kit)).toEqual([])
@@ -386,9 +404,7 @@ test('supersession aborts the owned turn and remote rows wait until it ends', as
   )
   const started = turns(kit)
   // Another sequence's supersession is not this turn's.
-  kit.world.remote(THREAD, { type: 'producer.turn', sequence: running.sequence + 100, status: 'superseded' })
-  await new Promise((resolve) => setTimeout(resolve, 200))
-  await kit.settle()
+  await deliver(kit, { type: 'producer.turn', sequence: running.sequence + 100, status: 'superseded' })
   expect(kit.pi.aborts).toBe(0)
   kit.world.remote(
     THREAD,
@@ -396,10 +412,7 @@ test('supersession aborts the owned turn and remote rows wait until it ends', as
     { type: 'producer.turn', sequence: running.sequence, status: 'superseded' },
   )
   await kit.until(() => kit.pi.statuses.get('delta')?.includes('Ada'), "Ada's turn to show")
-  kit.world.remote(THREAD, { type: 'item', item: item('Taking over: stop that', { id: 'takeover' }) })
-  await kit.until(() => kit.pi.aborts, 'the turn to be stopped')
-  await new Promise((resolve) => setTimeout(resolve, 200))
-  await kit.settle()
+  await deliver(kit, { type: 'item', item: item('Taking over: stop that', { id: 'takeover' }) })
   expect(kit.pi.aborts).toBe(1)
   // A row added now would land inside the stopped turn.
   expect(rows(kit)).toEqual([])

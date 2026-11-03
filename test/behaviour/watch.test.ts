@@ -1,7 +1,7 @@
 // The thread watch: its readiness, reconnection and failures, and what ending a session while it starts
 // leaves behind. Ported from the upstream plugin's engine tests (hooks/register.test.ts, "the watch") onto
 // the kit.
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, startDelta } from '../kit/index.ts'
@@ -182,13 +182,15 @@ test('reconnection retries with capped backoff and session end stops the idle ch
   const thread = threadOf(again)
   const attempts = () => watches(again).length
   const watching = () => again.running().some((args) => args[1] === 'watch')
-  /** Wait until the watch running now has gone live: its status inspection has answered. */
+  /** Wait until the watch running now has been inspected: its status read ran and answered. */
   const live = async (inspections: number) => {
-    await again.until(() => statuses(again).length > inspections && watching(), 'the watch to go live')
+    await again.until(
+      () => statuses(again).length > inspections && !again.running().some((args) => args[1] === 'status') && watching(),
+      'the watch to be inspected',
+    )
     await again.settle()
   }
-  await live(0)
-  expect(band(again).startsWith(LIVE)).toBe(true)
+  await again.until(() => band(again).startsWith(LIVE), 'the first watch to go live')
   // The first watch went live before it dropped, so the band waits out its grace.
   again.world.endWatch(thread)
   await again.until(() => !watching(), 'the watch to drop')
@@ -479,7 +481,11 @@ const lateInspection = (failure: boolean) => async () => {
   if (failure) kit.world.fail('thread status', { code: 'unavailable', retryable: false })
   else kit.world.patchStatus({ url: 'https://delta.dev/join/old_inspection' })
   release()
-  await new Promise((resolve) => setTimeout(resolve, 200))
+  // The failure is used up once the old read answers with it. A result leaves no such sign, so the old
+  // read gets a moment to answer; nothing below depends on it, since a stopped read's answer goes unheard.
+  if (failure)
+    await second.until(() => !existsSync(join(kit.world.state, 'fail-thread-status')), 'the old read to answer')
+  else await new Promise((resolve) => setTimeout(resolve, 200))
   kit.world.stopFailing('thread status')
   kit.world.patchStatus(undefined)
   await second.settle()
