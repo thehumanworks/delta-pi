@@ -57,15 +57,15 @@ export function exportParent(host: Host, binding: Binding | undefined) {
     directories,
   }
   const value = JSON.stringify(link)
-  if (process.env[PARENT_ENV] === value) return
-  process.env[PARENT_ENV] = value
+  if (host.env.get(PARENT_ENV) === value) return
+  host.env.set(PARENT_ENV, value)
   exported = value
   host.ui.debug(`Sessions this one starts record under Delta thread ${binding.thread}.`)
 }
 
 /** Stop telling new sessions to record under this one, as when it ends. */
-export function withdrawParent() {
-  if (exported !== undefined && process.env[PARENT_ENV] === exported) delete process.env[PARENT_ENV]
+export function withdrawParent(host: Host) {
+  if (exported !== undefined && host.env.get(PARENT_ENV) === exported) host.env.set(PARENT_ENV, undefined)
   exported = undefined
 }
 
@@ -95,7 +95,7 @@ export function parentLink(value: string | undefined): ParentLink | undefined {
  * that outlived its session, as a long-running worker's does, records nothing.
  */
 export async function childLink(host: Host, session: string): Promise<ParentLink | undefined> {
-  const link = parentLink(process.env[PARENT_ENV])
+  const link = parentLink(host.env.get(PARENT_ENV))
   if (!link || link.sender === session) return
   const parent = await storedBinding(host, key(link.sender))
   if (!parent?.snapshot || parent.thread !== link.thread || parent.endedAt !== undefined) return
@@ -121,7 +121,7 @@ export async function beginChild(host: Host, session: string, link: ParentLink) 
       child: {
         parent: link.reference,
         sender: link.sender,
-        name: cleanTitle(process.env[NAME_ENV], 80) ?? DEFAULT_NAME,
+        name: cleanTitle(host.env.get(NAME_ENV), 80) ?? DEFAULT_NAME,
         sharesParentCheckout: shared !== undefined,
         root: shared ?? own ?? cwd,
       },

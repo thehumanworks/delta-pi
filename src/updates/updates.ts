@@ -92,7 +92,7 @@ async function notificationsOn(host: Host): Promise<boolean> {
 
 /** Check in the background now and hourly; a failed check only reaches the debug log. */
 export function startPluginUpdates(host: Host) {
-  if (timer || process.env.PI_OFFLINE || !host.session.interactive()) return
+  if (timer || host.env.get('PI_OFFLINE') || !host.session.interactive()) return
   const run = async () => {
     try {
       if (!(await notificationsOn(host))) return

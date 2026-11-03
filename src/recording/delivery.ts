@@ -772,7 +772,7 @@ export async function startTurn(host: Host) {
   const session = host.session.id()
   const runtime = stateFor(session)
   if (runtime.currentTurnId !== undefined) return
-  const turnId = `turn-${Date.now().toString(36)}-${++turnCount}`
+  const turnId = `turn-${host.clock.now().toString(36)}-${++turnCount}`
   runtime.currentTurnId = turnId
   runtime.promptEntering = false
   await captureDecided(session)

@@ -21,7 +21,13 @@ import {
 import type { TUI } from '@earendil-works/pi-tui'
 import { systemClock } from './src/core/clock.ts'
 import { piVersionWarning } from './src/core/compatibility.ts'
-import { type AskRequest, type Host, InteractionUnavailableError, type NoteTone } from './src/core/host.ts'
+import {
+  type AskRequest,
+  type Host,
+  InteractionUnavailableError,
+  type NoteTone,
+  type Platform,
+} from './src/core/host.ts'
 import { run, spawn } from './src/core/process.ts'
 import {
   activation,
@@ -77,8 +83,40 @@ const NOTE_ENTRY = 'delta-note'
 /** The debug log moves aside to `debug.log.1` past this size. */
 const DEBUG_LOG_LIMIT = 2 * 1024 * 1024
 
+/** The machine pi runs on, as the extension uses it. */
+export function nodePlatform(): Platform {
+  return {
+    dataDir: join(getAgentDir(), 'delta'),
+    clock: systemClock,
+    process: { run, spawn },
+    env: {
+      windows: () => process.platform === 'win32',
+      home: () => process.env.HOME ?? process.env.USERPROFILE,
+      get: (name) => process.env[name],
+      set: (name, value) => {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      },
+    },
+    stderr: (text) => process.stderr.write(text),
+    copy: async (text) => {
+      try {
+        await copyToClipboard(text)
+        return true
+      } catch {
+        return false
+      }
+    },
+  }
+}
+
 export default function delta(pi: ExtensionAPI) {
-  const dataDir = join(getAgentDir(), 'delta')
+  createDelta(pi, nodePlatform())
+}
+
+/** Bind Delta's features to pi's events, commands and UI, on `platform`. */
+export function createDelta(pi: ExtensionAPI, platform: Platform) {
+  const { dataDir } = platform
   useDataDirectory(dataDir)
   usePatchBuilder((path, before, after) => generateUnifiedPatch(path, before, after))
   /** The context pi handed this runtime last; undefined before the session starts and after it ends. */
@@ -107,19 +145,16 @@ export default function delta(pi: ExtensionAPI) {
     // A client without pi's terminal draws no entries, so it hears each note as a notification. Print
     // mode has no client at all: its notes go where pi reports everything but the model's answer.
     if (context.hasUI && context.mode !== 'tui') context.ui.notify(text, tone)
-    else if (context.mode === 'print') process.stderr.write(`${text}\n`)
+    else if (context.mode === 'print') platform.stderr(`${text}\n`)
   }
   const host: Host = {
     pi,
     dataDir,
     plugin: { name: MANIFEST.name, version: MANIFEST.version, root: ROOT },
-    clock: systemClock,
-    process: { run, spawn },
+    clock: platform.clock,
+    process: platform.process,
     store: fileStore(join(dataDir, 'store')),
-    env: {
-      windows: () => process.platform === 'win32',
-      home: () => process.env.HOME ?? process.env.USERPROFILE,
-    },
+    env: platform.env,
     session: {
       id: () => context?.sessionManager.getSessionId() ?? '',
       cwd: () => context?.cwd ?? process.cwd(),
@@ -169,14 +204,7 @@ export default function delta(pi: ExtensionAPI) {
         shownStatus = text
         context.ui.setStatus('delta', text)
       },
-      copy: async (text) => {
-        try {
-          await copyToClipboard(text)
-          return true
-        } catch {
-          return false
-        }
-      },
+      copy: (text) => platform.copy(text),
       open: async (url) => {
         const attempts =
           process.platform === 'win32'
@@ -185,7 +213,7 @@ export default function delta(pi: ExtensionAPI) {
               ? [['open', url]]
               : [['xdg-open', url]]
         for (const argv of attempts) {
-          const opened = await run(argv, { timeoutMs: 5_000 }).catch(() => ({ exitCode: 1 }))
+          const opened = await platform.process.run(argv, { timeoutMs: 5_000 }).catch(() => ({ exitCode: 1 }))
           if (opened.exitCode === 0) return true
         }
         return false
@@ -371,7 +399,7 @@ export default function delta(pi: ExtensionAPI) {
     }
     await forgetSessionStart(host, session)
     cancelRequestsOf(session)
-    withdrawParent()
+    withdrawParent(host)
     const runtime = stateFor(session)
     endActivationOf(session)
     resetRuntime(runtime)

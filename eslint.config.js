@@ -43,6 +43,16 @@ export default tseslint.config(
       // Every empty block says why it may be empty.
       'no-empty': ['error', { allowEmptyCatch: false }],
       'no-restricted-imports': restrict(boundaries.childProcess, boundaries.fs, boundaries.fsPromises, boundaries.pi),
+      'no-restricted-properties': [
+        'error',
+        { object: 'process', property: 'env', message: 'Use host.env, which tests replace.' },
+        { object: 'Date', property: 'now', message: 'Use host.clock.now(), which tests control.' },
+      ],
+      'no-restricted-globals': [
+        'error',
+        { name: 'setTimeout', message: 'Use host.clock.after or host.clock.sleep, which tests control.' },
+        { name: 'setInterval', message: 'Use host.clock.after, which tests control.' },
+      ],
       'no-restricted-syntax': [
         'error',
         {
@@ -52,12 +62,21 @@ export default tseslint.config(
       ],
     },
   },
-  // The files that own a boundary may cross it.
-  { files: ['index.ts'], rules: { 'no-restricted-imports': restrict(boundaries.childProcess) } },
+  // The files that own a boundary may cross it: index.ts binds Node's platform, and the clock and the
+  // process runner are Node's timers and programs.
+  {
+    files: ['index.ts'],
+    rules: { 'no-restricted-imports': restrict(boundaries.childProcess), 'no-restricted-properties': 'off' },
+  },
   {
     files: ['src/core/process.ts'],
-    rules: { 'no-restricted-imports': restrict(boundaries.fs, boundaries.fsPromises) },
+    rules: {
+      'no-restricted-imports': restrict(boundaries.fs, boundaries.fsPromises),
+      'no-restricted-properties': 'off',
+      'no-restricted-globals': 'off',
+    },
   },
+  { files: ['src/core/clock.ts'], rules: { 'no-restricted-properties': 'off', 'no-restricted-globals': 'off' } },
   { files: ['src/core/files.ts'], rules: { 'no-restricted-imports': restrict(boundaries.childProcess) } },
   {
     // The band and the transcript's renderers draw with pi's own theme and components.
@@ -76,6 +95,9 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/unbound-method': 'off',
       'no-restricted-imports': 'off',
+      'no-restricted-properties': 'off',
+      'no-restricted-globals': 'off',
+      'no-restricted-syntax': 'off',
     },
   },
   {

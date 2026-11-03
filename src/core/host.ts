@@ -34,6 +34,10 @@ export type Host = {
   env: {
     windows(): boolean
     home(): string | undefined
+    /** An environment variable of this pi process, which the programs it starts inherit. */
+    get(name: string): string | undefined
+    /** Set or, with undefined, remove an environment variable for the programs pi starts from now on. */
+    set(name: string, value: string | undefined): void
   }
   session: {
     id(): string
@@ -89,3 +93,19 @@ export type Host = {
 
 /** Nobody can answer a question in this session: print and JSON modes have no dialogs. */
 export class InteractionUnavailableError extends Error {}
+
+/**
+ * What the extension takes from the machine pi runs on: `index.ts` binds Node's, and tests their own,
+ * so a test runs the whole extension against a fake clock, Delta CLI and environment.
+ */
+export type Platform = {
+  /** Where the extension keeps its store, outbox and debug log. */
+  dataDir: string
+  clock: Clock
+  process: Host['process']
+  env: Host['env']
+  /** Write to the terminal's error stream, which print mode shows. */
+  stderr(text: string): void
+  /** Put text on the clipboard; resolves whether it got there. */
+  copy(text: string): Promise<boolean>
+}
