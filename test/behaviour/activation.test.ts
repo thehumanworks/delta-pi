@@ -383,6 +383,8 @@ describe('the band on an automatic session', () => {
     await delta.pi.start()
     await delta.until(() => ran(delta!, 'thread watch'), 'the watch to start')
     await bandSays(delta, link(delta))
+    // The watch is still connecting, so the band's mark is the pending one, not the live one.
+    expect(band(delta)).toMatch(/^◌/)
     release()
   })
 
