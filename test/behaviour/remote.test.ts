@@ -73,7 +73,12 @@ async function shared(before?: (kit: Kit) => void) {
 }
 
 /** What the model read from the thread: each row's first line. */
-const rows = (kit: Kit) => kit.pi.contextMessages().map((message) => String(message.content).split('\n', 1)[0]!)
+/** The thread's rows the model read; the note listing the threads it can run (the markers below) is not one. */
+const rows = (kit: Kit) =>
+  kit.pi
+    .contextMessages()
+    .map((message) => String(message.content).split('\n', 1)[0]!)
+    .filter((row) => !row.startsWith('[Delta] These threads belong to this Delta conversation'))
 /** Wait until the model has read `count` rows from the thread, and nothing more arrives meanwhile. */
 async function offered(kit: Kit, count: number) {
   await kit.until(() => rows(kit).length >= count, `${count} rows`)

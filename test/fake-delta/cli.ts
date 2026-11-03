@@ -123,6 +123,13 @@ function takeAnswer(args: string[], io: FakeIo): FakeAnswer | undefined {
   return value
 }
 
+/**
+ * The actor Delta records a producer's output as, which its items' `author.actor_id` names: one per
+ * external ID here, so a test can write a producer's own items.
+ */
+export function actorOf(external: string | undefined): string | null {
+  return external ? `actor-${external}` : null
+}
 /** The install helper a Windows `delta update --download-only` hands back, before the version it installs. */
 export const UPDATE_HELPER_ARGV = [
   'C:\\Updates\\cli-update-1\\delta-update-helper.exe',
@@ -559,7 +566,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         producer: {
           source,
           external_id: external,
-          actor_id: null,
+          actor_id: actorOf(external),
           next_sequence: producer?.thread === thread.thread_id ? producer.next : 1,
           turn: null,
         },
@@ -685,7 +692,13 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         type: 'ready',
         thread_id: thread.thread_id,
         producer: source
-          ? { source, external_id: external, actor_id: null, next_sequence: producer?.next ?? 1, turn: null }
+          ? {
+              source,
+              external_id: external,
+              actor_id: actorOf(external),
+              next_sequence: producer?.next ?? 1,
+              turn: null,
+            }
           : null,
       })
       const eventsPath = join(root, `events-${thread.thread_id}.jsonl`)

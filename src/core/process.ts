@@ -21,9 +21,16 @@ export type Output = { stream: 'stdout' | 'stderr'; text: string }
  */
 export type ProcessStream = AsyncIterator<Output, Exit> & {
   return(value?: Exit): Promise<IteratorResult<Output, Exit>>
+  /**
+   * Ask the program to stop with SIGTERM while its output is still read, so a program that reports
+   * as it shuts down, as pi's JSON mode does, can finish; SIGKILL follows {@link TERMINATE_GRACE_MS}
+   * later. The reader keeps calling `next` until the stream ends with the program's exit.
+   */
+  terminate(): void
   readonly pid: number | undefined
 }
-export type SpawnInit = { argv: string[]; env?: Record<string, string>; cwd?: string }
+/** `stdin`, when given, is written to the program's input, which is then closed. */
+export type SpawnInit = { argv: string[]; env?: Record<string, string>; cwd?: string; stdin?: string }
 
 /** Output past this is cut and reported as truncated, as Claude Code's `process.run` does. */
 const CAPTURE_LIMIT = 4 * 1024 * 1024
@@ -31,6 +38,11 @@ const CAPTURE_LIMIT = 4 * 1024 * 1024
 export const KILL_GRACE_MS = 2_000
 /** How long stopping a program waits for it to exit before leaving it to finish on its own. */
 const STOP_WAIT_MS = 6_000
+/**
+ * How long a program asked to stop with `terminate` has before it is killed: longer than a pi
+ * subagent's own end (`SUBAGENT_SHUTDOWN_MS` in src/subagents/subagents.ts), which flushes its records.
+ */
+export const TERMINATE_GRACE_MS = 20_000
 
 function environment(env: Record<string, string> | undefined): NodeJS.ProcessEnv {
   return env ? { ...process.env, ...env } : process.env
@@ -118,12 +130,18 @@ export function run(argv: string[], init: RunInit = {}): Promise<RunResult> {
 export function spawn(init: SpawnInit): ProcessStream {
   const [command, ...args] = init.argv
   if (!command) throw new Error('No command to run')
-  const child = spawnChild(command, args, {
-    cwd: init.cwd,
-    env: environment(init.env),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
+  const options = { cwd: init.cwd, env: environment(init.env), windowsHide: true }
+  // Only a program given input gets a pipe for it; the others read nothing, as from /dev/null.
+  const child =
+    init.stdin === undefined
+      ? spawnChild(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawnChild(command, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] })
+  if (child.stdin) {
+    child.stdin.on('error', () => {
+      /* a program that exits without reading its input closes the pipe; its exit says what happened */
+    })
+    child.stdin.end(init.stdin)
+  }
   const queue: Output[] = []
   let exit: Exit | undefined
   let failure: Error | undefined
@@ -177,6 +195,12 @@ export function spawn(init: SpawnInit): ProcessStream {
         })
       }
     },
+    terminate() {
+      if (exit || closed || kill) return
+      child.kill('SIGTERM')
+      kill = setTimeout(() => child.kill('SIGKILL'), TERMINATE_GRACE_MS)
+      kill.unref()
+    },
     async return(): Promise<IteratorResult<Output, Exit>> {
       if (!closed) {
         closed = true
@@ -186,6 +210,7 @@ export function spawn(init: SpawnInit): ProcessStream {
         child.stderr.destroy()
         wake()
         if (!exit) {
+          if (kill) clearTimeout(kill)
           child.kill('SIGTERM')
           kill = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS)
           kill.unref()

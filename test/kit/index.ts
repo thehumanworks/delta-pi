@@ -41,6 +41,8 @@ export async function startDelta(
     start?: boolean
     /** Whether the machine is Windows, as `Platform.env.windows` tells the extension. */
     windows?: boolean
+    /** The arguments pi was started with, as a subagent it starts keeps some of them. */
+    args?: string[]
   } = {},
 ) {
   const w = options.world ?? world({ ...(options.policy ? { policy: options.policy } : {}) })
@@ -63,6 +65,8 @@ export async function startDelta(
     dataDir: join(w.agentDir, 'delta'),
     clock,
     process: processes,
+    // A subagent this pi starts is the fake `pi` a test stands in for (`kit.spawned`).
+    launch: { command: ['pi'], args: options.args ?? [], cwd: options.cwd ?? w.checkout },
     env: {
       windows: () => options.windows ?? false,
       get: (name) => env[name],

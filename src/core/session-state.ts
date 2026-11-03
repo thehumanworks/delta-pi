@@ -73,6 +73,8 @@ export type Binding = {
   title?: string
   /** This session is a subagent recorded as a child thread of the session that started it. */
   child?: ChildOf
+  /** The Delta threads this session ran as subagents (`src/subagents/thread-runs.ts`), by thread ID. */
+  threadRuns?: string[]
 }
 
 /** Where a subagent session's thread hangs: its parent's thread, and who sends its prompts. */
@@ -98,6 +100,15 @@ export type ChildOf = {
    * shares its worktrees when it works in one of them.
    */
   directories?: string[]
+  /**
+   * The thread was Delta's before this session ran it, as a thread its parent runs with `delta_thread`:
+   * its thread exists already, so none is created and no checkout is attached for it.
+   */
+  adopted?: true
+  /** The pi session file, so the session that runs the thread can resume it. */
+  file?: string
+  /** The turn sequence Delta last took over from this subagent, so the session that runs it can tell. */
+  takenOver?: number
 }
 
 const encoder = new TextEncoder()

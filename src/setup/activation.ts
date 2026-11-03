@@ -134,6 +134,13 @@ export async function activate(host: Host, session: string, isCurrent = () => tr
         if (ownsActivation()) report(host, error)
         return
       }
+      // A thread its parent runs is resumed from its pi session file, which is kept with its binding.
+      const file = host.session.file()
+      if (ownsActivation() && binding.child.adopted && file && binding.child.file !== file)
+        await serial(async () => {
+          const current = await load(host, session)
+          if (current.child) await save(host, { ...current, child: { ...current.child, file } })
+        })
       // The subagents this one starts hang under it, even before its thread exists.
       if (ownsActivation()) exportParent(host, binding)
       // A subagent that ended with its turn open, as when its process was stopped, closes that turn;
@@ -751,5 +758,7 @@ async function pruneStore(host: Host) {
       continue
     await host.store.delete(key(id))
     await host.store.delete(ledgerKey(id))
+    // The Delta threads the session ran go with it.
+    for (const storeKey of keys) if (storeKey.startsWith(`thread-run:${id}:`)) await host.store.delete(storeKey)
   }
 }

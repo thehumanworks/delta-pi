@@ -161,12 +161,14 @@ function answered(answer: Promise<RunResult | ProcessStream | undefined>, real: 
         return piece ? { done: false, value: piece } : { done: true, value: exit }
       },
       return: async () => ({ done: true, value: exit }),
+      terminate: () => {},
     } satisfies ProcessStream
   })
   return {
     pid: undefined,
     next: async () => (await stream).next(),
     return: async (value) => (await stream).return(value),
+    terminate: () => void stream.then((value) => value.terminate()),
   }
 }
 
@@ -252,6 +254,13 @@ function deltaStream(args: string[], env: Record<string, string>): ProcessStream
         wake()
       }
       return { done: true, value: exit }
+    },
+    // A fake command keeps nothing to report as it stops, so it stops as at once.
+    terminate() {
+      if (exit) return
+      exit = { code: null, signal: 'SIGTERM' }
+      stop?.()
+      wake()
     },
   }
 }

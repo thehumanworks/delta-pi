@@ -308,6 +308,21 @@ export async function ensureChildThread(host: Host, binding: Binding, current: (
  * Delta bounds the final upload at 5 seconds, then stops watching the directory.
  */
 const CHILD_RELEASE_BUDGET_MS = 6_000
+/**
+ * A subagent's end, in the order its `session_shutdown` spends it: a run still going is stopped and
+ * given this long to settle, an automatic activation this long, and its records this long to reach
+ * Delta, before its own checkout is released.
+ */
+export const SUBAGENT_SETTLE_MS = 3_000
+export const SUBAGENT_ACTIVATION_MS = 2_000
+export const SUBAGENT_DELIVERY_MS = 5_000
+/**
+ * The longest a subagent's end takes. The session that stops a subagent it runs, as a Delta thread's
+ * run, gives it longer (`TERMINATE_GRACE_MS`) before killing it, and releases the thread's mounts only
+ * once it has exited.
+ */
+export const SUBAGENT_SHUTDOWN_MS =
+  SUBAGENT_SETTLE_MS + SUBAGENT_ACTIVATION_MS + SUBAGENT_DELIVERY_MS + CHILD_RELEASE_BUDGET_MS
 /** How often a finishing subagent's checkout is checked for Delta's release. */
 const CHILD_RELEASE_POLL_MS = 100
 
@@ -426,6 +441,7 @@ export function followChildTurn(host: Host, session: string) {
       if (stopped) return
       const turn = event.type === 'producer.turn' ? event : event.type === 'ready' ? event.producer?.turn : undefined
       if (turn?.sequence === sequence && turn.status === 'superseded') {
+        await markTakenOver(host, session, sequence)
         await loseExecution(host, session, sequence, CHILD_TAKEOVER)
         return
       }
@@ -436,6 +452,19 @@ export function followChildTurn(host: Host, session: string) {
       watch.stop()
       if (turnWatch === watch) turnWatch = undefined
     })
+}
+
+/**
+ * Remember that Delta took the subagent's turn `sequence` over, so the session that runs the thread
+ * knows its run ended for that, and waits on Delta's turn instead. Nothing is kept for a session that
+ * is not a subagent.
+ */
+export async function markTakenOver(host: Host, session: string, sequence: number) {
+  await serial(async () => {
+    const binding = await load(host, session)
+    if (binding.child && binding.child.takenOver !== sequence)
+      await save(host, { ...binding, child: { ...binding.child, takenOver: sequence } })
+  }).catch((error: unknown) => host.ui.debug(`Delta could not note the subagent's takeover: ${errorText(error)}`))
 }
 
 /** Stop following the subagent's turn, as when it ends. */

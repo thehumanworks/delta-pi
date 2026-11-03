@@ -297,6 +297,9 @@ function streamed(pieces: (Output | Promise<void>)[], code: number | null, onSto
       halt()
       return { done: true, value: exit }
     },
+    terminate() {
+      void this.return()
+    },
   }
 }
 

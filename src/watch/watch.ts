@@ -40,6 +40,7 @@ import { clearDoneNotice, finishProgress, reportedProgress, stopBandTimers, sync
 import { personKey, statusCurrentTurn, type StatusState, threadTurnOwned, type TurnStatus } from '../band/status.ts'
 import { REMOTE_MESSAGE } from '../recording/content.ts'
 import { drain, loseExecution, observeTurn, recordsOffline } from '../recording/delivery.ts'
+import { observeThreads } from '../subagents/thread-runs.ts'
 import { refreshMounts } from '../sharing/join.ts'
 import { announceThought, conversationText, itemDisplay, type Ledger, RemoteView } from './conversation.ts'
 import { PresenceTracker } from './presence.ts'
@@ -642,6 +643,7 @@ function observeRemote(host: Host, session: string, event: WatchEvent) {
     } else {
       feed.children = feed.children.filter((child) => child.thread_id !== event.thread_id)
     }
+    observeThreads(host, session)
     syncSpinner(host)
     host.ui.invalidate()
   }
