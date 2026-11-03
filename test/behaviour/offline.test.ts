@@ -195,6 +195,27 @@ describe('offline recording', () => {
     await base.stop()
   })
 
+  // Not one of upstream's: a retryable failure whose work Delta did is retried like any other, and
+  // creation is idempotent, so the retry finds the thread the lost reply never named.
+  test('a create whose reply was lost finishes activation on the next prompt, in the thread it created', async () => {
+    delta = await startDelta({ policy: PRIVATE, start: false })
+    const lost = { error: { code: 'app_unavailable', message: 'the connection dropped', retryable: true } }
+    delta.world.answer('thread create', { run: true, stdout: `${JSON.stringify(lost)}\n` })
+    await delta.pi.start()
+    const retries =
+      "Delta couldn't start syncing this session: thread create: app_unavailable: the connection dropped. Nothing is lost; Delta retries on your next prompt."
+    await delta.until(() => delta!.pi.noticeTexts().includes(retries), 'the transient failure')
+    expect(band(delta)).toContain(retries)
+    expect(delta.thread()).toBeDefined()
+    expect((await binding(delta)).thread).toBeUndefined()
+    expect(await delta.pi.prompt('after the lost reply')).toBe('settled')
+    await delta.until(() => delivered(delta!, 'Echo: after the lost reply'), 'the prompt to reach the thread')
+    expect(Object.keys(delta.world.delta().threads)).toEqual([delta.thread()!.thread_id])
+    expect(await binding(delta)).toMatchObject({ thread: delta.thread()!.thread_id, checkout: delta.world.checkout })
+    expect(band(delta)).not.toContain("couldn't start syncing")
+    expect(ran(delta, 'thread share')).toBe(0)
+  })
+
   test('a policy naming an organization the account is not in records nothing and explains once per repository', async () => {
     delta = await startDelta({ policy: { mode: 'organization', organization: 'org-other' } })
     const explained = () =>
