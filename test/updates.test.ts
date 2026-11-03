@@ -5,8 +5,14 @@ import * as files from '../src/core/files.ts'
 import { claimInstallation, installation } from '../src/core/installation.ts'
 import { activation, requests, sessions, stateFor } from '../src/core/session-state.ts'
 import {
+  answersFor,
+  CHECK_INTERVAL_MS,
+  checkFrom,
   pluginUpdateCommand,
   pluginUpdateNotice,
+  recentlyChecked,
+  REMINDER_INTERVAL_MS,
+  reminderIsSnoozed,
   sourceAt,
   startPluginUpdates,
   stopPluginUpdates,
@@ -42,10 +48,10 @@ function fake() {
       }
     },
   }
-  const packages = { source: `npm:${NAME}`, version: '1.0.0', nextVersion: '1.1.0' }
+  const packages = { source: `npm:${NAME}`, scope: 'User', version: '1.0.0', nextVersion: '1.1.0' }
   vi.spyOn(files, 'readText').mockImplementation(async () => JSON.stringify({ name: NAME, version: packages.version }))
   const run = vi.fn(async (argv: string[], _init?: RunInit) => {
-    if (argv[1] === 'list') return ok(`User packages:\n  ${packages.source}\n    ${ROOT}`)
+    if (argv[1] === 'list') return ok(`${packages.scope} packages:\n  ${packages.source}\n    ${ROOT}`)
     if (argv[1] === 'update') {
       packages.version = packages.nextVersion
       return ok()
@@ -219,7 +225,11 @@ test('a failed pi listing is quiet and throttled before any registry request', a
 
 test.each(['delta', NAME])('filtered npm listing annotations are not part of the source: %s', async (name) => {
   const source = `npm:${name}@next`
-  expect(sourceAt(`Project packages:\n  ${source} (filtered)\n    ${ROOT}`, ROOT)).toEqual({ source, name })
+  expect(sourceAt(`Project packages:\n  ${source} (filtered)\n    ${ROOT}`, ROOT)).toEqual({
+    source,
+    name,
+    scope: 'project',
+  })
   const { host, packages, run } = fake()
   packages.source += ' (filtered)'
   const reload = reloaded()
@@ -416,7 +426,8 @@ test('a session replacement during registry discovery prevents installation', as
 })
 
 test('a changed project does not reuse another project’s cached source or release', async () => {
-  const { host, timers, run } = fake()
+  const { host, timers, run, packages } = fake()
+  packages.scope = 'Project'
   startPluginUpdates(host)
   await timers.at(-1)!.run()
   stopPluginUpdates()
@@ -468,4 +479,131 @@ test('malformed or clock-rollback snoozes cannot hide a release indefinitely', a
     expect(pluginUpdateNotice()).toContain('1.1.0')
     stopPluginUpdates()
   }
+})
+
+test('installation selection follows scope and project, and recognizes a native update of the running cached copy', async () => {
+  const user = `/home/ada/.pi/agent/npm/node_modules/${NAME}`
+  const project = `/repo/.pi/npm/node_modules/${NAME}`
+  const listing = [
+    'User packages:',
+    `  npm:${NAME}`,
+    `    ${user}`,
+    '',
+    'Project packages:',
+    `  npm:${NAME}@next (filtered)`,
+    `    ${project}`,
+  ].join('\n')
+  // The copy pi runs is the one installed where it runs from, by the user or by this project.
+  expect(sourceAt(listing, user)).toEqual({ source: `npm:${NAME}`, name: NAME, scope: 'user' })
+  expect(sourceAt(listing, project)).toEqual({ source: `npm:${NAME}@next`, name: NAME, scope: 'project' })
+  for (const root of [`${user}/nested`, '/repo', '/home/ada/src/pi-delta'])
+    expect(sourceAt(listing, root)).toBeUndefined()
+  for (const source of ['../pi-delta', 'git:github.com/thehumanworks/delta-pi'])
+    expect(sourceAt(`User packages:\n  ${source}\n    ${user}`, user)).toBeUndefined()
+  // Windows spells one path with either separator, and a terminal's listing is colored.
+  const windows = `C:/Users/ada/.pi/agent/npm/node_modules/${NAME}`
+  expect(sourceAt(`User packages:\r\n  npm:${NAME}\r\n    ${windows}\r\n`, windows.replaceAll('/', '\\'))?.scope).toBe(
+    'user',
+  )
+  expect(sourceAt(`\x1b[1mUser packages:\x1b[22m\n  npm:${NAME}\n\x1b[2m    ${user}\x1b[22m`, user)?.scope).toBe('user')
+  // pi updates an npm copy in place: a newer version another pi installed there is offered as a reload.
+  const { host, packages } = fake()
+  packages.version = '1.1.0'
+  expect((await pluginUpdateCommand(host, 'check')).text).toContain('1.1.0 is already installed (running: 1.0.0)')
+  expect(fetch).not.toHaveBeenCalled()
+  // Another package pi put where this copy runs from is not this extension's release.
+  packages.source = 'npm:another-package'
+  expect((await pluginUpdateCommand(host, 'check')).text).toContain("wasn't installed from npm")
+})
+
+test('only the named plugin with a valid version is a release', async () => {
+  const invalid = ['null', '{}', '{"name":"other","version":"1.1.0"}', `{"name":"${NAME}","version":7}`, '<html>']
+  const valid = fake()
+  expect((await pluginUpdateCommand(valid.host, 'check')).text).toContain('1.1.0 is available')
+  for (const text of invalid) {
+    // Neither the registry's manifest nor the one installed on disk can be another package's or versionless.
+    const registry = fake()
+    vi.mocked(fetch).mockResolvedValue(new Response(text))
+    expect((await pluginUpdateCommand(registry.host, 'check')).text).toContain("couldn't check")
+    expect(registry.values.get(CHECK)).not.toHaveProperty('latest')
+    vi.mocked(fetch).mockResolvedValue(Response.json({ name: NAME, version: '1.1.0' }))
+    const installed = fake()
+    vi.mocked(files.readText).mockResolvedValue(text)
+    expect((await pluginUpdateCommand(installed.host, 'check')).text).toContain("couldn't check")
+    expect(installed.values.get(CHECK)).not.toHaveProperty('latest')
+  }
+  // npm resolves a tag or range to versions alone; anything but versions is no release either.
+  for (const text of ['null', '{}', '7', '"1.1.0-beta.1"', '["1.0.0", 7]', '<html>']) {
+    const tagged = fake()
+    tagged.packages.source += '@next'
+    tagged.run.mockImplementation(async (argv) =>
+      argv[1] === 'list' ? ok(`User packages:\n  ${tagged.packages.source}\n    ${ROOT}`) : ok(text),
+    )
+    expect((await pluginUpdateCommand(tagged.host, 'check')).text).toContain("couldn't check")
+    expect(tagged.values.get(CHECK)).not.toHaveProperty('latest')
+  }
+})
+
+test('persisted throttles expire, survive clock changes, and snooze only the announced release', () => {
+  expect(recentlyChecked(0, CHECK_INTERVAL_MS - 1)).toBe(true)
+  expect(recentlyChecked(0, CHECK_INTERVAL_MS)).toBe(false)
+  expect(recentlyChecked(100, 0)).toBe(false)
+  const source = { source: `npm:${NAME}`, name: NAME, scope: 'user' } as const
+  const check = { checkedAt: 1, root: ROOT, cwd: '/repo', source, latest: '1.2.3', installed: '1.2.2' }
+  expect(checkFrom(check)).toEqual(check)
+  expect(checkFrom({ ...check, source: undefined })).toEqual({ ...check, source: undefined })
+  for (const value of [
+    null,
+    { ...check, checkedAt: NaN },
+    { ...check, checkedAt: -1 },
+    { ...check, latest: {} },
+    { ...check, installed: '1.2' },
+    { ...check, root: '' },
+    { ...check, source: { ...source, scope: 'global' } },
+    { ...check, source: { ...source, name: 'other' } },
+    { ...check, source: { ...source, source: '../pi-delta' } },
+  ])
+    expect(checkFrom(value)).toBeUndefined()
+  // A user installation's check holds in every project; a project's, or a copy this updater skips, only in its own.
+  expect(answersFor(check, ROOT, '/other')).toBe(true)
+  expect(answersFor(check, '/another/copy', '/repo')).toBe(false)
+  expect(answersFor({ ...check, source: { ...source, scope: 'project' } }, ROOT, '/other')).toBe(false)
+  expect(answersFor({ ...check, source: undefined }, ROOT, '/other')).toBe(false)
+  expect(answersFor({ ...check, source: undefined }, ROOT, '/repo')).toBe(true)
+  const reminder = { version: '1.2.3', until: REMINDER_INTERVAL_MS }
+  expect(reminderIsSnoozed(reminder, '1.2.3', 0)).toBe(true)
+  expect(reminderIsSnoozed(reminder, '1.2.4', 0)).toBe(false)
+  expect(reminderIsSnoozed(reminder, '1.2.3', REMINDER_INTERVAL_MS)).toBe(false)
+  expect(reminderIsSnoozed(reminder, '1.2.3', -1)).toBe(false)
+})
+
+test.each([
+  [`npm:${NAME}`, 'registry'],
+  [`npm:${NAME}@next`, 'npm'],
+  [`npm:${NAME}@^1.0.0`, 'npm'],
+  [`npm:${NAME}@1.0.0`, 'pinned'],
+  [`npm:${NAME}@v1.0.0-beta.1+build`, 'pinned'],
+  ['npm:pi-delta-fork', 'other'],
+  ['git:github.com/thehumanworks/delta-pi', 'other'],
+  ['../pi-delta', 'other'],
+] as const)('release checks follow npm source %s as pi does: %s', async (source, follows) => {
+  const { host, packages, run } = fake()
+  packages.source = source
+  packages.nextVersion = '1.0.3'
+  const { text } = await pluginUpdateCommand(host, 'check')
+  const ran = run.mock.calls.map(([argv]) => argv.slice(0, 2).join(' '))
+  if (follows === 'registry') {
+    expect(fetch).toHaveBeenCalledWith(
+      `https://registry.npmjs.org/${NAME.replace('/', '%2F')}/latest`,
+      expect.anything(),
+    )
+    expect(text).toContain('1.1.0 is available')
+  } else expect(fetch).not.toHaveBeenCalled()
+  if (follows === 'npm') {
+    expect(ran).toEqual(['pi list', 'npm view'])
+    expect(run).toHaveBeenLastCalledWith(['npm', 'view', source.slice(4), 'version', '--json'], expect.anything())
+    expect(text).toContain('1.0.3 is available')
+  } else expect(ran).toEqual(['pi list'])
+  if (follows === 'pinned') expect(text).toContain('pinned to an exact npm version')
+  if (follows === 'other') expect(text).toContain("wasn't installed from npm")
 })

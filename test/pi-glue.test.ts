@@ -79,6 +79,7 @@ describe('extension updates', () => {
     expect(sourceAt(listing, '/home/ada/.pi/agent/npm/node_modules/@nothumanwork/pi-delta')).toEqual({
       source: 'npm:@nothumanwork/pi-delta@0.1.0',
       name: '@nothumanwork/pi-delta',
+      scope: 'user',
     })
     // A local copy is left alone.
     expect(sourceAt(listing, '/home/ada/src/pi-delta')).toBeUndefined()

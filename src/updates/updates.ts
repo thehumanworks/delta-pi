@@ -4,10 +4,11 @@
  * reloads. Only npm sources are checked; local copies and git checkouts are left alone.
  */
 import { join } from 'node:path'
+import { stripVTControlCharacters } from 'node:util'
 import { readText } from '../core/files.ts'
 import { activation, requests, sessions } from '../core/session-state.ts'
 import type { Host } from '../core/host.ts'
-import { isJsonObject } from '../core/json.ts'
+import { isJsonObject, isNonEmptyString, isOneOf } from '../core/json.ts'
 import { samePath } from '../core/paths.ts'
 import { errorText } from '../core/text.ts'
 import { claimInstallation, installation } from '../core/installation.ts'
@@ -18,16 +19,28 @@ const NOTIFICATIONS = 'plugin-update:notifications'
 const CHECK = 'plugin-update:check'
 const REMINDER = 'plugin-update:reminder'
 /** One check an hour is shared by every pi process on the machine. */
-const CHECK_INTERVAL_MS = 60 * 60 * 1000
+export const CHECK_INTERVAL_MS = 60 * 60 * 1000
 const CHECK_TIMEOUT_MS = 10_000
-const REMINDER_INTERVAL_MS = 24 * CHECK_INTERVAL_MS
+export const REMINDER_INTERVAL_MS = 24 * CHECK_INTERVAL_MS
+const SCOPES = ['user', 'project'] as const
 const USAGE =
   'Usage: /delta-plugin-update [check | later | notifications on | notifications off]. Updates this pi extension and reloads it. /delta-update updates the Delta app and CLI instead.'
 
-/** Where pi installed the extension from: an npm package source, by name. */
-type Source = { source: string; name: string }
-/** What the last check found, shared through the store. */
-type Check = { checkedAt: number; root: string; cwd: string; source?: Source; latest?: string; installed?: string }
+/** Where pi installed the extension from: an npm package source, by name, for the user or a project. */
+type Source = { source: string; name: string; scope: (typeof SCOPES)[number] }
+/**
+ * The hourly check every session shares: the source pi installed the copy running from `root` from,
+ * as `pi list` in `cwd` lists it, the newest release that source follows, and the version on disk.
+ * Without a source, that copy is not one this updater follows.
+ */
+export type Check = {
+  checkedAt: number
+  root: string
+  cwd: string
+  source?: Source
+  latest?: string
+  installed?: string
+}
 
 /** The newer release the band offers, once a check found one: on npm, or `ready`, installed and waiting for a reload. */
 let available: { version: string; ready: boolean } | undefined
@@ -50,18 +63,23 @@ export function compareVersions(left: string, right: string): number | undefined
   return 0
 }
 
-/** The npm source in `pi list`'s output whose installed path is `root`. */
+/**
+ * The npm source in `pi list`'s output whose installed path is `root`, and whether the user or the
+ * project installed it. pi lists each package's source, then the path it installed it at.
+ */
 export function sourceAt(listing: string, root: string): Source | undefined {
-  const lines = listing.split('\n')
+  const lines = stripVTControlCharacters(listing).split(/\r?\n/)
+  let scope: Source['scope'] | undefined
   for (let index = 0; index < lines.length - 1; index++) {
-    const source = lines[index]!.trim().replace(/ \(filtered\)$/, '')
-    const path = lines[index + 1]!.trim()
-    const parsed = npmSource(source)
-    if (parsed && samePath(path, root)) return parsed
+    const line = lines[index]!.trim()
+    if (line === 'User packages:') scope = 'user'
+    if (line === 'Project packages:') scope = 'project'
+    const parsed = npmSource(line.replace(/ \(filtered\)$/, ''))
+    if (scope && parsed && samePath(lines[index + 1]!.trim(), root)) return { ...parsed, scope }
   }
 }
 
-function npmSource(source: string): Source | undefined {
+function npmSource(source: string): Omit<Source, 'scope'> | undefined {
   const name = /^npm:((?:@[^/\s]+\/)?[^@\s]+)(?:@.+)?$/.exec(source)?.[1]
   if (name) return { source, name }
 }
@@ -92,7 +110,9 @@ async function installedSource(host: Host, cwd: string): Promise<Source | undefi
   const listed = await runPi(host, ['list'], { cwd, timeoutMs: CHECK_TIMEOUT_MS })
   if (listed.exitCode !== 0 || listed.isStdoutTruncated || listed.isStderrTruncated)
     throw new Error(listed.stderr.trim() || 'pi could not list its packages')
-  return sourceAt(listed.stdout, host.plugin.root)
+  const source = sourceAt(listed.stdout, host.plugin.root)
+  // Another package pi put where this copy runs from is not this extension's release channel.
+  return source?.name === host.plugin.name ? source : undefined
 }
 
 /** Pi leaves exact npm versions fixed, including prerelease and build-qualified pins. */
@@ -164,37 +184,57 @@ async function latestVersion(host: Host, source: Source, cwd: string): Promise<s
 }
 
 /** Validate shared state before letting it suppress discovery or supply a release. */
-function checkFrom(value: unknown): Check | undefined {
+export function checkFrom(value: unknown): Check | undefined {
+  const version = (field: unknown) => field === undefined || (typeof field === 'string' && !!versionParts(field))
   if (
     !isJsonObject(value) ||
     typeof value.checkedAt !== 'number' ||
     !Number.isFinite(value.checkedAt) ||
     value.checkedAt < 0 ||
-    typeof value.root !== 'string' ||
+    !isNonEmptyString(value.root) ||
     typeof value.cwd !== 'string' ||
-    (value.latest !== undefined && (typeof value.latest !== 'string' || !versionParts(value.latest))) ||
-    (value.installed !== undefined && (typeof value.installed !== 'string' || !versionParts(value.installed)))
+    !version(value.latest) ||
+    !version(value.installed)
   )
     return
+  const check: Check = {
+    checkedAt: value.checkedAt,
+    root: value.root,
+    cwd: value.cwd,
+    ...(typeof value.latest === 'string' ? { latest: value.latest } : {}),
+    ...(typeof value.installed === 'string' ? { installed: value.installed } : {}),
+  }
   const source = value.source
-  if (
-    source !== undefined &&
-    (!isJsonObject(source) ||
-      typeof source.source !== 'string' ||
-      !source.name ||
-      npmSource(source.source)?.name !== source.name)
-  )
-    return
-  return value as Check
+  if (source === undefined) return check
+  if (!isJsonObject(source) || typeof source.source !== 'string' || !isOneOf(source.scope, SCOPES)) return
+  const parsed = npmSource(source.source)
+  if (!parsed || parsed.name !== source.name) return
+  return { ...check, source: { ...parsed, scope: source.scope } }
 }
 
-/** Attempts, including failures, wait an hour; a failure retains the last known release. */
+/**
+ * Another session's check holds for the same running copy and, unless the user installed that copy
+ * for every project, the same project.
+ */
+export function answersFor(check: Check, root: string, cwd: string): boolean {
+  return samePath(check.root, root) && (check.source?.scope === 'user' || samePath(check.cwd, cwd))
+}
+
+/** A future timestamp is not a permanent throttle after the machine's clock moves backwards. */
+export function recentlyChecked(checkedAt: number, now: number): boolean {
+  return now >= checkedAt && now - checkedAt < CHECK_INTERVAL_MS
+}
+
+/**
+ * Attempts, including failures, wait an hour; a failure retains the last known release. A session
+ * reuses another's check when {@link answersFor} says it holds, and runs neither pi nor a request.
+ */
 async function check(host: Host, force = false, cwd = host.session.cwd()): Promise<Check> {
   const now = host.clock.now()
   const root = host.plugin.root
   const saved = checkFrom(await host.store.get(CHECK))
-  const previous = saved && samePath(saved.root, root) && samePath(saved.cwd, cwd) ? saved : undefined
-  if (!force && previous && now >= previous.checkedAt && now - previous.checkedAt < CHECK_INTERVAL_MS) return previous
+  const previous = saved && answersFor(saved, root, cwd) ? saved : undefined
+  if (!force && previous && recentlyChecked(previous.checkedAt, now)) return previous
   await host.store.set(CHECK, { ...previous, checkedAt: now, root, cwd } satisfies Check)
   const source = await installedSource(host, cwd)
   const installed = source && !pinned(source) ? await installedVersion(host, source) : undefined
@@ -237,7 +277,7 @@ export function startPluginUpdates(host: Host) {
       const release = { version: latest, ready: !!installed && compareVersions(installed, host.plugin.version) === 1 }
       // A release is announced once a day, in whichever session sees it first; refreshing a notice must
       // not bring back one this session does not show.
-      if (snoozed(await host.store.get(REMINDER), latest, now)) {
+      if (reminderIsSnoozed(await host.store.get(REMINDER), latest, now)) {
         if (available) available = release
         return host.ui.invalidate()
       }
@@ -274,7 +314,8 @@ export function stopPluginUpdates() {
 /** Reloading pi's extensions, which only a command handler may do. */
 export type Reload = { reload?(): Promise<void> }
 
-function snoozed(value: unknown, version: string, now: number): boolean {
+/** A snooze holds only its release, and at most a day, however the clock moves. */
+export function reminderIsSnoozed(value: unknown, version: string, now: number): boolean {
   return (
     isJsonObject(value) &&
     value.version === version &&
