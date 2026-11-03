@@ -222,16 +222,21 @@ describe('offline recording', () => {
       delta!.pi.noticeTexts().filter((text) => text.includes("org-other, which your Delta account isn't a member of"))
         .length
     await delta.until(() => band(delta!).includes("isn't in this repo's team"), 'the refusal on the band')
+    await delta.until(() => explained() === 1, 'the explanation')
     // The membership check runs before staging, so nothing is created or queued.
     expect(ran(delta, 'thread create')).toBe(0)
     expect(await binding(delta)).toBeUndefined()
-    expect(explained()).toBe(1)
     expect(await delta.pi.prompt('one')).toBe('settled')
     expect(ran(delta, 'thread create')).toBe(0)
     expect(await binding(delta)).toBeUndefined()
-    // The next new session in the repository keeps the band line without repeating the explanation.
+    // The next new session in the repository keeps the band line without repeating the explanation,
+    // which the store remembers per repository.
+    const remembered = () => delta!.disk.touched('read').filter((path) => path.includes('auto-refused')).length
+    const readBefore = remembered()
     await delta.whileTimePasses(delta.pi.newSessionIn())
     await delta.until(() => band(delta!).includes("isn't in this repo's team"), 'the band line again')
+    await delta.until(() => remembered() > readBefore, 'the explanation to be looked up')
+    expect(await delta.pi.prompt('two')).toBe('settled')
     expect(explained()).toBe(1)
     expect(ran(delta, 'thread create')).toBe(0)
   })

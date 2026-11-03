@@ -170,20 +170,20 @@ describe('automatic activation', () => {
   })
 
   const reminderCases: {
-    name: string
+    title: string
     expected: ReturnType<typeof reminderKind>
     options?: Parameters<typeof startDelta>[0]
     arrange?: (kit: Kit) => Promise<void>
   }[] = [
-    { name: 'an unconfigured checkout is told how to set up', expected: 'not set up' },
+    { title: 'band reminder: an unconfigured checkout is told how to set up', expected: 'not set up' },
     {
-      name: 'a Manual checkout is told how to share, not to set up',
+      title: 'band reminder: a Manual checkout is told how to share, not to set up',
       expected: 'manual',
       options: { policy: { mode: 'manual' } },
     },
-    { name: 'a headless session gets none', expected: 'none', options: { mode: 'print' } },
+    { title: 'band reminder: a headless session gets none', expected: 'none', options: { mode: 'print' } },
     {
-      name: 'a session with an unfinished join gets none',
+      title: 'band reminder: a session with an unfinished join gets none',
       expected: 'none',
       // A join switched into this session and has not finished: pi started elsewhere than the thread's folder.
       arrange: async (kit) => {
@@ -205,8 +205,8 @@ describe('automatic activation', () => {
       },
     },
   ]
-  for (const { name, expected, options, arrange } of reminderCases)
-    test(`band reminder: ${name}`, async () => {
+  for (const { title, expected, options, arrange } of reminderCases)
+    test(title, async () => {
       delta = await startDelta({ ...options, start: false })
       // Every question is dismissed, as the upstream case answers none.
       delta.pi.answers.push(undefined, undefined)
@@ -346,8 +346,18 @@ describe('the band on an automatic session', () => {
     expect(ran(delta, 'thread share')).toBe(false)
   })
 
-  for (const mode of ['organization', 'private'] as const)
-    test(`a ${mode} thread in a personal organization is synced, never shared, and offers no share control`, async () => {
+  const personalCases = [
+    {
+      mode: 'organization',
+      title: 'a organization thread in a personal organization is synced, never shared, and offers no share control',
+    },
+    {
+      mode: 'private',
+      title: 'a private thread in a personal organization is synced, never shared, and offers no share control',
+    },
+  ] as const
+  for (const { mode, title } of personalCases)
+    test(title, async () => {
       // The fake account's login is `ada`, and its personal organization says so.
       delta = await startDelta({ policy: { mode, organization: 'org-personal' } })
       await bandSays(delta, "Synced with ada's Organization")
