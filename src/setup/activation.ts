@@ -126,6 +126,9 @@ export async function activate(host: Host, session: string, isCurrent = () => tr
         if (ownsActivation()) report(host, error)
         return
       }
+      // A subagent that ended with its turn open, as when its process was stopped, closes that turn;
+      // delivering it mounts the subagent's own checkout again.
+      if (ownsActivation()) await recoverExecution(host, session)
       if (ownsActivation() && binding.pending.length)
         void drain(host, session).catch((error: unknown) => report(host, error))
       return
@@ -245,6 +248,12 @@ export async function beginSession(host: Host, session: string) {
   const fresh = host.session.turns() === 0
   started = { session, fresh }
   const link = fresh ? await childLink(host, session).catch(() => undefined) : undefined
+  if (link === 'stale') {
+    // A link left in an environment that outlived its session, as a long-running worker's does,
+    // records nothing: not as a subagent of an ended session, nor as a session of its own.
+    host.ui.debug('This session was started by a Delta session that has ended, so Delta does not record it.')
+    return
+  }
   if (link) {
     try {
       await beginChild(host, session, link)

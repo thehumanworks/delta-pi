@@ -7,11 +7,11 @@
  */
 import type { Host } from '../core/host.ts'
 import { isJsonObject, isNonEmptyString } from '../core/json.ts'
-import { isWithin } from '../core/paths.ts'
+import { isWithin, samePath } from '../core/paths.ts'
 import { type Binding, key, load, save, serial, stateFor, storedBinding } from '../core/session-state.ts'
 import { errorText } from '../core/text.ts'
 import type { ProcessStream } from '../core/process.ts'
-import { threadCreate, threadWatch, verifiedContract, watchEvents } from '../cli/delta-cli.ts'
+import { hasWorktreeMount, threadCreate, threadWatch, verifiedContract, watchEvents } from '../cli/delta-cli.ts'
 import { CHILD_CONTRACT_VERSION } from '../cli/thread-commands.ts'
 import type { RecordedMessage, Update } from '../recording/content.ts'
 import { loseExecution } from '../recording/delivery.ts'
@@ -91,24 +91,29 @@ export function parentLink(value: string | undefined): ParentLink | undefined {
 }
 
 /**
- * The recorded session that started this one, when it is still live: a link left in an environment
- * that outlived its session, as a long-running worker's does, records nothing.
+ * The recorded session that started this one, when it is still live, or `stale` when the link is left
+ * in an environment that outlived its session, as a long-running worker's is.
  */
-export async function childLink(host: Host, session: string): Promise<ParentLink | undefined> {
+export async function childLink(host: Host, session: string): Promise<ParentLink | 'stale' | undefined> {
   const link = parentLink(host.env.get(PARENT_ENV))
   if (!link || link.sender === session) return
   const parent = await storedBinding(host, key(link.sender))
-  if (!parent?.snapshot || parent.thread !== link.thread || parent.endedAt !== undefined) return
+  if (!parent?.snapshot || parent.thread !== link.thread || parent.endedAt !== undefined) return 'stale'
   return link
 }
 
 /** Make this new session a subagent recorded under `link`'s thread; its thread is created with its first record. */
 export async function beginChild(host: Host, session: string, link: ParentLink) {
   const cwd = host.session.cwd()
-  const shared = link.directories.find((directory) => isWithin(cwd, directory))
-  // A subagent working in a checkout of its own, such as a Git worktree, attaches that checkout to
-  // its thread while it runs there; one that works nowhere in Git has no files to share.
-  const own = shared === undefined ? await gitRoot(host, cwd) : undefined
+  // A subagent working in a checkout of its own, such as a Git worktree, even one inside its parent's
+  // checkout, attaches that checkout to its thread while it runs there. One working in its parent's
+  // checkout shares the parent's worktrees, and one that works nowhere in Git has no files to share.
+  const root = await gitRoot(host, cwd)
+  const shared =
+    root === undefined
+      ? link.directories.find((directory) => isWithin(cwd, directory))
+      : link.directories.find((directory) => samePath(directory, root))
+  const own = shared === undefined ? root : undefined
   await serial(async () => {
     const existing = await load(host, session)
     if (existing.snapshot || existing.thread) return
@@ -121,13 +126,19 @@ export async function beginChild(host: Host, session: string, link: ParentLink) 
       child: {
         parent: link.reference,
         sender: link.sender,
-        name: cleanTitle(host.env.get(NAME_ENV), 80) ?? DEFAULT_NAME,
+        ...childName(host),
         sharesParentCheckout: shared !== undefined,
         root: shared ?? own ?? cwd,
       },
     })
   })
   host.ui.debug(`This session records as a subagent under Delta thread ${link.thread}.`)
+}
+
+/** The name the extension that started the subagent gave it, or the default its first prompt replaces. */
+function childName(host: Host): { name: string; named?: true } {
+  const name = cleanTitle(host.env.get(NAME_ENV), 80)
+  return name ? { name, named: true } : { name: DEFAULT_NAME }
 }
 
 /** How a subagent's records differ: where paths are shown from, and who its prompts come from. */
@@ -158,7 +169,7 @@ export function sentBy(update: Update, sender: string): Update {
 /** Name a subagent's thread for its first prompt, unless the extension that started it named it. */
 export async function nameChild(host: Host, session: string, text: string) {
   const binding = stateFor(session).binding
-  if (!binding?.child || binding.thread || binding.child.name !== DEFAULT_NAME) return
+  if (!binding?.child || binding.thread || binding.child.named) return
   const name = promptTitle(text)
   if (!name) return
   await serial(async () => {
@@ -168,10 +179,46 @@ export async function nameChild(host: Host, session: string, text: string) {
   })
 }
 
-/** Create the subagent's child thread under its parent's, once, before its first records are sent. */
-export async function ensureChildThread(host: Host, binding: Binding): Promise<Binding> {
-  const child = binding.child
-  if (!child || binding.thread) return binding
+/**
+ * Whether the subagent still needs its thread created, or its own checkout attached or mounted, before
+ * its records are sent.
+ */
+export function childNeedsSetup(binding: Binding): boolean {
+  if (!binding.child) return false
+  if (!binding.thread) return true
+  return !!binding.checkout && (!binding.checkoutReference || !hasWorktreeMount(binding.session, binding.checkout))
+}
+
+/**
+ * Create the subagent's child thread under its parent's, once, then attach its own checkout to it and
+ * keep that mounted, before its records are sent. Each step is saved as it finishes, so one that fails
+ * is retried with the next delivery; once the session is no longer `current`, nothing more starts, and
+ * a mount that started meanwhile is stopped.
+ */
+export async function ensureChildThread(host: Host, binding: Binding, current: () => boolean): Promise<Binding> {
+  const check = async () => {
+    if (!current()) throw new Error("The subagent's session ended while its thread was being prepared")
+  }
+  let next = binding
+  if (next.child && !next.thread) next = await createChildThread(host, next, check)
+  const checkout = next.checkout
+  if (!next.child || !next.thread || !checkout) return next
+  if (!next.checkoutReference) {
+    const checkoutReference = await attachWorktree(host, checkout, next.thread, undefined, check, next.session)
+    await check()
+    next = await serial(async () => {
+      const saved = { ...(await load(host, binding.session)), checkoutReference, pendingWorktree: undefined }
+      await save(host, saved)
+      return saved
+    })
+  }
+  // The mount keeps the checkout synchronized until the subagent's session ends.
+  if (!hasWorktreeMount(next.session, checkout)) await mountCheckout(host, next, check)
+  return next
+}
+
+async function createChildThread(host: Host, binding: Binding, check: () => Promise<void>): Promise<Binding> {
+  const child = binding.child!
   const created = await threadCreate(host, {
     externalId: binding.session,
     parent: {
@@ -183,31 +230,16 @@ export async function ensureChildThread(host: Host, binding: Binding): Promise<B
   if (typeof created.reference !== 'string' || !created.reference)
     throw new Error("thread create: Delta returned no reference for the subagent's thread")
   const reference = created.reference
-  let next: Binding = await serial(async () => {
+  // The thread exists now whether or not the session still does: saving it lets a resumed session
+  // use it rather than create another.
+  const saved = await serial(async () => {
     const current = await load(host, binding.session)
-    const saved = { ...current, thread: created.thread_id, child: { ...current.child!, reference } }
-    await save(host, saved)
-    return saved
+    const next = { ...current, thread: created.thread_id, child: { ...current.child!, reference } }
+    await save(host, next)
+    return next
   })
-  if (next.checkout) {
-    const checkoutReference = await attachWorktree(
-      host,
-      next.checkout,
-      created.thread_id,
-      next.checkoutReference,
-      undefined,
-      next.session,
-    )
-    next = await serial(async () => {
-      const current = await load(host, binding.session)
-      const saved = { ...current, checkoutReference, pendingWorktree: undefined }
-      await save(host, saved)
-      return saved
-    })
-    // The mount keeps the checkout synchronized until the subagent's session ends.
-    await mountCheckout(host, next)
-  }
-  return next
+  await check()
+  return saved
 }
 
 async function gitRoot(host: Host, cwd: string): Promise<string | undefined> {

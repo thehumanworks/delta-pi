@@ -85,6 +85,8 @@ export type ChildOf = {
   /** The child thread's own reference, from its creation receipt; later commands use it. */
   reference?: string
   name: string
+  /** The extension that started the subagent named it, so its first prompt does not. */
+  named?: true
   /** Whether the child works in its parent's checkout, so its thread shares the parent's worktrees. */
   sharesParentCheckout: boolean
   /** The directory the child's paths are shown relative to: the parent's checkout it works in, or its own. */

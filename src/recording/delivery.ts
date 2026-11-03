@@ -51,7 +51,14 @@ import {
 import { activationIncomplete, captureDecided, outbox } from '../setup/activation.ts'
 import { notifyOnce } from '../setup/interaction.ts'
 import type { Entry } from '../subagents/children.ts'
-import { childFields, ensureChildThread, exportParent, followChildTurn, stopChildTurn } from '../subagents/subagents.ts'
+import {
+  childFields,
+  childNeedsSetup,
+  ensureChildThread,
+  exportParent,
+  followChildTurn,
+  stopChildTurn,
+} from '../subagents/subagents.ts'
 import { beginShare } from '../sharing/share.ts'
 import { liveFor, rememberStatus } from '../watch/watch.ts'
 import { settleRemote } from '../watch/rows.ts'
@@ -275,17 +282,25 @@ async function drainPending(host: Host, session: string): Promise<boolean> {
   const delivering = () => activation.session === session && sessions.has(session) && !isPaused(sessions.get(session)!)
   while (delivering()) {
     let binding = await serial(async () => load(host, session))
-    // A subagent's thread is created under its parent's with its first records.
-    if (binding.child && !binding.thread && binding.pending.length) {
+    const current = stillActive(session)
+    // A subagent's thread is created under its parent's with its first records, and its own checkout
+    // is attached and mounted before they are sent; a step that failed is retried here.
+    if (binding.pending.length && childNeedsSetup(binding)) {
       await requireContract(host, session)
-      binding = await ensureChildThread(host, binding)
-      if (stateFor(session).currentTurnId !== undefined) followChildTurn(host, session)
+      const created = !binding.thread
+      try {
+        binding = await ensureChildThread(host, binding, () => delivering() && current())
+      } catch (error) {
+        // Preparing the thread of a session that ended stops there; that is not a failure to show.
+        if (!delivering() || !current()) return false
+        throw error
+      }
+      if (created && stateFor(session).currentTurnId !== undefined) followChildTurn(host, session)
     }
     if (!binding.thread || !binding.pending.length) return true
     // A recovered outbox checks the CLI's contract before its first append, so an incompatible CLI
     // records nothing. An answer that arrives after the session ended or was activated again belongs
     // to that earlier lifetime: it neither appends nor reports.
-    const current = stillActive(session)
     try {
       await requireContract(host, session)
     } catch (error) {
