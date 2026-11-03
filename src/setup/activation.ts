@@ -575,9 +575,11 @@ function activateAutomatically(host: Host, session: string, root: string, upload
     }
   })()
   autoActivating.set(session, task)
-  void task.finally(() => {
+  // Not `finally`: its promise would carry the task's rejection, which the caller handles, unobserved.
+  const forget = () => {
     if (autoActivating.get(session) === task) autoActivating.delete(session)
-  })
+  }
+  void task.then(forget, forget)
   return task
 }
 
