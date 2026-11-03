@@ -91,11 +91,22 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
       }
     },
     /**
-     * Make `times` runs of `command`, such as `worktree list`, fail as a transient error, after letting
-     * `after` runs through.
+     * Make `times` runs of `command`, such as `worktree list`, fail with Delta's error `code`, transient
+     * unless `retryable` is false, after letting `after` runs through.
      */
-    fail(command: string, { times = 1, after = 0 } = {}) {
-      writeFileSync(join(state, `fail-${command.replaceAll(' ', '-')}`), JSON.stringify({ after, times }))
+    fail(command: string, { times = 1, after = 0, code = 'process_failed', retryable = true } = {}) {
+      writeFileSync(
+        join(state, `fail-${command.replaceAll(' ', '-')}`),
+        JSON.stringify({ after, times, code, retryable }),
+      )
+    },
+    /** Let `command` run normally again after `fail`. */
+    stopFailing(command: string) {
+      rmSync(join(state, `fail-${command.replaceAll(' ', '-')}`), { force: true })
+    },
+    /** Make `thread contract` answer the range of recording contracts another CLI version speaks. */
+    contract(min: number, max: number) {
+      writeFileSync(join(state, 'contract.json'), JSON.stringify({ min, max }))
     },
     /** Hold the runs of `command` after the first `after` until the returned function releases them. */
     hold(command: string, { after = 0 } = {}): () => void {

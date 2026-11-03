@@ -205,9 +205,10 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   // `fail-<command>` counts down, each after letting `after` runs through: see world() in test/world.ts.
   const switchName = words.replaceAll(' ', '-')
   /** Whether this run is past the runs the switch lets through; counts them down meanwhile. */
-  const reached = (path: string): { after: number; times?: number } | undefined => {
+  type Switch = { after: number; times?: number; code?: string; retryable?: boolean }
+  const reached = (path: string): Switch | undefined => {
     if (!existsSync(path)) return
-    const value = JSON.parse(readFileSync(path, 'utf8')) as { after: number; times?: number }
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Switch
     if (value.after <= 0) return value
     writeFileSync(path, JSON.stringify({ ...value, after: value.after - 1 }))
     return undefined
@@ -219,14 +220,19 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   if (failure) {
     const left = (failure.times ?? 1) - 1
     if (left <= 0) rmSync(failing, { force: true })
-    else writeFileSync(failing, JSON.stringify({ after: 0, times: left }))
-    fail('process_failed', `${words} failed as the test asked`, true)
+    else writeFileSync(failing, JSON.stringify({ ...failure, after: 0, times: left }))
+    fail(failure.code ?? 'process_failed', `${words} failed as the test asked`, failure.retryable ?? true)
   }
 
   switch (words) {
-    case 'thread contract':
-      out({ operation: 'contract', min: 8, max: 8 })
+    case 'thread contract': {
+      // A test sets the range another CLI version would speak in `contract.json`.
+      const range = existsSync(join(root, 'contract.json'))
+        ? (JSON.parse(readFileSync(join(root, 'contract.json'), 'utf8')) as { min: number; max: number })
+        : { min: 8, max: 8 }
+      out({ operation: 'contract', ...range })
       break
+    }
     case 'auth status':
       if (signedOut) {
         out({ status: 'signed_out' })

@@ -988,8 +988,9 @@
     },
     {
       "upstream": "register.test.ts > native turns > a queued own finish does not block a new prompt",
-      "status": "missing",
-      "note": "Hold finish delivery, admit/start another prompt, and verify durable finish-before-next-start ordering without waiting for the server acknowledgment."
+      "status": "covered",
+      "note": "Appends are held at the fake CLI rather than through a hook.",
+      "ours": ["test/behaviour/delivery.test.ts > a queued own finish does not block a new prompt"]
     },
     {
       "upstream": "register.test.ts > native turns > a raced busy start is observed independently of snapshots and cancels only its local ID",
@@ -1061,8 +1062,12 @@
     },
     {
       "upstream": "register.test.ts > native turns > live turns report the installed plugin version and only confirmed finish reasons",
-      "status": "missing",
-      "note": "Healthy e2e asserts end_turn and CLI integration labels, but not producer_version, malformed version, cancellation/error/unknown reason mapping or recovered predecessor reason omission. Add those assertions; the finish-mapping bug is reported."
+      "status": "ported",
+      "note": "Ported onto the kit, with the stop reasons pi reports.",
+      "ours": [
+        "test/behaviour/delivery.test.ts > live turns report the installed extension version and only confirmed finish reasons",
+        "test/delivery.test.ts > a turn ends normally only when its last reply stopped normally; an unnamed finish stays unspecified"
+      ]
     },
     {
       "upstream": "register.test.ts > native turns > malformed saved control {\"schemaVersion\":2} is not translated or discarded",
@@ -1241,13 +1246,19 @@
     },
     {
       "upstream": "register.test.ts > recording > a failed append shows the CLI error in the transcript once, keeps the record queued, and retries it",
-      "status": "missing",
-      "note": "Pure delivery-policy tests do not execute timers or drains. Fail two appends, assert one notice and unchanged records, advance backoff, then assert successful ordered delivery and recovery."
+      "status": "covered",
+      "note": "Checks the notice, the queue and the scheduled retry; pi's band colours are not asserted.",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a failed append shows the CLI error in the transcript once, keeps the record queued, and retries it"
+      ]
     },
     {
       "upstream": "register.test.ts > recording > a failure that lands after its session ended is neither retried nor shown",
-      "status": "missing",
-      "note": "Hold and fail an append after shutdown; assert no retry timer, note or status from the obsolete operation."
+      "status": "covered",
+      "note": "The session ends through /new, as pi replaces it.",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a failure that lands after its session ended is neither retried nor shown"
+      ]
     },
     {
       "upstream": "register.test.ts > recording > a growing backlog reports the same reason once, and ending the session cancels and resets its retry",
@@ -1266,8 +1277,11 @@
     },
     {
       "upstream": "register.test.ts > recording > a permanent append failure pauses with its reason instead of retrying a poison record",
-      "status": "missing",
-      "note": "Test permanent invalid_record, no autonomous retries, one retry on the next prompt, retained later records, and explicit share recovery. The offline reload_required/Fork & Restore e2e case is a different refusal."
+      "status": "covered",
+      "note": "An automatic session recovers on its next prompt rather than through a share.",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a permanent append failure pauses with its reason instead of retrying a poison record"
+      ]
     },
     {
       "upstream": "register.test.ts > recording > an acknowledgment that cannot be saved replays the exact marked record after restart",
@@ -1560,8 +1574,11 @@
     },
     {
       "upstream": "register.test.ts > the recording contract > a CLI newer than this plugin asks the person to update the plugin",
-      "status": "missing",
-      "note": "test/thread-commands.test.ts checks contractRefusal(9,10) text in isolation. Add a command-level test verifying the extension-update answer and no thread creation or records."
+      "status": "ported",
+      "note": "Ported onto the kit.",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a CLI newer than this extension asks the person to update the extension"
+      ]
     },
     {
       "upstream": "register.test.ts > the recording contract > a CLI that predates thread contract is treated as too old",
@@ -1585,13 +1602,17 @@
     },
     {
       "upstream": "register.test.ts > the recording contract > an out-of-range recording contract refuses to share, and a later retry re-checks",
-      "status": "missing",
-      "note": "Pure contract-range tests exist, but no share test verifies zero create/attach/export/watch side effects, an uncached refusal, and successful renegotiation on retry."
+      "status": "ported",
+      "note": "Ported onto the kit.",
+      "ours": [
+        "test/behaviour/delivery.test.ts > an out-of-range recording contract refuses to share, and a later retry checks again"
+      ]
     },
     {
       "upstream": "register.test.ts > the recording contract > the recording contract is checked once per session, not per command",
-      "status": "missing",
-      "note": "Count actual contract CLI calls across create, attach, append and repeated share in one runtime."
+      "status": "ported",
+      "note": "Ported onto the kit.",
+      "ours": ["test/behaviour/delivery.test.ts > the recording contract is checked once per session, not per command"]
     },
     {
       "upstream": "register.test.ts > the status band > /delta share returns at once and reports in the band before exporting",
@@ -1739,8 +1760,11 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a CLI this plugin cannot record against leaves auto mode off and says which to update",
-      "status": "missing",
-      "note": "Contract parsing/refusal unit tests exist, but no activation test supplies an incompatible contract and checks no staged binding/create plus the explanatory notice."
+      "status": "ported",
+      "note": "Ported onto the kit.",
+      "ours": [
+        "test/behaviour/activation.test.ts > a CLI this extension cannot record against leaves automatic recording off and says which to update"
+      ]
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a clear session activates and uploads to the organization",
@@ -1766,8 +1790,9 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a resumed session never activates",
-      "status": "missing",
-      "note": "Need to resume an unbound session with existing conversation in an automatic-policy repository and assert no create or automatic snapshot. The local resume E2E resumes an already-bound recording session instead."
+      "status": "ported",
+      "note": "Ported onto the kit.",
+      "ours": ["test/behaviour/activation.test.ts > a resumed session never activates"]
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a session that already holds a binding is never created again",
@@ -1779,8 +1804,11 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > a session that ends during attach starts no watcher and gives no share advice",
-      "status": "missing",
-      "note": "Hold automatic attach, shut down or replace the session, then release attach; assert no obsolete watcher, advice, or successful activation is produced."
+      "status": "ported",
+      "note": "Ported onto the kit.",
+      "ours": [
+        "test/behaviour/activation.test.ts > a session that ends while its checkout is attached starts no watcher and gives no share advice"
+      ]
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > band reminder: a Manual checkout is told how to share, not to set up",
@@ -1804,8 +1832,11 @@
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > holds the first prompt, row, and turn until the auto decision, so none is lost",
-      "status": "missing",
-      "note": "The print-mode recording E2E sends an immediate first prompt, but does not hold the contract before staging. Port needs a held contract and concurrent input/message/agent-start assertions proving the capture boundary releases without loss."
+      "status": "covered",
+      "note": "pi's prompt and its row arrive through one run, so the test holds the prompt and its turn.",
+      "ours": [
+        "test/behaviour/activation.test.ts > holds the first prompt and its turn until the automatic decision, so neither is lost"
+      ]
     },
     {
       "upstream": "setup/auto.test.ts > automatic activation > quitting partway through setup offers it again",
@@ -1827,8 +1858,9 @@
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > Discard drops the refused changes and drains the queued records",
-      "status": "missing",
-      "note": "The E2E selects Fork & Restore only. Select Discard, assert no fork, one discard, resumed delivery, and removal of the conflict state."
+      "status": "covered",
+      "note": "/delta resolve's Discard stands in for the band's button.",
+      "ours": ["test/behaviour/activation.test.ts > Discard drops the refused changes and delivers the queued records"]
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > Fork & Restore forks the refused changes, discards the original, and drains the queued records",
@@ -1880,8 +1912,11 @@
     },
     {
       "upstream": "setup/auto.test.ts > offline recording > keeps a prompt and its turn while Delta is unreachable, then drains after reconnect",
-      "status": "missing",
-      "note": "Retry-policy units do not exercise recording. Make status/append unreachable during an automatic session, verify prompts continue and local-ack records remain queued, then reconnect and drain the matching lifecycle."
+      "status": "covered",
+      "note": "Delta is made unreachable through failing commands rather than a fault on status alone.",
+      "ours": [
+        "test/behaviour/activation.test.ts > keeps a prompt and its turn while Delta is unreachable, then delivers them once it is back"
+      ]
     },
     {
       "upstream": "setup/auto.test.ts > setup command and policy problems > a headless session refuses /delta setup and never offers onboarding",
@@ -2016,8 +2051,11 @@
     },
     {
       "upstream": "setup/auto.test.ts > the band on an automatic session > the share control pressed during a turn shares once the turn ends",
-      "status": "missing",
-      "note": "The README's command replacement is applicable, but currently refuses instead of queuing; see the parity finding. Test a share command during a turn, no mid-turn publication, and one publication after settlement."
+      "status": "covered",
+      "note": "pi's band has no share button; /delta share during a turn queues the share the same way.",
+      "ours": [
+        "test/behaviour/sharing.test.ts > /delta share during a turn asks who should see the session once the turn ends, then shares it"
+      ]
     },
     {
       "upstream": "setup/delta-menu.test.ts > each menu answer becomes the action its dedicated command runs",

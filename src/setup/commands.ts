@@ -46,7 +46,7 @@ async function setupCommand(host: Host): Promise<string> {
 
 /** Every `/delta` action, for a session that can't show the menu and for an action it doesn't know. */
 export const DELTA_USAGE =
-  'Usage: /delta share [<email>…] | /delta join <shared-link-or-thread> | /delta setup | /delta update | /delta plugin-update [check | notifications on|off] | /delta org list | /delta org current | /delta org switch <ID> | /delta org invite <email>… | /delta org manage | /delta link | /delta copy | /delta resolve'
+  'Usage: /delta share [<email>…] | /delta join <shared-link-or-thread> | /delta setup | /delta update | /delta plugin-update [check | later | notifications on|off] | /delta org list | /delta org current | /delta org switch <ID> | /delta org invite <email>… | /delta org manage | /delta link | /delta copy | /delta resolve'
 /** `/delta-join` typed without its link. */
 export const JOIN_USAGE =
   'Usage: /delta-join <link>. Paste the Delta link someone shared with you, such as /delta-join https://delta.dev/join/…, or a thread ID.'

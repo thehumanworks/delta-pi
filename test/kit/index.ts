@@ -17,7 +17,7 @@ import { type Answer, FakePi, type FakeSession } from './pi.ts'
 import { type Environment, kitProcesses } from './processes.ts'
 
 export { until } from '../world.ts'
-export { echoModel, type FakeSession, type Model, type Reply } from './pi.ts'
+export { echoModel, FakeSession, type Model, type Reply } from './pi.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
 
@@ -92,13 +92,19 @@ export async function startDelta(
     /** Let work already under way run. */
     settle: flush,
     /**
-     * Wait for `work` while time passes, a second at a time up to `limitMs`, as it would while pi waits
-     * on a bounded budget such as shutdown's.
+     * Wait for `work` while time passes, a second at a time, as it would while pi waits on a bounded
+     * budget such as shutdown's. Between steps the real I/O under way gets a moment, so a loaded machine
+     * cannot outrun the work; a real deadline of `timeoutMs` stops a wait that never ends.
      */
-    async whileTimePasses<T>(work: Promise<T>, limitMs = 120_000): Promise<T> {
+    async whileTimePasses<T>(work: Promise<T>, timeoutMs = 20_000): Promise<T> {
       let done = false
       const watched = work.finally(() => (done = true))
-      for (let passed = 0; !done && passed < limitMs; passed += 1_000) await clock.advance(1_000)
+      const deadline = Date.now() + timeoutMs
+      while (!done) {
+        if (Date.now() > deadline) throw new Error('The work did not finish while time passed')
+        await clock.advance(1_000)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
       return watched
     },
     /**
