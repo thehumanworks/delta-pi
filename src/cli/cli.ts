@@ -151,7 +151,7 @@ export class DeltaCli {
         {
           timeoutMs: 600_000,
         },
-      ).catch((error) => {
+      ).catch((error: unknown) => {
         throw new Error(
           `Delta installation could not finish: ${errorText(error)}. An installer may still be running; let it finish and check the installation before retrying.`,
         )
@@ -179,6 +179,7 @@ export class DeltaCli {
     } catch (error) {
       throw new Error(
         `Delta installation could not finish: ${errorText(error)}. Check network access, curl, and disk permissions, then retry /delta-share or /delta-join <link>.`,
+        { cause: error },
       )
     }
     if (installed.exitCode !== 0 || installed.isStdoutTruncated || installed.isStderrTruncated)

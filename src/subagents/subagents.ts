@@ -258,7 +258,7 @@ export function followChildTurn(host: Host, session: string) {
       }
     }
   })()
-    .catch((error) => host.ui.debug(`Delta could not follow this subagent's turn: ${errorText(error)}`))
+    .catch((error: unknown) => host.ui.debug(`Delta could not follow this subagent's turn: ${errorText(error)}`))
     .finally(() => {
       watch.stop()
       if (turnWatch === watch) turnWatch = undefined

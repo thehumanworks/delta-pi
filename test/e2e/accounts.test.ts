@@ -11,7 +11,7 @@ afterEach(async () => {
 })
 
 function onlyThread(w: World) {
-  const threads = Object.values(w.delta().threads) as any[]
+  const threads = Object.values(w.delta().threads)
   return threads.length === 1 ? threads[0] : undefined
 }
 

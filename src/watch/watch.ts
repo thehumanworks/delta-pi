@@ -343,7 +343,7 @@ export async function startConversation(host: Host, session: string): Promise<Th
         : { thread, items: {} },
     )
     launched = true
-    void consumeConversation(host, session, revision, cancel.signal, readiness).catch((error) => {
+    void consumeConversation(host, session, revision, cancel.signal, readiness).catch((error: unknown) => {
       if (!ownsStartup()) return
       const current = feed.connection
       if ('gate' in current) current.gate.reject(error)
@@ -417,7 +417,7 @@ async function consumeConversation(
       goLive(host)
       resumeCheckout(stateFor(session), 'watcher')
       readiness.resolve(ready!)
-      void drain(host, session).catch((error) => {
+      void drain(host, session).catch((error: unknown) => {
         if (ownsConnection()) return report(host, error)
       })
     }

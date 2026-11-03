@@ -180,6 +180,7 @@ export async function threadContract(host: Host): Promise<ThreadContract | undef
     // The same failure a share or a status read reports when the CLI is missing or cannot start.
     throw new Error(
       `thread contract: cannot run Delta CLI (${errorText(error)}). Repair the selected Delta CLI and retry.`,
+      { cause: error },
     )
   }
   if (result.isStdoutTruncated || result.isStderrTruncated)
@@ -204,6 +205,7 @@ async function command(
   } catch (error) {
     throw new Error(
       `${name}: cannot run Delta CLI (${errorText(error)}). Install the matching new Delta CLI and app, and put delta on PATH.`,
+      { cause: error },
     )
   }
   return checkResult(result, name)
@@ -444,7 +446,9 @@ async function mountCommand<T>(
 /** Read a ready mount's output until it exits, so a full pipe never blocks it; its end releases it here. */
 async function drainOutput(process: MountProcess) {
   try {
-    while (!(await process.stream.next()).done) {}
+    while (!(await process.stream.next()).done) {
+      /* the output is read only so the mount never blocks on a full pipe */
+    }
   } catch {
     /* a mount that failed to read is gone either way */
   }

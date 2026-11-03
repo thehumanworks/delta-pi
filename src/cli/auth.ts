@@ -1,4 +1,4 @@
-import { isJsonObject, type JsonObject } from '../core/json.ts'
+import { isJsonObject, isNonEmptyString, type JsonObject, jsonText } from '../core/json.ts'
 import type { ProcessStream } from '../core/process.ts'
 import { readCommandStream } from './command-reader.ts'
 import { commandErrorFromEnvelope } from './thread-commands.ts'
@@ -81,7 +81,8 @@ export async function requireAuthentication(
       (code, stdout) => {
         if (code === 0) return true
         try {
-          return code === 1 && typeof JSON.parse(stdout)?.status === 'string'
+          const reply: unknown = JSON.parse(stdout)
+          return code === 1 && isJsonObject(reply) && typeof reply.status === 'string'
         } catch {
           return false
         }
@@ -153,16 +154,17 @@ export async function requireAuthentication(
     if (login.status === 'signed_in') return
     if (login.status === 'access_denied') return await resolveAccess(login)
     if (login.status !== 'pending') throw authFailure(login, recovery, retry)
-    const expires = typeof login.expires_at === 'string' ? Date.parse(login.expires_at) : NaN
+    const expiresAt = login.expires_at
     if (
       typeof login.login_id !== 'string' ||
       !login.login_id ||
       typeof login.url !== 'string' ||
       !/^https?:\/\//.test(login.url) ||
-      !Number.isFinite(expires)
+      typeof expiresAt !== 'string' ||
+      !Number.isFinite(Date.parse(expiresAt))
     )
       throw new Error('Delta returned an invalid sign-in link; update Delta and retry')
-    await notice(`Finish signing in to Delta in your browser; this link expires at ${login.expires_at}: ${login.url}`)
+    await notice(`Finish signing in to Delta in your browser; this link expires at ${expiresAt}: ${login.url}`)
     // Detached attempts can be shared by other clients. Stop our waiter, never
     // cancel the app's attempt or sign the account out when pi changes session.
     wait('sign-in')
@@ -191,7 +193,7 @@ function authFailure(value: JsonObject, recovery: string, retry: string): Error 
     // `requireAuthentication` offers to open the beta terms before reaching here.
     case 'access_denied':
       return new Error(
-        `Delta access denied: ${value.message ?? 'account access is required'}.${value.url ? ` ${value.url}` : ''} ${recovery}`,
+        `Delta access denied: ${typeof value.message === 'string' ? value.message : 'account access is required'}.${isNonEmptyString(value.url) ? ` ${value.url}` : ''} ${recovery}`,
       )
     case 'signed_out':
       return new Error(`Delta signed out before sign-in finished. Retry ${retry}.`)
@@ -204,6 +206,6 @@ function authFailure(value: JsonObject, recovery: string, retry: string): Error 
     case 'expired':
       return new Error(`Delta sign-in expired. Retry ${retry}.`)
     default:
-      return new Error(`Unsupported Delta authentication status: ${value.status}. Update Delta and retry.`)
+      return new Error(`Unsupported Delta authentication status: ${jsonText(value.status)}. Update Delta and retry.`)
   }
 }

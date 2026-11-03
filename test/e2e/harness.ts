@@ -204,10 +204,10 @@ export class Pi {
     if (!response.success) throw new Error(`prompt refused: ${JSON.stringify(response)}`)
     await until(
       () => this.events.filter((event) => event.type === 'agent_settled').length > settled,
-      `pi to settle after "${message}" (notices: ${JSON.stringify(this.notices().slice(-3))})`,
+      `pi to settle after "${message}"`,
       timeoutMs,
-    ).catch((error) => {
-      throw new Error(`${error.message}; latest notices: ${JSON.stringify(this.notices().slice(-3))}`)
+    ).catch((error: unknown) => {
+      throw new Error(`${(error as Error).message}; latest notices: ${JSON.stringify(this.notices().slice(-3))}`)
     })
   }
 

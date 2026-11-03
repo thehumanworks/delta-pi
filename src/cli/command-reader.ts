@@ -1,7 +1,7 @@
 import { isJsonObject } from '../core/json.ts'
 import type { Exit, Output } from '../core/process.ts'
 import { errorText } from '../core/text.ts'
-import { commandErrorFromEnvelope, DeltaCommandError } from './thread-commands.ts'
+import { commandErrorFromEnvelope, commandErrorFromOutput, DeltaCommandError } from './thread-commands.ts'
 
 type Stream = AsyncIterator<Output, Exit>
 
@@ -38,7 +38,7 @@ export async function readCommandStream(
       try {
         piece = await stream.next()
       } catch (error) {
-        if (signal.aborted) throw new Error(`Delta ${name} cancelled`)
+        if (signal.aborted) throw new Error(`Delta ${name} cancelled`, { cause: error })
         throw new DeltaCommandError('process_failed', `${name}: ${errorText(error)}`)
       }
       if (signal.aborted) throw new Error(`Delta ${name} cancelled`)
@@ -46,11 +46,8 @@ export async function readCommandStream(
       if (piece.done) {
         const stdout = chunks.join('')
         if (!acceptsExit(piece.value.code, stdout)) {
-          let failure: DeltaCommandError | undefined
           // Output that is not JSON carries no typed error; stderr then says what failed.
-          try {
-            failure = commandErrorFromEnvelope(JSON.parse(stdout)?.error, name)
-          } catch {}
+          const failure = commandErrorFromOutput(stdout, name)
           throw (
             failure ??
             new DeltaCommandError(
@@ -111,17 +108,14 @@ export async function readMountReady(
       try {
         piece = await stream.next()
       } catch (error) {
-        if (signal.aborted) throw new Error(`Delta ${name} cancelled`)
+        if (signal.aborted) throw new Error(`Delta ${name} cancelled`, { cause: error })
         throw new DeltaCommandError('process_failed', `${name}: ${errorText(error)}`)
       }
       if (signal.aborted) throw new Error(`Delta ${name} cancelled`)
       if (timedOut) throw new DeltaCommandError('timeout', `Delta ${name} timed out`)
       if (piece.done) {
-        let failure: DeltaCommandError | undefined
         // Output that is not JSON carries no typed error; stderr then says what failed.
-        try {
-          failure = commandErrorFromEnvelope(JSON.parse(stdout)?.error, name)
-        } catch {}
+        const failure = commandErrorFromOutput(stdout, name)
         throw (
           failure ??
           new DeltaCommandError(

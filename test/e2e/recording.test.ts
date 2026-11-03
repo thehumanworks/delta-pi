@@ -19,7 +19,7 @@ test('a repository that syncs automatically records each turn, its tools and its
   await pi.prompt('hello there')
   await pi.prompt('run echo hi')
   const thread = await until(() => {
-    const found = Object.values(w.delta().threads)[0] as any
+    const found = Object.values(w.delta().threads)[0]
     return (
       found?.records.some(
         (record: any) =>
@@ -71,7 +71,7 @@ test('a write is recorded as a diff with its patch', async () => {
   await pi.prompt('write notes.txt first line')
   await pi.prompt('write notes.txt second line')
   const thread = await until(() => {
-    const found = Object.values(w.delta().threads)[0] as any
+    const found = Object.values(w.delta().threads)[0]
     return (
       found?.records.filter(
         (record: any) =>
@@ -113,7 +113,7 @@ test('a new session records into a thread of its own, and resuming the first car
   await until(() => w.calls().filter((call) => call.argv.includes('mount')).length === 3, 'the restored mount')
   await pi.prompt('first again')
   const [one, two] = await until(() => {
-    const threads = Object.values(w.delta().threads) as any[]
+    const threads = Object.values(w.delta().threads)
     return (
       threads[0]?.records.some((record: any) => JSON.stringify(record.update).includes('Echo: first again')) && threads
     )
@@ -133,7 +133,7 @@ test("a prompt steered into a running turn is recorded in it, and teammates' row
   await until(() => w.calls().some((call) => call.argv.includes('watch')), 'the thread watch to start')
   const settled = pi.events.filter((event) => event.type === 'agent_settled').length
   await pi.send({ type: 'prompt', message: 'run sleep 2' })
-  const thread = () => Object.values(w.delta().threads)[0] as any
+  const thread = () => Object.values(w.delta().threads)[0]
   const start = await until(
     () => thread()?.records.find((record: any) => record.update.state === 'running'),
     'the turn to start',
@@ -182,7 +182,7 @@ test('a print-mode run in a repository that syncs automatically is recorded befo
     { cwd: w.checkout, env: w.env(), timeout: 60_000 },
   ).toString()
   expect(output).toContain('Echo: one shot')
-  const thread = Object.values(w.delta().threads)[0] as any
+  const thread = Object.values(w.delta().threads)[0]
   expect(thread.records.map((record: any) => record.update.sessionUpdate)).toEqual([
     'state_update',
     'user_message',

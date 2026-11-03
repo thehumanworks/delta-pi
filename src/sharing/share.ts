@@ -246,6 +246,7 @@ async function share(host: Host, request: ShareRequest): Promise<ShareOutcome> {
     if (error instanceof DeltaCommandError && error.reason === 'worktree_directory_in_use')
       throw new Error(
         `${root} is a checkout Delta manages for another thread, so it can't be shared as this one. Run /delta-join with that thread's link to work there (${error.message})`,
+        { cause: error },
       )
     throw error
   }

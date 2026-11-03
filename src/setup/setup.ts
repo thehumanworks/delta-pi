@@ -18,7 +18,7 @@ import { AccessRequiredError } from '../cli/auth.ts'
 import { InteractionUnavailableError } from '../core/host.ts'
 import { errorText } from '../core/text.ts'
 import { commandErrorFromEnvelope, contractRefusal, type ThreadContract } from '../cli/thread-commands.ts'
-import { isJsonObject, isNonEmptyString, isOneOf, type JsonObject } from '../core/json.ts'
+import { isJsonObject, isNonEmptyString, isOneOf, type JsonObject, jsonText } from '../core/json.ts'
 
 /** A question could not be shown: nobody can answer questions in this pi session. */
 export { InteractionUnavailableError }
@@ -147,7 +147,7 @@ export function inviteResultsFrom(result: JsonObject): InviteResult[] {
   return result.results.map((entry): InviteResult =>
     entry.status === 'invited'
       ? { email: entry.email, invited: true }
-      : { email: entry.email, invited: false, message: String(entry.message ?? entry.reason ?? 'failed') },
+      : { email: entry.email, invited: false, message: jsonText(entry.message ?? entry.reason ?? 'failed') },
   )
 }
 

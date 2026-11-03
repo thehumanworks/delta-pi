@@ -165,7 +165,7 @@ export function settleRemote(host: Host, session: string): Promise<void> | undef
   let task: Promise<void> | undefined = undefined
   task = (async () => {
     // Start after `task` is assigned, so a run with nothing to do still clears `settling`.
-    await undefined
+    await Promise.resolve()
     try {
       if (!rowsHeld(session, host)) flushNotes(host, session)
       const view = feed.view

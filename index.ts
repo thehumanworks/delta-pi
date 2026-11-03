@@ -90,7 +90,9 @@ export default function delta(pi: ExtensionAPI) {
       mkdirSync(dataDir, { recursive: true, mode: 0o700 })
       try {
         if (statSync(logPath).size > DEBUG_LOG_LIMIT) renameSync(logPath, `${logPath}.1`)
-      } catch {}
+      } catch {
+        /* no log yet, or another pi process just moved it aside */
+      }
       appendFileSync(logPath, `${new Date().toISOString()} ${text}\n`, { mode: 0o600 })
     } catch {
       /* the debug log is best effort */
@@ -122,7 +124,7 @@ export default function delta(pi: ExtensionAPI) {
       terminal: () => context?.mode === 'tui',
       messages: () =>
         (context?.sessionManager.getBranch() ?? []).flatMap((entry) =>
-          entry.type === 'message' ? [entry.message as AgentMessage] : [],
+          entry.type === 'message' ? [entry.message] : [],
         ),
       turns: () =>
         (context?.sessionManager.getBranch() ?? []).filter(

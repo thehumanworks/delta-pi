@@ -2,6 +2,7 @@
  * The thread's title: the session's pi name when it has one, else the first line of its first
  * prompt, as Delta's own threads are named for what they were asked.
  */
+import { isJsonObject, jsonText } from '../core/json.ts'
 import type { Host } from '../core/host.ts'
 import { load, report, save, serial, stateFor } from '../core/session-state.ts'
 import { cutsSurrogatePair } from '../core/text.ts'
@@ -39,7 +40,9 @@ function firstPromptTitle(host: Host): string | undefined {
       typeof value.content === 'string'
         ? value.content
         : Array.isArray(value.content)
-          ? value.content.flatMap((block) => (block?.type === 'text' ? [String(block.text)] : [])).join('\n')
+          ? value.content
+              .flatMap((block) => (isJsonObject(block) && block.type === 'text' ? [jsonText(block.text)] : []))
+              .join('\n')
           : ''
     return promptTitle(text)
   }
@@ -67,7 +70,7 @@ export async function recordTitle(host: Host, session: string) {
       return true
     })
     // Once staged, the title is delivered and reported like every other record.
-    if (staged) void drain(host, session).catch((error) => report(host, error))
+    if (staged) void drain(host, session).catch((error: unknown) => report(host, error))
   } catch (error) {
     host.ui.debug(`Couldn't record this session's title: ${String(error)}`)
   }

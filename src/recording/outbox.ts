@@ -1,3 +1,4 @@
+import { isJsonObject, isSafeInteger } from '../core/json.ts'
 import { cutsSurrogatePair } from '../core/text.ts'
 import { parseAppendReceipt } from '../cli/thread-commands.ts'
 
@@ -58,12 +59,12 @@ export function appendBatch(
  * own start, a running state update, may name its own sequence.
  */
 export function pendingRecordTurn(line: string, sequence: number): number | undefined {
-  const record = JSON.parse(line)
+  const record: unknown = JSON.parse(line)
   const invalid = () => new Error(`invalid pending record ${sequence}; sharing paused without changing its record`)
   // Every saved envelope was written with JSON.stringify plus a newline; requiring that
   // representation also rejects duplicate keys.
   if (
-    !record ||
+    !isJsonObject(record) ||
     line !== JSON.stringify(record) + '\n' ||
     record.schemaVersion !== 1 ||
     record.sequence !== sequence ||
@@ -72,24 +73,20 @@ export function pendingRecordTurn(line: string, sequence: number): number | unde
   )
     throw invalid()
   const keys = Object.keys(record).sort().join()
+  const update = record.update
   if (
     !['schemaVersion,sequence,update', 'schemaVersion,sequence,turnSequence,update'].includes(keys) ||
-    !record.update ||
-    Array.isArray(record.update) ||
-    typeof record.update.sessionUpdate !== 'string'
+    !isJsonObject(update) ||
+    typeof update.sessionUpdate !== 'string'
   )
     throw invalid()
   const turnSequence = record.turnSequence
+  if (turnSequence === undefined) return undefined
   if (
-    turnSequence !== undefined &&
-    (!Number.isSafeInteger(turnSequence) ||
-      turnSequence < 1 ||
-      (turnSequence >= sequence &&
-        !(
-          turnSequence === sequence &&
-          record.update.sessionUpdate === 'state_update' &&
-          record.update.state === 'running'
-        )))
+    !isSafeInteger(turnSequence) ||
+    turnSequence < 1 ||
+    (turnSequence >= sequence &&
+      !(turnSequence === sequence && update.sessionUpdate === 'state_update' && update.state === 'running'))
   )
     throw invalid()
   return turnSequence

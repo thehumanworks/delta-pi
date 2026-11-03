@@ -97,7 +97,7 @@ export function spawn(init: SpawnInit): ProcessStream {
   })
   const queue: Output[] = []
   let exit: Exit | undefined
-  let failure: unknown
+  let failure: Error | undefined
   let waiting: (() => void) | undefined
   const wake = () => {
     const resume = waiting

@@ -1,4 +1,4 @@
-import { isJsonObject, jsonText } from '../core/json.ts'
+import { isJsonObject, type JsonObject, jsonText } from '../core/json.ts'
 import { cutsSurrogatePair, errorText } from '../core/text.ts'
 import type { WatchComment, WatchCommentTarget, WatchItem } from '../cli/thread-commands.ts'
 
@@ -29,6 +29,7 @@ const SNAPSHOT_BUDGET = 400_000
 
 /** Text for the transcript and the model keeps tabs and newlines, but no other control characters. */
 export function conversationText(text: string): string {
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what this removes
   return text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
 }
 
@@ -169,12 +170,15 @@ function toolCallDisplay(item: WatchItem): string {
  * already name it, and its status unless it completed. Each is one line; the caller fits the detail
  * to the room it has, with `middleTruncate`.
  */
+/** A tool call's title, else its name, else `tool`. */
+function toolName(tool: JsonObject): string {
+  return [tool.title, tool.name].find((value): value is string => typeof value === 'string' && !!value.trim()) ?? 'tool'
+}
+
 export function toolCallParts(item: WatchItem): { name: string; detail?: string; status?: string } {
   const tool = item.content
   const status = typeof tool.status === 'string' && tool.status !== 'completed' ? singleLine(tool.status) : undefined
-  const title = singleLine(
-    String([tool.title, tool.name].find((value) => typeof value === 'string' && value.trim()) ?? 'tool'),
-  )
+  const title = singleLine(toolName(tool))
   const input = toolInput(tool.rawInput)
   const detail = input && !describesInput(title, input) ? input : undefined
   return { name: middleTruncate(title, TOOL_NAME_LIMIT), detail, status }
@@ -245,17 +249,19 @@ export function renderItem(item: WatchItem, thread: string, edited = false): str
   let body: string
   if (item.kind === 'tool_call') {
     const tool = item.content
-    const name = [tool.title, tool.name].find((value) => typeof value === 'string' && value.trim()) ?? 'tool'
     // The input section below carries the call's full arguments, so the label stays one bounded line.
-    label = `tool call ${middleTruncate(singleLine(String(name)), TOOL_LINE_LIMIT)}${typeof tool.status === 'string' ? ` (${tool.status})` : ''}`
+    label = `tool call ${middleTruncate(singleLine(toolName(tool)), TOOL_LINE_LIMIT)}${typeof tool.status === 'string' ? ` (${tool.status})` : ''}`
     const sections: string[] = []
     if (tool.rawInput !== undefined) sections.push(`Input: ${clip(jsonText(tool.rawInput), 2_000)}`)
     for (const entry of Array.isArray(tool.content) ? tool.content.filter(isJsonObject) : []) {
       if (entry.type === 'diff') {
         const patch =
           typeof entry.patch === 'string' ? entry.patch : typeof entry.newText === 'string' ? entry.newText : ''
-        sections.push(`Changed ${entry.path ?? 'a file'}:\n${clip(patch, SECTION_LIMIT)}`)
-      } else if (entry.type === 'terminal') sections.push(`Terminal ${entry.terminalId ?? ''}`.trim())
+        sections.push(
+          `Changed ${typeof entry.path === 'string' ? entry.path : 'a file'}:\n${clip(patch, SECTION_LIMIT)}`,
+        )
+      } else if (entry.type === 'terminal')
+        sections.push(`Terminal ${typeof entry.terminalId === 'string' ? entry.terminalId : ''}`.trim())
       else if (entry.type === 'content') {
         const block = entry.content
         sections.push(

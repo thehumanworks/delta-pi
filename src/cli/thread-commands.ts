@@ -187,6 +187,17 @@ export function commandErrorFromEnvelope(error: unknown, name?: string): DeltaCo
   )
 }
 
+/** The typed error a line of the CLI's output carries; output that is not JSON carries none. */
+export function commandErrorFromOutput(text: string, name?: string): DeltaCommandError | undefined {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  return isJsonObject(value) ? commandErrorFromEnvelope(value.error, name) : undefined
+}
+
 /** The typed error an envelope carries, if any: what every CLI answer is checked for first. */
 function envelopeError(value: unknown): DeltaCommandError | undefined {
   return isJsonObject(value) ? commandErrorFromEnvelope(value.error) : undefined
@@ -263,12 +274,10 @@ export class DeltaSendError extends Error {
 
 /** Name why an append failed, preferring the CLI's typed error envelope over stderr. */
 export function appendFailure(stdout: string, stderr: string, exitCode: number | null): DeltaCommandError {
+  // A line that is not an error envelope may be followed by one.
   for (const line of stdout.trim().split('\n').reverse()) {
-    try {
-      const failure = commandErrorFromEnvelope(JSON.parse(line)?.error)
-      if (failure) return failure
-      // A line that is not JSON is not an error envelope; the next one may be.
-    } catch {}
+    const failure = commandErrorFromOutput(line)
+    if (failure) return failure
   }
   return new DeltaCommandError('process_failed', stderr.trim() || `append exited ${exitCode ?? 'abnormally'}`)
 }

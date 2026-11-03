@@ -173,34 +173,34 @@ test("another participant's agent takes a line of its own, or its owner's place 
   }
   const band = renderBand(remote, WIDE)
   expect(text(band.right)).toBe('Maya, Sam, Ada')
-  expect(text(band.activity!)).toMatch(/^. Maya's agent  \(34s\)$/)
+  expect(text(band.activity)).toMatch(/^. Maya's agent {2}\(34s\)$/)
   expect(band.activity![1]).toMatchObject({ color: personColor('u-maya'), bold: true })
   // What it is doing: its newest open call, timed from when that opened, with the others counted.
   const doing = { text: 'cargo test -p thread', tool: true, seconds: 72, more: 2 }
-  expect(text(renderBand({ ...remote, agent: { seconds: 300, doing } }, WIDE).activity!)).toMatch(
-    /^. Maya's agent › cargo test -p thread  \(1m 12s · 2 more running\)$/,
+  expect(text(renderBand({ ...remote, agent: { seconds: 300, doing } }, WIDE).activity)).toMatch(
+    /^. Maya's agent › cargo test -p thread {2}\(1m 12s · 2 more running\)$/,
   )
   expect(
     text(
       renderBand(
         { ...remote, agent: { seconds: 300, doing: { text: 'thinking', tool: false, seconds: 8, more: 0 } } },
         WIDE,
-      ).activity!,
+      ).activity,
     ),
-  ).toMatch(/› thinking  \(8s\)$/)
+  ).toMatch(/› thinking {2}\(8s\)$/)
   // The line has the whole width, so a long title keeps its start and its end.
   const long = { ...doing, more: 0, text: 'cargo test -p thread external_recording -- --nocapture' }
   const narrow = text(
-    renderBand({ ...remote, agent: { seconds: 300, doing: long } }, { columns: 60, terminal: true }).activity!,
+    renderBand({ ...remote, agent: { seconds: 300, doing: long } }, { columns: 60, terminal: true }).activity,
   )
   expect(narrow.length).toBeLessThanOrEqual(58)
   expect(narrow).toContain('cargo')
   expect(narrow).toContain('…')
   expect(narrow).toContain('capture')
-  expect(text(renderBand({ ...remote, agent: { seconds: 130, quiet: 45 } }, WIDE).activity!)).toBe(
+  expect(text(renderBand({ ...remote, agent: { seconds: 130, quiet: 45 } }, WIDE).activity)).toBe(
     "◌ Maya's agent quiet 45s",
   )
-  expect(text(renderBand({ ...live, turn: { state: 'starting' } }, WIDE).activity!)).toMatch(/^. An agent starting…$/)
+  expect(text(renderBand({ ...live, turn: { state: 'starting' } }, WIDE).activity)).toMatch(/^. An agent starting…$/)
   // With one row the agent takes its owner's place on the band's row, and a failure's reason outranks its line.
   expect(text(renderBand({ ...remote, agent: { seconds: 34, doing } }, { ...WIDE, rows: 1 }).right)).toMatch(
     /^. Maya's agent 34s · Sam, Ada$/,

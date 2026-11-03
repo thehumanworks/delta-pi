@@ -1,6 +1,6 @@
 import type { Timer } from '../core/clock.ts'
 import { claimInstallation, installation } from '../core/installation.ts'
-import { isJsonObject, isNonEmptyString, isOneOf, isSafeInteger } from '../core/json.ts'
+import { isJsonObject, isNonEmptyString, isOneOf, isSafeInteger, type JsonObject } from '../core/json.ts'
 import type { ProcessStream, RunInit, RunResult, SpawnInit } from '../core/process.ts'
 import { errorText } from '../core/text.ts'
 import { DeltaCli } from './cli.ts'
@@ -52,37 +52,63 @@ class UnsupportedUpdateCommandError extends Error {}
 
 /** Parses the versioned installation-update response, independently of the thread protocol. */
 export function parseInstallUpdate(stdout: string): UpdateResult {
-  const value = JSON.parse(stdout)
-  const failure = commandErrorFromEnvelope(value?.error, 'update')
+  const value: unknown = JSON.parse(stdout)
+  const failure = commandErrorFromEnvelope(isJsonObject(value) ? value.error : undefined, 'update')
   if (failure) throw failure
+  const result = isJsonObject(value) ? updateResult(value) : undefined
+  if (!result) throw new Error(`Unexpected Delta update response. ${MANUAL_UPDATE}`)
+  return result
+}
+
+const UPDATE_STATUSES = ['up_to_date', 'update_available', 'updated', 'install_ready', 'unsupported'] as const
+const UPDATE_CHANNELS = ['dev', 'trunk', 'stable'] as const
+
+/** The update a schema 1 reply describes, or undefined when any field is not as the schema says. */
+function updateResult(value: JsonObject): UpdateResult | undefined {
+  const { status, message } = value
+  const currentVersion = value.current_version
+  const latestVersion = value.latest_version
+  const canInstall = value.can_install
+  const restartRequired = value.restart_required
   if (
-    value?.schema_version !== 1 ||
-    typeof value.can_install !== 'boolean' ||
-    !['up_to_date', 'update_available', 'updated', 'install_ready', 'unsupported'].includes(value.status) ||
-    typeof value.current_version !== 'string' ||
-    !value.current_version ||
-    !(value.latest_version === null || (typeof value.latest_version === 'string' && value.latest_version)) ||
-    !['dev', 'trunk', 'stable'].includes(value.channel) ||
-    typeof value.message !== 'string' ||
-    (['update_available', 'updated', 'install_ready'].includes(value.status) && !value.latest_version) ||
-    (value.restart_required !== undefined && typeof value.restart_required !== 'boolean') ||
-    (value.status === 'install_ready' &&
-      (value.can_install !== true ||
-        !Array.isArray(value.install_argv) ||
-        !value.install_argv.length ||
-        !value.install_argv.every((part: unknown) => typeof part === 'string' && part)))
+    value.schema_version !== 1 ||
+    typeof canInstall !== 'boolean' ||
+    !isOneOf(status, UPDATE_STATUSES) ||
+    !isNonEmptyString(currentVersion) ||
+    !(latestVersion === null || isNonEmptyString(latestVersion)) ||
+    !isOneOf(value.channel, UPDATE_CHANNELS) ||
+    typeof message !== 'string' ||
+    (restartRequired !== undefined && typeof restartRequired !== 'boolean')
   )
-    throw new Error(`Unexpected Delta update response. ${MANUAL_UPDATE}`)
-  return {
-    status: value.status,
-    currentVersion: value.current_version,
-    latestVersion: value.latest_version,
-    message: value.message,
-    canInstall: value.can_install,
-    ...(value.status === 'updated' && value.restart_required !== undefined
-      ? { restartRequired: value.restart_required }
-      : {}),
-    ...(value.status === 'install_ready' ? { installArgv: value.install_argv } : {}),
+    return
+  switch (status) {
+    case 'up_to_date':
+    case 'unsupported':
+      return { status, currentVersion, latestVersion, message, canInstall }
+    case 'update_available':
+      return latestVersion === null ? undefined : { status, currentVersion, latestVersion, message, canInstall }
+    case 'updated':
+      if (latestVersion === null) return
+      return {
+        status,
+        currentVersion,
+        latestVersion,
+        message,
+        canInstall,
+        ...(restartRequired !== undefined ? { restartRequired } : {}),
+      }
+    case 'install_ready': {
+      const installArgv = value.install_argv
+      if (
+        latestVersion === null ||
+        canInstall !== true ||
+        !Array.isArray(installArgv) ||
+        !installArgv.length ||
+        !installArgv.every(isNonEmptyString)
+      )
+        return
+      return { status, currentVersion, latestVersion, message, canInstall, installArgv }
+    }
   }
 }
 

@@ -215,7 +215,7 @@ function editDiff(
  */
 export function toolInfo(name: string, input: unknown, root?: string, cwd?: string): { title: string; kind: string } {
   const value = object(input) ?? {}
-  const field = (key: string) => (typeof value[key] === 'string' && value[key] ? (value[key] as string) : undefined)
+  const field = (key: string) => (typeof value[key] === 'string' && value[key] ? value[key] : undefined)
   const path = (key: string) => {
     const given = field(key)
     if (!given) return
@@ -247,8 +247,8 @@ export function toolInfo(name: string, input: unknown, root?: string, cwd?: stri
       const parts = ['grep']
       if (value.ignoreCase) parts.push('-i')
       if (value.literal) parts.push('-F')
-      if (value.context !== undefined) parts.push(`-C ${value.context}`)
-      if (value.limit !== undefined) parts.push(`| head -${value.limit}`)
+      if (value.context !== undefined) parts.push(`-C ${jsonText(value.context)}`)
+      if (value.limit !== undefined) parts.push(`| head -${jsonText(value.limit)}`)
       if (field('glob')) parts.push(`--include="${field('glob')}"`)
       if (field('pattern')) parts.push(`"${field('pattern')}"`)
       if (path('path')) parts.push(path('path')!)

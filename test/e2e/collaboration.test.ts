@@ -15,7 +15,7 @@ const ONBOARDING = (request: Record<string, any>) =>
   String(request.title).includes('Set it up now?') ? 'Not now' : undefined
 
 function onlyThread(w: World) {
-  const threads = Object.values(w.delta().threads) as any[]
+  const threads = Object.values(w.delta().threads)
   return threads.length === 1 ? threads[0] : undefined
 }
 
@@ -201,7 +201,7 @@ test('a pi process a recorded session starts records as a subagent in a child th
   )
   const child = await until(
     () =>
-      (Object.values(w.delta().threads) as any[]).find(
+      Object.values(w.delta().threads).find(
         (thread) => thread.parent && thread.records.some((record: any) => record.update.state === 'idle'),
       ),
     "the subagent's thread",
@@ -217,7 +217,7 @@ test('a pi process a recorded session starts records as a subagent in a child th
 }, 120_000)
 
 function onlyThreadOf(w: World) {
-  return (Object.values(w.delta().threads) as any[]).find((thread) => !thread.parent)
+  return Object.values(w.delta().threads).find((thread) => !thread.parent)
 }
 
 test('a subagent working in a Git worktree of its own attaches that checkout to its thread while it runs', async () => {
@@ -233,7 +233,7 @@ test('a subagent working in a Git worktree of its own attaches that checkout to 
   )
   const child = await until(
     () =>
-      (Object.values(w.delta().threads) as any[]).find(
+      Object.values(w.delta().threads).find(
         (thread) => thread.parent && thread.records.some((record: any) => record.update.state === 'idle'),
       ),
     "the subagent's thread",

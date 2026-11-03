@@ -6,7 +6,7 @@ import {
   parseProgressEvent,
   type UpdateHost,
 } from '../src/cli/install-update.ts'
-import type { Exit, Output, ProcessStream, RunResult } from '../src/core/process.ts'
+import type { Output, ProcessStream, RunResult } from '../src/core/process.ts'
 
 /** A finished program's output as a stream, as the CLI would print it. */
 function stream(stdout: string, stderr = '', code = 0): ProcessStream {
@@ -17,8 +17,8 @@ function stream(stdout: string, stderr = '', code = 0): ProcessStream {
   return {
     pid: 1,
     next: async () =>
-      pieces.length ? { done: false, value: pieces.shift()! } : { done: true, value: { code, signal: null } as Exit },
-    return: async () => ({ done: true, value: { code: null, signal: 'SIGTERM' } as Exit }),
+      pieces.length ? { done: false, value: pieces.shift()! } : { done: true, value: { code, signal: null } },
+    return: async () => ({ done: true, value: { code: null, signal: 'SIGTERM' } }),
   }
 }
 const ran = (stdout: string, exitCode = 0): RunResult => ({

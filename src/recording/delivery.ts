@@ -3,7 +3,7 @@
  * retries, turn executions, checkout verification, capture failures, and refused offline changes.
  */
 import { join } from 'node:path'
-import { exists, list, readText, remove, writePrivate } from '../core/files.ts'
+import { exists, list, readText, remove, size, writePrivate } from '../core/files.ts'
 import type { Host } from '../core/host.ts'
 import { isJsonObject } from '../core/json.ts'
 import { isWithin } from '../core/paths.ts'
@@ -195,7 +195,9 @@ export function scheduleOutboxCleanup(host: Host, binding: Binding) {
     .finally(() => {
       if (runtime.cleanupTask === task) runtime.cleanupTask = undefined
     })
-    .catch((error) => reportCleanupIssue(host, binding.session, `Delta outbox cleanup failed: ${errorText(error)}`))
+    .catch((error: unknown) =>
+      reportCleanupIssue(host, binding.session, `Delta outbox cleanup failed: ${errorText(error)}`),
+    )
 }
 
 function reportCleanupIssue(host: Host, session: string, message: string) {
@@ -329,7 +331,7 @@ async function drainPending(host: Host, session: string): Promise<boolean> {
     // on the stop, so a slow or failed abort cannot hold up the outbox.
     const running = binding.execution?.sequence
     if (running !== undefined && fenced.includes(running))
-      void loseExecution(host, session, running, 'Shared execution was superseded').catch((error) =>
+      void loseExecution(host, session, running, 'Shared execution was superseded').catch((error: unknown) =>
         report(host, error),
       )
     if (failure) throw failure
@@ -457,14 +459,14 @@ async function endExecution(
   })
   if (!isCurrent()) return
   if (delivery === 'await') await drain(host, session)
-  else if (delivery === 'background') void drain(host, session).catch((error) => report(host, error))
+  else if (delivery === 'background') void drain(host, session).catch((error: unknown) => report(host, error))
   else await deliverWithin(host, session, TURN_COMPLETE_DELIVERY_BUDGET_MS)
 }
 
 /** Delivers within `budgetMs`, letting the outbox finish a slower append in the background. */
 export async function deliverWithin(host: Host, session: string, budgetMs: number): Promise<void> {
   const cancelled = new AbortController()
-  const delivery = drain(host, session).catch((error) => report(host, error))
+  const delivery = drain(host, session).catch((error: unknown) => report(host, error))
   const expiry = host.clock.sleep(budgetMs, { signal: cancelled.signal }).catch(() => undefined)
   await Promise.race([delivery, expiry])
   cancelled.abort()
@@ -553,7 +555,7 @@ export async function drain(host: Host, session: string): Promise<void> {
       // A delivery that succeeds again clears any pinned failure notice.
       host.ui.invalidate()
     },
-    (error) => failDelivery(host, session, error),
+    (error: unknown) => failDelivery(host, session, error),
   )
   drainTask = task
   try {
@@ -612,7 +614,7 @@ function scheduleSendRetry(host: Host, session: string, retryAfterMs?: number) {
   // A timer rather than a sleep: the handler that hit the failure may finish long before the retry.
   state.retryTimer = host.clock.after(delay, () => {
     state.retryTimer = undefined
-    if (activation.session === session) void drain(host, session).catch((error) => report(host, error))
+    if (activation.session === session) void drain(host, session).catch((error: unknown) => report(host, error))
   })
 }
 
@@ -731,7 +733,7 @@ async function resolveRefusal(host: Host, session: string, kind: 'fork' | 'disca
       ? "Delta forked this thread's offline changes into a kept thread."
       : "Delta discarded this thread's offline changes.",
   )
-  void drain(host, session).catch((error) => report(host, error))
+  void drain(host, session).catch((error: unknown) => report(host, error))
 }
 
 /** Show why the person's Fork & Restore or Discard did not resolve the refusal; the choice stays available. */
@@ -791,7 +793,7 @@ export async function startTurn(host: Host) {
         'Delta observation or capture is unavailable',
       )
     else {
-      void drain(host, session).catch((error) => report(host, error))
+      void drain(host, session).catch((error: unknown) => report(host, error))
       if (runtime.binding?.child) followChildTurn(host, session)
     }
   } catch (error) {
@@ -822,7 +824,7 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
     }
   }
   // Remote rows held back while this turn ran reach the model now, between turns.
-  void settleRemote(host, session)?.catch((error) => report(host, error))
+  void settleRemote(host, session)?.catch((error: unknown) => report(host, error))
   if (requests.shareAfterTurn?.session === session) {
     const { audience } = requests.shareAfterTurn
     requests.shareAfterTurn = undefined
@@ -890,5 +892,6 @@ export async function recordMessage(host: Host, message: AgentMessage, id: strin
     priorFiles.delete(recorded.toolCallId)
     runtime.toolTurns.delete(recorded.toolCallId)
   }
-  if (!runtime.captureFailure && runtime.binding.thread) void drain(host, session).catch((error) => report(host, error))
+  if (!runtime.captureFailure && runtime.binding.thread)
+    void drain(host, session).catch((error: unknown) => report(host, error))
 }

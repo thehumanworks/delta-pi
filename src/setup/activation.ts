@@ -126,7 +126,8 @@ export async function activate(host: Host, session: string, isCurrent = () => tr
         if (ownsActivation()) report(host, error)
         return
       }
-      if (ownsActivation() && binding.pending.length) void drain(host, session).catch((error) => report(host, error))
+      if (ownsActivation() && binding.pending.length)
+        void drain(host, session).catch((error: unknown) => report(host, error))
       return
     }
     // A shared session's own checkout stays synchronized only while a mount process runs for it.
@@ -160,7 +161,7 @@ export async function activate(host: Host, session: string, isCurrent = () => tr
         // Offline recording does not wait for the watcher: start it in the background and let a
         // prompt or the outbox proceed meanwhile.
         resumeCheckout(runtime, 'watcher')
-        void startConversation(host, session).catch((error) => {
+        void startConversation(host, session).catch((error: unknown) => {
           if (ownsActivation()) report(host, error)
         })
       } else {
@@ -176,7 +177,7 @@ export async function activate(host: Host, session: string, isCurrent = () => tr
       if (ownsActivation() && !isPaused(runtime)) await recoverExecution(host, session)
     }
     if (ownsActivation() && !runtime.captureFailure && binding.thread && binding.pending.length)
-      void drain(host, session).catch((error) => report(host, error))
+      void drain(host, session).catch((error: unknown) => report(host, error))
     if (ownsActivation() && binding.thread && binding.snapshot) exportParent(host, binding)
   } finally {
     if (epoch === activation.epoch) activation.activating = ''
@@ -189,7 +190,8 @@ export async function finishRestoredActivation(host: Host, session: string, bind
   if (binding.autoUpload) followUpload(host, session)
   if (!isPaused(runtime)) await recoverExecution(host, session)
   if (!owns()) return
-  if (!runtime.captureFailure && binding.pending.length) void drain(host, session).catch((error) => report(host, error))
+  if (!runtime.captureFailure && binding.pending.length)
+    void drain(host, session).catch((error: unknown) => report(host, error))
   if (binding.thread && binding.snapshot) exportParent(host, binding)
 }
 
@@ -263,7 +265,7 @@ export async function beginSession(host: Host, session: string) {
   // The offer and activation never delay a prompt.
   host.clock.after(0, () => {
     if (activation.session !== session) return decideCapture(session)
-    void startSession(host, session, !fresh).catch((error) => {
+    void startSession(host, session, !fresh).catch((error: unknown) => {
       decideCapture(session)
       report(host, error)
     })
@@ -545,10 +547,10 @@ function activateAutomatically(host: Host, session: string, root: string, upload
       )
       if (!ownsActivation()) return
       runtime.binding = await serial(() => load(host, session))
-      void startConversation(host, session).catch((error) => {
+      void startConversation(host, session).catch((error: unknown) => {
         if (ownsActivation()) report(host, error)
       })
-      void drain(host, session).catch((error) => {
+      void drain(host, session).catch((error: unknown) => {
         if (ownsActivation()) report(host, error)
       })
       exportParent(host, runtime.binding)
