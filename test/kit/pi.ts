@@ -185,18 +185,21 @@ export class FakePi {
 
   /**
    * How the next switch a command asks for goes: pi's own refusal before it starts, a failure before it
-   * shuts the session down, or, unset, a switch.
+   * shuts the session down, a switch that opens the session in another directory (`{ cwd }`, as pi's
+   * terminal does when the session's own directory is missing and the person continues where pi is), or,
+   * unset, a switch.
    */
-  nextSwitch: 'cancel' | Error | undefined
+  nextSwitch: 'cancel' | Error | { cwd: string } | undefined
 
   /** Switch to the session saved in `file`, as `/resume` or a command's `switchSession` does. */
   async switchTo(file: string, reason: 'resume' | 'new' | 'fork' = 'resume') {
     const outcome = this.nextSwitch
     this.nextSwitch = undefined
     if (outcome === 'cancel') return { cancelled: true }
-    if (outcome) throw outcome
+    if (outcome instanceof Error) throw outcome
     await this.shutdown(reason, file)
-    this.session = this.sessions.get(file) ?? this.sessionFromFile(file)
+    const session = this.sessions.get(file) ?? this.sessionFromFile(file)
+    this.session = outcome ? new FakeSession(session.id, outcome.cwd, file) : session
     await this.start(reason)
     return { cancelled: false }
   }

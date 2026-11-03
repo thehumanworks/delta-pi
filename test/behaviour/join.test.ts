@@ -957,7 +957,7 @@ test('Windows mixed separators join and allow subdirectories but not sibling che
   expect(outside.shown).toContain(`pi is working in ${directory}-other, outside this session's folder ${directory}`)
 })
 
-test("the session a join switches into is not told it is unrecorded while its mount runs", async () => {
+test('the session a join switches into is not told it is unrecorded while its mount runs', async () => {
   delta = await joiner()
   const { url, thread } = sharedThread(delta.world)
   // Delta's mounts are Git checkouts of the teammate's repository.
@@ -979,4 +979,64 @@ test("the session a join switches into is not told it is unrecorded while its mo
   await delta.until(() => joined(delta!), 'the join to finish')
   expect(band(delta)).not.toMatch(/Not set up|Not syncing/)
   expect(delta.pi.dialogs.slice(dialogs)).toEqual([])
+})
+
+test('terminal: a refused cd surfaces partial progress without enabling participation in the old cwd', async () => {
+  const first = await joiner()
+  delta = first
+  const { url, thread } = sharedThread(first.world)
+  const before = first.pi.session.id
+  // pi's counterpart of a refused /cd: it opens the join's session where pi already is, as its terminal
+  // does when the session's folder is missing and the person continues there.
+  first.pi.nextSwitch = { cwd: first.world.checkout }
+  await first.pi.command('delta-join', url)
+  await first.until(() => shown(first).includes("Delta couldn't finish joining"), 'the join to stop')
+  const fresh = first.pi.session
+  expect(fresh.id).not.toBe(before)
+  expect(fresh.cwd).toBe(first.world.checkout)
+  expect(ran(first, 'thread watch')).toEqual([])
+  const saved = await bindingOf(first, fresh.id)
+  expect(saved).toMatchObject({ snapshot: false, joinTransition: { locator: url }, next: 1, pending: [] })
+  const { directory } = saved.joinTransition
+  expect(await first.pi.prompt('do not run here')).toBe('handled')
+  // Sharing it instead is refused, runs nothing, and points back to the join.
+  const commands = first.commands().length
+  await first.pi.command('delta', 'share')
+  await first.until(() => shown(first).includes('This session joined an already shared thread'), 'the share refusal')
+  expect(shown(first)).toContain(`/delta-join ${url}`)
+  expect(first.commands()).toHaveLength(commands)
+  expect(await bindingOf(first, fresh.id)).toEqual(saved)
+  expect(recordsOf(first, thread)).toEqual([])
+  await first.whileTimePasses(first.pi.shutdown('quit'))
+  await first.crash()
+  // Started again where it is, the session stays blocked, says where it has to run, and keeps its join.
+  const resume = (cwd: string) =>
+    startDelta({ world: first.world, session: new FakeSession(fresh.id, cwd, fresh.file) })
+  const second = await resume(first.world.checkout)
+  try {
+    await second.until(() => shown(second).includes("Delta couldn't finish joining"), 'the join to stop again')
+    expect(shown(second)).toContain(directory)
+    expect(await second.pi.prompt('still blocked after restart')).toBe('handled')
+    await second.pi.command('delta-join', 'another-link')
+    expect(shown(second)).toContain(`This session is joining ${url}; retry /delta-join with that link`)
+    expect(await bindingOf(second, fresh.id)).toEqual(saved)
+    second.expectClean()
+  } finally {
+    await second.stop()
+  }
+  // Opened in the thread's folder, it finishes the join it was started for, under the same owner.
+  const third = await resume(directory)
+  try {
+    await third.until(() => joined(third), 'the join to finish in the folder')
+    expect(await bindingOf(third, fresh.id)).toMatchObject({
+      snapshot: true,
+      joined: true,
+      owner: saved.joinTransition.owner,
+    })
+    expect([...ran(first, 'thread mount'), ...ran(third, 'thread mount')]).toHaveLength(2)
+    expect(await third.pi.prompt('in the folder')).toBe('settled')
+    third.expectClean()
+  } finally {
+    await third.stop()
+  }
 })
