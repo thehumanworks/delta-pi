@@ -1,6 +1,17 @@
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, startDelta } from '../kit/index.ts'
-import { binding, checkouts, exports, MANUAL, ran, records, setupCommands, share, staged } from './sharing-kit.ts'
+import {
+  binding,
+  checkouts,
+  exports,
+  MANUAL,
+  ran,
+  records,
+  setupCommands,
+  share,
+  staged,
+  unlisted,
+} from './sharing-kit.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -141,10 +152,11 @@ test('a checkout Delta manages for another thread is named in the share failure,
   const failure = await share(delta)
   expect(failure).toContain('manages for another thread')
   expect(failure).toContain('/delta-join')
+  unlisted(delta)
   expect(await share(delta)).toBe(delta.thread().url)
   expect(exports(delta)).toBe(1)
   // The retry attached the local worktree identity the first attempt created.
-  expect(ran(delta).filter((command) => command === 'worktree create')).toHaveLength(1)
+  expect(delta.world.delta().worktrees).toHaveLength(1)
 })
 
 test('a staging record write failure contacts no Delta command and leaves no partial import', async () => {

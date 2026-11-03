@@ -1,12 +1,14 @@
 /**
  * What the share behaviour tests (sharing.test.ts, lifecycle.test.ts) share: a checkout that records only
- * what `/delta share` shares, running a share to its outcome as upstream's `fake.share($)` does, restarting
- * pi on the same session, and reading what was staged, exported and set up.
+ * what `/delta share` shares, running a share to its outcome as upstream's `fake.share($)` does, a Delta
+ * CLI that is missing until a share installs it, and reading what was staged, exported and set up.
  */
 import { existsSync } from 'node:fs'
-import { type Kit, startDelta } from '../kit/index.ts'
+import { join } from 'node:path'
+import type { RunResult } from '../../src/core/process.ts'
+import type { Kit } from '../kit/index.ts'
 import type { Dialog } from '../kit/pi.ts'
-import { world, type World } from '../world.ts'
+import { FAKE_BIN, world, type World } from '../world.ts'
 
 /** A checkout set to record only what `/delta share` shares, so no setup offer opens. */
 export const MANUAL = { mode: 'manual' }
@@ -61,12 +63,6 @@ export function manualWorld(): World {
   return world({ policy: MANUAL })
 }
 
-/** End `kit`'s pi as quitting does, and resume its session in a new pi process on the same machine. */
-export async function restart(kit: Kit): Promise<Kit> {
-  await kit.stop()
-  return startDelta({ world: kit.world, session: kit.pi.session })
-}
-
 /** The session's saved binding, as the store holds it. */
 export async function binding(kit: Kit): Promise<any> {
   return kit.store.get(`session:${kit.pi.session.id}`)
@@ -84,10 +80,15 @@ export function records(kit: Kit): any[] {
   return kit.thread()?.records ?? []
 }
 
-/** How many times the session's conversation was exported: each export stages its first record anew. */
-export function exports(kit: Kit): number {
-  const first = `/outbox/${kit.pi.session.id}/1-0.json`
+/** How many times a session's conversation was exported: each export stages its first record anew. */
+export function exports(kit: Kit, session = kit.pi.session.id): number {
+  const first = `/outbox/${session}/1-0.json`
   return kit.disk.touched('write').filter((path) => path.endsWith(first)).length
+}
+
+/** A Delta error envelope, as a command whose work was done and whose answer was lost prints it. */
+export function lost(message: string, code = 'app_unavailable', retryable = true): string {
+  return `${JSON.stringify({ error: { code, reason: code, message, retryable } })}\n`
 }
 
 /** The setup commands, which a share runs and nothing else may: creation, attachment and publication. */
@@ -131,4 +132,47 @@ export function addMessage(kit: Kit, text: string) {
     timestamp: new Date().toISOString(),
     message: { role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() },
   })
+}
+
+/**
+ * Make the Delta CLI missing until a share or join installs it, by standing in for the shell that runs
+ * Delta's discovery and installer scripts (src/cli/cli.ts). `setups` lists the discoveries and
+ * installations a share or join ran, without the startup update check's own discovery; `install`, when
+ * set, holds the installer until it resolves.
+ */
+export function missingCli(kit: Kit) {
+  const cli = {
+    missing: true,
+    setups: [] as ('discover' | 'install')[],
+    install: undefined as Promise<void> | undefined,
+  }
+  const answer = (stdout: string, exitCode: number): RunResult => ({
+    stdout,
+    stderr: '',
+    exitCode,
+    isStdoutTruncated: false,
+    isStderrTruncated: false,
+  })
+  const found = () => answer(`${join(FAKE_BIN, 'delta')}\n`, 0)
+  kit.programs.set('sh', async (argv, init) => {
+    const script = argv[2] ?? ''
+    if (!script.includes('command -v delta')) return undefined
+    const install = script.includes('--non-interactive')
+    // The update check discovers on a private, short budget, and never installs.
+    if (!install && init.timeoutMs === 5_000) return cli.missing ? answer('', 3) : found()
+    cli.setups.push(install ? 'install' : 'discover')
+    if (!install) return cli.missing ? answer('', 3) : found()
+    await cli.install
+    cli.missing = false
+    return found()
+  })
+  return cli
+}
+
+/**
+ * Make `worktree list` name no worktree, as Delta lists only the checkouts it syncs: a retry can then
+ * find the local worktree identity an earlier attempt created only where it saved it.
+ */
+export function unlisted(kit: Kit) {
+  kit.world.answer('worktree list', { patch: { worktrees: [] } }, { times: 1000 })
 }
