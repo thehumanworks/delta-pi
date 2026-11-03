@@ -723,7 +723,15 @@ export class RemoteView {
    * items are drawn depends on which are the newest.
    */
   get settled(): boolean {
-    return !this.snapshotDone || this.unsettled.size === 0
+    return !this.snapshotDone || (this.unsettled.size === 0 && this.deferred === undefined)
+  }
+
+  /** A row taken for the model that had to wait before it was added; it is the next row. */
+  private deferred: PendingRow | undefined
+
+  /** Keep `row`, taken but not added because rows must wait now, as the next row. */
+  defer(row: PendingRow) {
+    this.deferred = row
   }
 
   /**
@@ -732,6 +740,9 @@ export class RemoteView {
    * correction row.
    */
   async nextRow(): Promise<PendingRow | undefined> {
+    const deferred = this.deferred
+    this.deferred = undefined
+    if (deferred) return deferred
     if (this.snapshotDone && this.omitting.length) {
       const omits = this.omitting
       this.omitting = []
@@ -861,6 +872,12 @@ export async function addRows(view: RemoteView, sink: RowSink): Promise<void> {
     while (sink.current() && !view.settled && !sink.held()) {
       const row = await view.nextRow()
       if (!row || !sink.current()) continue
+      // A turn may have started while the row was prepared: it waits for that turn to end. Nothing
+      // awaits from here until it is added, so no turn can start in between.
+      if (sink.held()) {
+        view.defer(row)
+        break
+      }
       if (row.announcement) sink.announce(row.announcement)
       sink.debug(`Adding a row to pi's context: ${row.text.split('\n', 1)[0]}`)
       let result: { deny?: string }
