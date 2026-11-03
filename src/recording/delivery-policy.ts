@@ -1,3 +1,7 @@
+/**
+ * Whether a failed delivery is retried, after how long, or pauses sharing, decided without timers, UI or
+ * records so it can be tested alone.
+ */
 import { classifyCommandFailure, type DeltaCommandError } from '../cli/thread-commands.ts'
 
 export type FailureStreak = {

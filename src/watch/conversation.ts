@@ -1,3 +1,7 @@
+/**
+ * The watched thread as pi shows it and the model reads it: Delta's items and comments rendered as text,
+ * the ledger of what the model has read, and the rows a change produces, corrections included.
+ */
 import { isJsonObject, type JsonObject, jsonText } from '../core/json.ts'
 import { cutsSurrogatePair, errorText } from '../core/text.ts'
 import type { WatchComment, WatchCommentTarget, WatchItem } from '../cli/thread-commands.ts'

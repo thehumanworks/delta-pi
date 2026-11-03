@@ -1,3 +1,6 @@
+/**
+ * Restoring a saved binding's delivery state: the next sequence, the turn executions and their ends.
+ */
 export type Execution = { sequence: number; turnId?: string; lost?: true; endSequence?: number }
 type SavedBinding = {
   next: number

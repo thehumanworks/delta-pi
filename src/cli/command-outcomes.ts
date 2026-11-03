@@ -1,3 +1,7 @@
+/**
+ * The outcomes of Delta's short commands, such as a link copied or a team invited, decoded from what the
+ * CLI printed rather than assumed from its exit code.
+ */
 import { isJsonObject, isNonEmptyString, type JsonObject } from '../core/json.ts'
 import { samePath } from '../core/paths.ts'
 import type { RunResult } from '../core/process.ts'

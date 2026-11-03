@@ -1,3 +1,7 @@
+/**
+ * Reading a Delta command's output as it streams, with a timeout and cancellation that close the
+ * command, for the commands that answer once (`thread status`) or report readiness (`mount`).
+ */
 import { isJsonObject } from '../core/json.ts'
 import type { Exit, Output } from '../core/process.ts'
 import { errorText } from '../core/text.ts'

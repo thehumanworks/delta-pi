@@ -1,3 +1,7 @@
+/**
+ * Who is in the watched thread, as the band lists them: arrivals settle before they show, and departures
+ * linger for a grace period.
+ */
 import { conversationText } from './conversation.ts'
 import { type Person, personKey } from '../band/status.ts'
 import type { ThreadUser } from '../cli/thread-commands.ts'

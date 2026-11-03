@@ -1,3 +1,7 @@
+/**
+ * Updating the Delta app and CLI: the background check at startup, `/delta-update`, the progress the CLI
+ * reports, and running the Windows installer it hands back.
+ */
 import type { Timer } from '../core/clock.ts'
 import { claimInstallation, installation } from '../core/installation.ts'
 import { isJsonObject, isNonEmptyString, isOneOf, isSafeInteger, type JsonObject } from '../core/json.ts'

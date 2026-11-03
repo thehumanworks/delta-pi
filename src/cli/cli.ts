@@ -1,3 +1,7 @@
+/**
+ * Finding the Delta CLI this extension runs, and installing Delta with its official installer where
+ * none is found: only setup, share and join do, never background discovery.
+ */
 import type { RunInit, RunResult } from '../core/process.ts'
 import { errorText } from '../core/text.ts'
 import { installWindows } from './windows-install.ts'

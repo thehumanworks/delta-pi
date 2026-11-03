@@ -50,3 +50,11 @@ test('every test the record says covers an upstream test exists here', () => {
   })
   expect(broken).toEqual([])
 })
+
+test("PARITY.md's summary counts what the record says", () => {
+  const text = readFileSync(join(repo, 'PARITY.md'), 'utf8')
+  const summary = text.slice(text.indexOf('<!-- parity-summary:start -->'), text.indexOf('<!-- parity-summary:end -->'))
+  const counts = new Map<string, number>()
+  for (const entry of manifest.tests) counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1)
+  for (const [status, count] of counts) expect(summary).toContain(`| ${status} | ${count} |`)
+})

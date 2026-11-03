@@ -1,3 +1,6 @@
+/**
+ * What a thread's status and mounts allow a join to do, and how a joined thread's worktrees changed.
+ */
 import type { MountedThread, ThreadMount, ThreadState } from '../cli/thread-commands.ts'
 import { samePath } from '../core/paths.ts'
 

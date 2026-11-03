@@ -1,6 +1,13 @@
+/**
+ * The outbox's records on disk: splitting a record into files, checking a pending record before it is
+ * sent, batching appends, and which files Delta's acknowledgments let the outbox remove.
+ */
 import { isJsonObject, isSafeInteger } from '../core/json.ts'
 import { cutsSurrogatePair } from '../core/text.ts'
 import { parseAppendReceipt } from '../cli/thread-commands.ts'
+
+/** One staged record: its outbox files, in order, and the digest that guards them. */
+export type Entry = { sequence: number; files: string[]; digest: string }
 
 /** Split a durable JSONL record without cutting a UTF-16 surrogate pair. */
 export function outboxChunks(line: string, sequence: number): string[] {

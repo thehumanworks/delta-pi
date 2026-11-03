@@ -50,7 +50,6 @@ import {
 } from '../cli/thread-commands.ts'
 import { activationIncomplete, captureDecided, outbox } from '../setup/activation.ts'
 import { notifyOnce } from '../setup/interaction.ts'
-import type { Entry } from '../subagents/children.ts'
 import {
   childFields,
   childNeedsSetup,
@@ -72,7 +71,14 @@ import {
   type Update,
 } from './content.ts'
 import { deliveryFailure, deliveryRetryDelay } from './delivery-policy.ts'
-import { acknowledgedOutboxFiles, acknowledgedPrefix, appendBatch, outboxChunks, pendingRecordTurn } from './outbox.ts'
+import {
+  acknowledgedOutboxFiles,
+  acknowledgedPrefix,
+  appendBatch,
+  type Entry,
+  outboxChunks,
+  pendingRecordTurn,
+} from './outbox.ts'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 
 export type RecordBody = { update: Update; turnSequence?: number }

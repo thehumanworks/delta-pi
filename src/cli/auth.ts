@@ -1,3 +1,7 @@
+/**
+ * Signing in to Delta and accepting its beta terms: `delta auth status`, `login` and `wait`, the browser
+ * sign-in a session waits on, and what each answer asks the person to do.
+ */
 import { isJsonObject, isNonEmptyString, type JsonObject, jsonText } from '../core/json.ts'
 import type { ProcessStream } from '../core/process.ts'
 import { readCommandStream } from './command-reader.ts'
