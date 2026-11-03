@@ -91,7 +91,6 @@ export function nodePlatform(): Platform {
     process: { run, spawn },
     env: {
       windows: () => process.platform === 'win32',
-      home: () => process.env.HOME ?? process.env.USERPROFILE,
       get: (name) => process.env[name],
       set: (name, value) => {
         if (value === undefined) delete process.env[name]

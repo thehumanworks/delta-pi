@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { RECORDED_TURNS } from '../world.ts'
 import { EXTENSION, FAUX_MODEL, PI, Pi, REDACTOR, until, world, type World } from './harness.ts'
 
 let current: { pi?: Pi; world?: World } = {}
@@ -28,6 +29,8 @@ test('a repository that syncs automatically records each turn, its tools and its
     )
   }, "the second turn's reply to reach Delta")
   const updates = thread.records.map((record: any) => record.update)
+  // The kit's fake pi records the same (test/behaviour/recording.test.ts), which keeps it honest.
+  expect(updates.map((update: any) => update.sessionUpdate)).toEqual(RECORDED_TURNS)
   expect(thread.records.every((record: any) => record.producer === session && record.name === 'Pi')).toBe(true)
   // Sequences are consecutive from 1, and each turn opens with its running start.
   expect(thread.records.map((record: any) => record.sequence)).toEqual(

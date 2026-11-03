@@ -33,7 +33,6 @@ export type Host = {
   store: Store
   env: {
     windows(): boolean
-    home(): string | undefined
     /** An environment variable of this pi process, which the programs it starts inherit. */
     get(name: string): string | undefined
     /** Set or, with undefined, remove an environment variable for the programs pi starts from now on. */
