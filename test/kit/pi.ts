@@ -252,9 +252,16 @@ export class FakePi {
     } as Entry)
   }
 
+  /**
+   * Awaited as a run starts, before agent_start, where pi runs other extensions' before_agent_start: a
+   * prompt sent meanwhile is queued into the run.
+   */
+  starting: (() => Promise<void>) | undefined
+
   private async agentRun(first: AgentMessage) {
     this.streaming = true
     this.aborted = false
+    await this.starting?.()
     await this.emit('agent_start', {})
     let next = [first]
     for (let turn = 0; ; turn++) {

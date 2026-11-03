@@ -90,6 +90,9 @@ export async function admitPrompt(host: Host, text: string, steering: boolean): 
     }
   }
   if (steering) {
+    // A prompt queued while pi is still starting its run, before the run's turn began here, joins that
+    // run, which opens its own turn; only steering a turn under way needs that turn to own the thread.
+    if (runtime.currentTurnId === undefined) return
     if (!ownsSteering(runtime.binding.execution, runtime.currentTurnId))
       return 'This pi turn no longer owns the shared conversation.'
     return

@@ -32,3 +32,26 @@ test('a repository that syncs automatically records each turn, its tools and its
   ).toEqual(['end_turn', 'end_turn'])
   expect(pi.errors).toEqual([])
 })
+
+test('a prompt queued while pi is still starting a run is taken into that run', async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  let start: (() => void) | undefined
+  pi.starting = () => new Promise((resolve) => (start = resolve))
+  const first = pi.submit('first')
+  await delta.until(() => start, 'the run to start')
+  expect(await pi.prompt('second')).toBe('steered')
+  pi.starting = undefined
+  start!()
+  await first
+  const thread = await delta.until(
+    () => delta!.thread()?.records.some((record: any) => record.update.state === 'idle') && delta!.thread(),
+    'the run to reach Delta',
+  )
+  const prompts = thread.records.filter((record: any) => record.update.sessionUpdate === 'user_message')
+  expect(prompts.map((record: any) => record.update.content[0].text)).toEqual(['first', 'second'])
+  // Both belong to the run's one turn.
+  expect(new Set(prompts.map((record: any) => record.turnSequence)).size).toBe(1)
+  expect(pi.noticeTexts()).toEqual([])
+})
