@@ -104,8 +104,10 @@ export default function delta(pi: ExtensionAPI) {
     debug(`note: ${text}`)
     if (!context) return
     pi.appendEntry<Note>(NOTE_ENTRY, { text, tone })
-    // A client without pi's terminal draws no entries, so it hears each note as a notification.
+    // A client without pi's terminal draws no entries, so it hears each note as a notification. Print
+    // mode has no client at all: its notes go where pi reports everything but the model's answer.
     if (context.hasUI && context.mode !== 'tui') context.ui.notify(text, tone)
+    else if (context.mode === 'print') process.stderr.write(`${text}\n`)
   }
   const host: Host = {
     pi,

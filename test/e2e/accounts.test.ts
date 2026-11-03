@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Pi, until, world, type World } from './harness.ts'
+import { EXTENSION, FAUX_MODEL, PI, Pi, until, world, type World } from './harness.ts'
 
 let current: { pi?: Pi; world?: World } = {}
 afterEach(async () => {
@@ -155,4 +156,21 @@ test("team commands pass Delta's own answers through", async () => {
   )
   await pi.command('/delta nonsense')
   await until(() => pi.notices().some((text) => text.startsWith('Usage: /delta share')), 'the usage')
+}, 60_000)
+
+test('in print mode, command answers and usage reach the terminal on stderr, leaving stdout to the model', () => {
+  const w = world()
+  current = { world: w }
+  const print = (command: string) =>
+    spawnSync(PI, ['-p', '-e', EXTENSION, '-e', FAUX_MODEL, '--provider', 'faux', '--model', 'faux-1', command], {
+      cwd: w.checkout,
+      env: w.env(),
+      encoding: 'utf8',
+      timeout: 60_000,
+    })
+  const list = print('/delta-org list')
+  expect(list.status).toBe(0)
+  expect(list.stderr).toContain('* org-1  Zed')
+  expect(list.stdout).not.toContain('org-1')
+  expect(print('/delta-join').stderr).toContain('Usage: /delta-join <link>')
 }, 60_000)
