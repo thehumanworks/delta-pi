@@ -37,6 +37,13 @@ function childThread(kit: Kit, done: (record: any) => boolean = () => true) {
 
 const idle = (record: any) => record.update.state === 'idle'
 
+/**
+ * Whether the kit said a delivery failed and will be retried, which it says once the retry is on the
+ * clock: a test moves the clock only after this, or the retry may be scheduled after the time it moved.
+ */
+const retrying = (kit: Kit) =>
+  [...kit.pi.noticeTexts(), ...kit.stderr].some((text) => text.includes('sending will be retried'))
+
 /** A Git worktree of the checkout, on a branch of its own, at `path`. */
 function worktree(kit: Kit, path: string) {
   execFileSync('git', ['worktree', 'add', '-q', '-b', 'feature', path], { cwd: kit.world.checkout })
@@ -84,6 +91,7 @@ test("a subagent's checkout that failed to attach is attached and mounted with i
   root.world.fail('worktree list')
   await sub.pi.prompt('work on the feature')
   // A later delivery, or the retry after its backoff, attaches and mounts the checkout before sending.
+  await sub.until(() => retrying(sub), 'the failed setup to be retried')
   await sub.advance(60_000)
   const thread = await sub.until(() => childThread(sub, idle), "the subagent's finished turn")
   expect(thread.worktrees).toHaveLength(1)
@@ -168,7 +176,7 @@ test('a subagent whose checkout setup failed once is still followed for takeover
   sub.pi.model = () => new Promise(() => {})
   void sub.pi.submit('a long task')
   const created = () => Object.values(sub.world.delta().threads).find((thread) => thread.parent)
-  await sub.until(created, "the subagent's thread")
+  await sub.until(() => retrying(sub), 'the failed setup to be retried')
   await sub.advance(60_000)
   await sub.until(() => mountState(sub, nested) === 'mounted', 'the checkout to be mounted on retry')
   const reference = created()?.reference
@@ -227,7 +235,7 @@ test('a subagent queues while Delta is unreachable and is delivered on retry', a
   const sub = await child(root)
   root.world.fail('thread append', { times: 1_000 })
   await sub.pi.prompt('inspect the parser')
-  await sub.settle()
+  await sub.until(() => retrying(sub), 'the failed delivery to be retried')
   const children = () => Object.values(sub.world.delta().threads).filter((thread) => thread.parent)
   expect(children().flatMap((thread) => thread.records)).toEqual([])
   expect((await savedBinding(sub)).pending).toHaveLength(4)
@@ -248,12 +256,15 @@ test('a refusal Delta calls permanent stops recording the subagent, once', async
   const sub = await child(root)
   root.world.fail('thread create', { code: 'failed', retryable: false, times: 1_000 })
   await sub.pi.prompt('inspect the parser')
+  const refused = () => sub.pi.noticeTexts().filter((text) => text.includes('Delta stopped recording the subagent'))
+  await sub.until(() => refused().length > 0, 'the refusal to be shown')
   await sub.pi.prompt('and the lexer')
   await sub.advance(60_000)
+  await sub.settle()
   root.world.stopFailing('thread create')
   expect(Object.values(sub.world.delta().threads).filter((thread) => thread.parent)).toEqual([])
   expect(sub.commands().filter((args) => args[0] === 'thread' && args[1] === 'create')).toHaveLength(1)
-  expect(sub.pi.noticeTexts().filter((text) => text.includes('Delta stopped recording the subagent'))).toEqual([
+  expect(refused()).toEqual([
     'Delta stopped recording the subagent "inspect the parser": thread create: failed: thread create failed as the test asked. Its records stay queued.',
   ])
   expect((await savedBinding(sub)).pending.length).toBeGreaterThan(0)
@@ -272,17 +283,19 @@ test("a subagent's run ends only once Delta stops syncing the worktree Claude ma
   await sub.pi.prompt('work on the feature')
   await sub.until(() => mountState(sub, own) === 'mounted', 'the checkout to be mounted')
   const release = root.world.holdRelease()
+  const listed = () => sub.commands().filter((args) => args.join(' ') === 'worktree list').length
+  const before = listed()
   let ended = false
   const ending = sub.pi.shutdown('quit').then(() => (ended = true))
   // The mount command has ended, but Delta still syncs the directory, so the session's end waits.
   await sub.until(() => mountState(sub, own) === 'restoring', 'the mount to end')
+  await sub.until(() => listed() > before, 'Delta to be asked whether it still syncs the checkout')
   await sub.advance(1_000)
+  await sub.settle()
   expect(ended).toBe(false)
   release()
   // The next check of the directory finds it released.
-  await sub.advance(1_000)
-  await sub.until(() => ended, "the subagent's session to end")
-  await ending
+  await sub.whileTimePasses(ending)
   expect(mountState(sub, own)).toBe('waiting')
 })
 
@@ -333,6 +346,7 @@ test("a subagent's subagent that starts before that subagent's thread exists rec
   const nested = await child(sub)
   await nested.pi.prompt('check the lexer')
   // Its records wait for its parent's thread, rather than going under the session above.
+  await nested.until(() => retrying(nested), "the nested subagent's records to wait")
   expect(nested.commands().some((args) => args[0] === 'thread' && args[1] === 'create')).toBe(false)
   release()
   const outer = await root.until(() => childThread(root, idle), "the subagent's finished turn")
