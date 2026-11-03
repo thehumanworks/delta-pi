@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { chooseDeltaAction, type MenuStart } from "../src/setup/delta-menu.ts";
 import { type Interaction, InteractionDismissedError } from "../src/setup/setup.ts";
 

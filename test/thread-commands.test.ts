@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { cliFixture } from "./cli-fixtures.ts";
 import {
   appendFailure,

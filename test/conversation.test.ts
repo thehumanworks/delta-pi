@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   addRows,
   commentAction,
@@ -11,7 +11,6 @@ import {
   DISPLAY_LIMIT,
   earlierItemsNotice,
   isDrawnItem,
-  isMessageItem,
   itemAuthor,
   itemDisplay,
   itemFingerprint,

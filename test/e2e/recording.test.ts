@@ -1,6 +1,6 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "vitest";
 import { execFileSync } from "node:child_process";
-import { EXTENSION, FAKE_BIN, FAUX_MODEL, Pi, until, world, type World } from "./harness.ts";
+import { EXTENSION, FAUX_MODEL, PI, Pi, until, world, type World } from "./harness.ts";
 
 let current: { pi?: Pi; world?: World } = {};
 afterEach(async () => {
@@ -8,13 +8,6 @@ afterEach(async () => {
   current.world?.cleanup();
   current = {};
 });
-
-/** The one thread the fake CLI holds for the pi producer, once it exists. */
-function piThread(w: World) {
-  return Object.values(w.delta().threads).find(
-    (thread: any) => thread.records.length || Object.keys(w.delta().producers).some((key) => key.startsWith("pi:")),
-  ) as any;
-}
 
 test("a repository that syncs automatically records each turn, its tools and its title", async () => {
   const w = world({ policy: { mode: "organization", organization: "org-1" } });
@@ -184,20 +177,9 @@ test("a print-mode run in a repository that syncs automatically is recorded befo
   const w = world({ policy: { mode: "private", organization: "org-1" } });
   current = { world: w };
   const output = execFileSync(
-    "pi",
+    PI,
     ["-p", "-e", EXTENSION, "-e", FAUX_MODEL, "--provider", "faux", "--model", "faux-1", "one shot"],
-    {
-      cwd: w.checkout,
-      env: {
-        ...process.env,
-        PATH: `${FAKE_BIN}:${process.env.PATH}`,
-        PI_CODING_AGENT_DIR: w.agentDir,
-        FAKE_DELTA_STATE: w.state,
-        PI_OFFLINE: "1",
-        DELTA_PI_PARENT: "",
-      },
-      timeout: 60_000,
-    },
+    { cwd: w.checkout, env: w.env(), timeout: 60_000 },
   ).toString();
   expect(output).toContain("Echo: one shot");
   const thread = Object.values(w.delta().threads)[0] as any;

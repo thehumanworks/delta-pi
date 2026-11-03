@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { deliveryFailure, deliveryRetryDelay, type FailureStreak } from "../src/recording/delivery-policy.ts";
 import { DeltaCommandError } from "../src/cli/thread-commands.ts";
 

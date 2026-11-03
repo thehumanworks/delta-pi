@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { cliFixture } from "./cli-fixtures.ts";
 import { type AudienceChoices, chooseShareAudience, threadInvitationsFrom } from "../src/sharing/share-audience.ts";
 import type { Interaction } from "../src/setup/setup.ts";

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { AccessRequiredError, type AuthenticationHost, requireAuthentication } from "../src/cli/auth.ts";
 import {
   InstallationUpdates,

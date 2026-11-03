@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { DeltaCli } from "../src/cli/cli.ts";
 
 test("existing executable is cached without running an installer", async () => {

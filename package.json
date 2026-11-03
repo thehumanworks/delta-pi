@@ -37,7 +37,9 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "bun test",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:e2e": "vitest run --project e2e",
     "prepublishOnly": "npm run check && npm test"
   },
   "peerDependencies": {
@@ -45,12 +47,17 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.51.1",
     "@earendil-works/pi-agent-core": "1.4.0",
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
-    "@types/bun": "^1.2.0",
+    "@eslint/js": "10.0.1",
     "@types/node": "^22.19.0",
-    "typescript": "^5.9.3"
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
   }
 }

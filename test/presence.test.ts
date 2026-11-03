@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { PresenceTracker } from "../src/watch/presence.ts";
 
 const ada = { user_id: "ada", name: "Ada" };

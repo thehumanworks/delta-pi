@@ -8,10 +8,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const REPO = join(import.meta.dir, "..", "..");
-export const FAKE_BIN = join(import.meta.dir, "bin");
+const REPO = join(import.meta.dirname, "..", "..");
+export const FAKE_BIN = join(import.meta.dirname, "bin");
 export const EXTENSION = join(REPO, "index.ts");
-export const FAUX_MODEL = join(import.meta.dir, "faux-model.ts");
+export const FAUX_MODEL = join(import.meta.dirname, "faux-model.ts");
+/**
+ * The pi the tests run: the one `package.json` pins, never whichever `pi` is on the PATH. CI swaps in
+ * another version by installing it over the pinned one.
+ */
+const PI_BIN = join(REPO, "node_modules", ".bin");
+export const PI = join(PI_BIN, "pi");
+if (!existsSync(PI)) throw new Error(`${PI} is missing; run npm ci`);
 
 export type Event = Record<string, any>;
 /** How a dialog is answered: a value, a function of the request, or undefined to dismiss it. */
@@ -68,6 +75,21 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
       const path = join(state, `events-${thread}.jsonl`);
       const previous = existsSync(path) ? readFileSync(path, "utf8") : "";
       writeFileSync(path, previous + events.map((event) => JSON.stringify(event) + "\n").join(""));
+    },
+    /**
+     * The environment pi runs in: the fake Delta CLI and the pinned pi first on the PATH, so a pi
+     * that a test's agent starts is the pinned one too, with this world's agent directory and state.
+     */
+    env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+      return {
+        ...process.env,
+        PATH: `${FAKE_BIN}:${PI_BIN}:${process.env.PATH}`,
+        PI_CODING_AGENT_DIR: agentDir,
+        FAKE_DELTA_STATE: state,
+        PI_OFFLINE: "1",
+        DELTA_PI_PARENT: "",
+        ...extra,
+      };
     },
     cleanup() {
       rmSync(base, { recursive: true, force: true });
@@ -128,7 +150,7 @@ export class Pi {
 
   static start(world: World, options: { env?: Record<string, string>; args?: string[]; answers?: Answer[] } = {}) {
     const child = spawn(
-      "pi",
+      PI,
       [
         "--mode",
         "rpc",
@@ -144,15 +166,7 @@ export class Pi {
       ],
       {
         cwd: world.checkout,
-        env: {
-          ...process.env,
-          PATH: `${FAKE_BIN}:${process.env.PATH}`,
-          PI_CODING_AGENT_DIR: world.agentDir,
-          FAKE_DELTA_STATE: world.state,
-          PI_OFFLINE: "1",
-          DELTA_PI_PARENT: "",
-          ...options.env,
-        },
+        env: world.env(options.env),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );

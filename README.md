@@ -166,7 +166,7 @@ session there.
 ```sh
 npm install
 npm run check   # tsc --noEmit
-npm test        # bun test: unit tests and end-to-end tests
+npm test        # vitest: unit tests and end-to-end tests, on Node
 ```
 
 The unit tests in `test/` are mostly the Claude Code plugin's own, ported; `test/fixtures/cli` holds the
@@ -185,7 +185,7 @@ PATH=$PWD/test/e2e/bin:$PATH FAKE_DELTA_STATE=/tmp/fake-delta PI_CODING_AGENT_DI
 ## Publishing to npm
 
 The package is published as `@nothumanwork/pi-delta`. You need npm publish access to the
-`@nothumanwork` scope, Node.js 22.19.0 or newer, and Bun (to run the tests). Pi loads the
+`@nothumanwork` scope and Node.js 22.19.0 or newer. Pi loads the
 TypeScript sources directly; no build step is needed.
 
 From a clean checkout:

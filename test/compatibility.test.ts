@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { MINIMUM_PI_VERSION, piVersionWarning } from "../src/core/compatibility.ts";
 
 test("pi compatibility compares numeric versions and accepts newer releases without an upper cutoff", () => {

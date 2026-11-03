@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { stripVTControlCharacters } from "node:util";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, hyperlink, setCapabilities, visibleWidth } from "@earendil-works/pi-tui";
@@ -69,7 +69,7 @@ test("link is discoverable in completion and usage; extra arguments do not share
 
 test("copy still copies the same URL and falls back to printing it", async () => {
   bind();
-  const copy = mock(async () => true);
+  const copy = vi.fn(async () => true);
   const copyingHost = { ui: { copy } } as unknown as Host;
   expect(await runDeltaCommand(copyingHost, "copy", "delta_subcommand")).toEqual({ text: `Copied ${URL}` });
   expect(copy).toHaveBeenCalledWith(URL);

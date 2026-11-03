@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SOURCE } from "../src/cli/thread-commands.ts";
 
-const directory = join(import.meta.dir, "fixtures", "cli");
+const directory = join(import.meta.dirname, "fixtures", "cli");
 const data: Record<string, any> = {};
 for (const file of readdirSync(directory)) {
   const text = readFileSync(join(directory, file), "utf8").replaceAll('"source":"claude-code"', `"source":"${SOURCE}"`);

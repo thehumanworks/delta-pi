@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { readCommandStream } from "../src/cli/command-reader.ts";
 import { DeltaCommandError } from "../src/cli/thread-commands.ts";
 

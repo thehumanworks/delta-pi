@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
 import {
@@ -164,8 +164,8 @@ describe("translation", () => {
     const diff = (update!.content as any[]).find((item) => item.type === "diff");
     expect(diff.changes).toEqual([{ operation: "modify", path: "/repo/src/main.rs" }]);
     expect(diff.patch.format).toBe("git_patch");
-    expect(diff.patch.text).toStartWith(
-      "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ ",
+    expect(diff.patch.text.startsWith("diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ ")).toBe(
+      true,
     );
     expect(diff.patch.text).toContain("-b\n+c\n");
   });

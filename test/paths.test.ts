@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { isWithin } from "../src/core/paths.ts";
 
 test("a path is within a directory it equals or lies under, never one its name merely starts with", () => {
