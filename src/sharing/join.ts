@@ -68,6 +68,8 @@ export type JoinRequest = {
   cwd: string
   locator: string
   cancelled?: boolean
+  /** The session file pi switched to when it ended this request's session. */
+  handedTo?: string
   form?: CommandForm
 }
 /** Switching pi to another session, which only a command handler may do. */
@@ -165,19 +167,24 @@ export async function startJoin(host: Host, request: JoinRequest, replace: Sessi
     host.ui.debug(
       `Joining Delta in pi session ${fresh} at ${mount.directory}. Resume the previous session ${request.session} with /resume from ${request.cwd}.`,
     )
-    // Pi shuts this session down while it switches, which cancels this request: from then on the new
-    // session owns the mount, and nothing below may use this session's pi context. A switch that fails
-    // or is refused before that leaves this session as it was.
-    const outcome = await replace.switchSession(prepared.file).catch((error: unknown) => {
-      if (request.cancelled) return { cancelled: false }
+    await check()
+    // Pi shuts this session down while it switches, which cancels this request and names the session it
+    // switched to: once that is the prepared one, it owns the mount, and nothing below may use this
+    // session's pi context. A switch that fails or is refused before that leaves this session as it was.
+    const file = prepared.file
+    const outcome = await replace.switchSession(file).catch((error: unknown) => {
+      if (request.handedTo === file) return { cancelled: false }
       throw error
     })
     if (outcome.cancelled) throw new Error("pi did not switch to the thread's session")
     switched = true
   } catch (error) {
-    if (switched || request.cancelled) return
+    if (switched || (prepared && request.handedTo === prepared.file)) return
+    // The join did not hand its mount to the prepared session: nothing it made is left behind, even when
+    // another switch ended this session first.
     if (mounted) await unmountThread(host, mounted.thread, mounted.owner)
     if (prepared) await abandonPrepared(host, prepared)
+    if (request.cancelled) return
     const invalidLocator = error instanceof DeltaCommandError && error.code === 'invalid_reference'
     // Sign-in runs before anything changes, so an access requirement leaves nothing to preserve.
     const text =

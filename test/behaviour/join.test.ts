@@ -126,3 +126,22 @@ test('a joined session that ends while its mount starts leaves the thread unmoun
   await new Promise((resolve) => setTimeout(resolve, 500))
   expect(Object.values(threadMounts(delta.world, thread))).not.toContain('mounted')
 })
+
+test('a join that another session switch interrupts leaves nothing mounted or prepared, and does not switch', async () => {
+  delta = await joiner()
+  const { url, thread } = sharedThread(delta.world)
+  const release = delta.world.hold('thread mount')
+  const joining = delta.pi.command('delta-join', url)
+  await delta.until(() => delta!.commands().some((args) => args[0] === 'thread' && args[1] === 'mount'), 'the mount')
+  // The person starts a new session before the join's mount is ready.
+  await delta.whileTimePasses(delta.pi.newSessionIn())
+  const session = delta.pi.session.id
+  release()
+  await joining
+  await delta.until(() => Object.keys(threadMounts(delta!.world, thread)).length, 'the late mount')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(delta.pi.session.id).toBe(session)
+  expect(Object.values(threadMounts(delta.world, thread))).not.toContain('mounted')
+  expect(preparedSessions(delta.world)).toEqual([])
+  expect(transitions(delta.world)).toEqual([])
+})

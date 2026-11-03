@@ -287,8 +287,11 @@ export function report(host: Host, error: unknown) {
   host.ui.note(text, 'error')
 }
 
-/** A session that ended cancels the share it ran, a share it asked for after its turn, and its join. */
-export function cancelRequestsOf(session: string) {
+/**
+ * A session that ended cancels the share it ran, a share it asked for after its turn, and its join,
+ * which learns the session pi switched to, `target`, so it can tell its own switch from another.
+ */
+export function cancelRequestsOf(session: string, target?: string) {
   if (requests.share?.session === session) {
     requests.share.cancelled = true
     requests.share = undefined
@@ -296,6 +299,7 @@ export function cancelRequestsOf(session: string) {
   if (requests.shareAfterTurn?.session === session) requests.shareAfterTurn = undefined
   if (requests.join?.session === session) {
     requests.join.cancelled = true
+    requests.join.handedTo = target
     requests.join = undefined
   }
 }

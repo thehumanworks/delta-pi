@@ -402,7 +402,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       await deliverWithin(host, session, 5_000).catch(() => {})
     }
     await forgetSessionStart(host, session)
-    cancelRequestsOf(session)
+    cancelRequestsOf(session, event.targetSessionFile)
     withdrawParent(host)
     const runtime = stateFor(session)
     endActivationOf(session)
