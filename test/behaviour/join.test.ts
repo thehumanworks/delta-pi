@@ -1,8 +1,9 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
-import { type Kit, startDelta } from '../kit/index.ts'
-import type { World } from '../world.ts'
+import { FakeSession, type Kit, startDelta } from '../kit/index.ts'
+import { FAKE_BIN, type World } from '../world.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -66,7 +67,9 @@ async function joiner() {
   return kit
 }
 
-const joined = (kit: Kit) => kit.pi.noticeTexts().some((text) => text.startsWith('Joined the Delta thread'))
+/** How many joins finished in `kit`'s pi, whichever session they finished in. */
+const joins = (kit: Kit) => kit.pi.noticeTexts().filter((text) => text.startsWith('Joined the Delta thread')).length
+const joined = (kit: Kit) => joins(kit) > 0
 
 test("/delta-join mounts a shared thread and continues in a new session in the thread's folder", async () => {
   delta = await joiner()
@@ -450,4 +453,191 @@ test('a joined delivery refusal lifts only after explicit successful same-thread
   expect(ran(kit, 'thread create')).toEqual([])
   expect(ran(kit, 'thread share')).toEqual([])
   expect(ran(kit, 'worktree attach')).toEqual([])
+})
+
+/** A teammate's finished message in the thread, as `thread watch` reports it. */
+function remoteItem(text: string, id = 'remote-1') {
+  return {
+    type: 'item',
+    item: {
+      id,
+      kind: 'agent_message',
+      after_id: null,
+      turn_id: 'turn-remote',
+      author: { user_id: 'user-ada', name: 'Ada', actor_id: 'actor-ada' },
+      created_at: null,
+      open: false,
+      content: { text },
+    },
+  }
+}
+
+/** Append one record to `thread` as the pi producer `session`, as an earlier process with that ID would have. */
+function appendAs(w: World, thread: string, session: string) {
+  const record = { schemaVersion: 1, sequence: 1, update: { sessionUpdate: 'state_update', state: 'idle' } }
+  execFileSync(
+    join(FAKE_BIN, 'delta'),
+    ['--json', 'thread', 'append', thread, '--source', 'pi', '--external-id', session],
+    {
+      input: `${JSON.stringify(record)}\n`,
+      env: { ...process.env, FAKE_DELTA_STATE: w.state },
+    },
+  )
+}
+
+test('ending the fresh session during status cannot bind, watch, or add rows to its replacement', async () => {
+  delta = await joiner()
+  const { url, thread } = sharedThread(delta.world)
+  delta.world.remote(thread, remoteItem('Must not enter a replacement session'))
+  // The preflight reads the thread's status; the session the join switches into reads it again to check its mounts.
+  const release = delta.world.hold('thread status', { after: 1 })
+  await delta.pi.command('delta-join', url)
+  const fresh = delta.pi.session
+  await delta.until(() => ran(delta!, 'thread status').length === 2, 'the fresh session to check its mounts')
+  await delta.whileTimePasses(delta.pi.newSessionIn(delta.world.checkout))
+  const replacement = delta.pi.session
+  release()
+  await delta.settle()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(await bindingOf(delta, fresh.id)).toMatchObject({ snapshot: false, joinTransition: { locator: url, thread } })
+  expect(await bindingOf(delta, replacement.id)).toBeUndefined()
+  expect(ran(delta, 'thread watch')).toEqual([])
+  expect(delta.pi.contextMessages()).toEqual([])
+  expect(delta.pi.session).toBe(replacement)
+  expect(replacement.cwd).toBe(delta.world.checkout)
+  expect(shown(delta)).not.toContain('Joined the Delta thread')
+})
+
+test('same-thread recovery interrupted during status preserves the replacement session and its live watcher', async () => {
+  const { kit, url, thread, session } = await joinedThread()
+  delta = kit
+  const file = kit.pi.session.file
+  const binding = await bindingOf(kit, session)
+  // Recovery reads the thread, mounts again, then checks the mounts with a second read: hold only that one.
+  const reads = ran(kit, 'thread status').length
+  const release = kit.world.hold('thread status', { after: 1, times: 1 })
+  const recovery = kit.pi.command('delta-join', url)
+  await kit.until(() => ran(kit, 'thread status').length === reads + 2, 'the recovery to check the mounts')
+  // The person leaves and resumes the joined session, which pi starts afresh.
+  await kit.whileTimePasses(kit.pi.newSessionIn(kit.world.checkout))
+  await kit.whileTimePasses(kit.pi.switchTo(file))
+  await kit.until(() => band(kit).includes('Restored 1 worktree'), 'the resumed session to restore its worktrees')
+  const watches = ran(kit, 'thread watch').length
+  const commands = kit.commands().length
+  const rows = kit.pi.contextMessages().length
+  release()
+  await recovery
+  await kit.settle()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(kit.pi.session.id).toBe(session)
+  expect(kit.commands()).toHaveLength(commands)
+  expect(ran(kit, 'thread watch')).toHaveLength(watches)
+  expect(kit.pi.contextMessages()).toHaveLength(rows)
+  expect(await bindingOf(kit, session)).toMatchObject({ thread, joined: true, owner: binding.owner })
+  expect(await kit.pi.prompt('replacement remains ready')).toBe('settled')
+  expect(ran(kit, 'thread watch')).toHaveLength(watches)
+})
+
+test('a nonempty fresh producer and a wrong project root never enable a completed binding', async () => {
+  const first = await joiner()
+  delta = first
+  const { url, thread } = sharedThread(first.world)
+  // Delta already holds a record from the producer of the session the join switches into.
+  const release = first.world.hold('thread status', { after: 1, times: 1 })
+  await first.pi.command('delta-join', url)
+  const fresh = first.pi.session
+  await first.until(() => ran(first, 'thread status').length === 2, 'the fresh session to check its producer')
+  appendAs(first.world, thread, fresh.id)
+  release()
+  await first.until(() => shown(first).includes("Delta couldn't finish joining"), 'the join to stop')
+  expect(shown(first)).toContain('Delta is ahead of this pi outbox')
+  expect(await bindingOf(first, fresh.id)).toMatchObject({ snapshot: false, joinTransition: { thread } })
+  expect(await first.pi.prompt('no sequence reuse')).toBe('handled')
+  // pi resumes that session in the folder it was launched from, as it does when the person continues there.
+  await first.crash()
+  const second = await startDelta({
+    world: first.world,
+    session: new FakeSession(fresh.id, first.world.checkout, fresh.file),
+  })
+  try {
+    await second.until(() => shown(second).includes("Delta couldn't finish joining"), 'the resumed join to stop')
+    await second.pi.command('delta-join', url)
+    expect(shown(second)).toContain(`pi did not start in the thread's folder`)
+    expect(await bindingOf(second, fresh.id)).toMatchObject({ snapshot: false, joinTransition: { thread } })
+    expect(await second.pi.prompt('wrong directory')).toBe('handled')
+    expect(ran(second, 'thread watch')).toEqual([])
+    expect(ran(second, 'thread mount')).toEqual([])
+    // Only the earlier process's record is in the thread.
+    expect(recordsOf(second, thread)).toHaveLength(1)
+    second.expectClean()
+  } finally {
+    await second.stop()
+  }
+})
+
+test('joining a different canonical thread preserves the previous joined producer', async () => {
+  const { kit, session, directory } = await joinedThread().then(async (joined) => ({
+    ...joined,
+    directory: (await bindingOf(joined.kit, joined.session)).directory as string,
+  }))
+  delta = kit
+  kit.world.fail('thread append', { times: 1_000, code: 'app_unavailable', retryable: true })
+  await kit.whileTimePasses(kit.pi.prompt('run echo queued for the first thread'))
+  const binding = await bindingOf(kit, session)
+  expect(binding.pending.length).toBeGreaterThan(0)
+  const second = sharedThread(kit.world, { teammate: 'another-teammate' })
+  await kit.whileTimePasses(kit.pi.command('delta-join', second.url))
+  await kit.until(() => joins(kit) === 2, 'the second join to finish')
+  const fresh = await bindingOf(kit, kit.pi.session.id)
+  expect(fresh).toMatchObject({ joined: true, thread: second.thread, next: 1, pending: [] })
+  expect(fresh.directory).not.toBe(directory)
+  // The first session keeps its producer and the records it has not delivered yet.
+  expect(await bindingOf(kit, session)).toMatchObject(binding)
+  for (const entry of binding.pending) for (const path of entry.files) expect(existsSync(path)).toBe(true)
+  // Joining exports nothing: the second thread holds only what its own teammate recorded.
+  expect(recordsOf(kit, second.thread)).toEqual([])
+  expect(ran(kit, 'thread create')).toEqual([])
+  expect(ran(kit, 'thread share')).toEqual([])
+  expect(ran(kit, 'worktree attach')).toEqual([])
+  kit.world.stopFailing('thread append')
+})
+
+test("another session in a joined thread's mount is refused before it snapshots, creates, or attaches", async () => {
+  const { kit, url, session } = await joinedThread()
+  delta = kit
+  const { directory } = await bindingOf(kit, session)
+  // The mounted worktree is a Git checkout, as Delta's are.
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: directory, stdio: 'pipe' })
+  git('init', '-q')
+  git('remote', 'add', 'origin', 'https://example.com/other.git')
+  await kit.whileTimePasses(kit.pi.newSessionIn(directory))
+  const unbound = kit.pi.session.id
+  const commands = kit.commands().length
+  // The session is offered setup, which it declines, and shares with the team.
+  const answer = (dialog: { title: string }) => (dialog.title.includes('Who should see') ? 'Share with Zed' : 'Not now')
+  kit.pi.answers.push(answer, answer)
+  await kit.pi.command('delta', 'share')
+  await kit.until(() => shown(kit).includes("Delta didn't share this session"), 'the share to be refused')
+  const refusal = kit.pi.noticeTexts().find((text) => text.startsWith("Delta didn't share this session"))!
+  expect(refusal).toContain(`/delta-join ${url}`)
+  // Retrying the share would be refused again, and the refusal staged nothing.
+  expect(refusal).not.toContain('retry /delta-share')
+  expect(refusal).not.toContain('saved records')
+  const since = kit
+    .commands()
+    .slice(commands)
+    .map((args) => args.slice(0, 2).join(' '))
+  expect(since.filter((command) => ['thread create', 'worktree attach', 'thread share'].includes(command))).toEqual([])
+  expect(await bindingOf(kit, unbound)).toBeUndefined()
+  // A refused share leaves nothing that blocks the session.
+  expect(await kit.pi.prompt('still usable')).toBe('settled')
+})
+
+test("the switch a join makes ends the previous session without releasing the joined session's mounts", async () => {
+  const { kit, thread, session, before } = await joinedThread()
+  delta = kit
+  // pi ended the session the join started from to switch; the mount it made belongs to the joined session.
+  expect(threadMounts(kit.world, thread)).toEqual({ [session]: 'mounted' })
+  expect(await bindingOf(kit, session)).toMatchObject({ owner: session, joined: true })
+  expect(before).not.toBe(session)
 })
