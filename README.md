@@ -163,11 +163,61 @@ session there.
 
 ## Development
 
+### With Nix (Linux x86-64 and ARM64)
+
+The only prerequisite is Nix with flakes enabled. From the checkout root:
+
 ```sh
-npm install
+nix develop
 npm run check   # tsc --noEmit
 npm test        # bun test: unit tests and end-to-end tests
+pi -e ./index.ts
 ```
+
+If flakes are not enabled in your Nix configuration, use
+`nix --extra-experimental-features 'nix-command flakes' develop` instead; no system configuration
+change is needed. The first entry needs network access to fetch Nix packages and npm dependencies.
+
+The shell supplies Node.js 22/npm, Bun, Git/SSH, Bash, command-line utilities, ripgrep, fd, Prettier 3,
+`nixfmt`, CA certificates, and the real Delta CLI/backend through
+[`deltanix`](https://github.com/thehumanworks/deltanix) (not the similarly named Git diff pager).
+It runs `npm ci --include=dev` if the local pi or TypeScript executable is missing, and puts
+`node_modules/.bin` first on `PATH`, so `pi` is the version pinned in `package-lock.json`, even when
+the tests run it in another directory. Nothing is installed globally, and no services or login flows
+start when you enter the shell. If dependencies change after entry, run `npm ci --include=dev` again.
+A failed automatic dependency install stops shell startup rather than using a global pi by accident.
+
+`flake.lock` pins the Nix inputs; `package-lock.json` pins pi and the other npm dependencies. To update
+the Nix tools, run `nix flake update`; to update only Delta, run `nix flake update deltanix` and re-enter
+the shell. Delta's in-app updater is disabled for this Nix-managed installation. Delta is proprietary;
+the `deltanix` package permits that package without requiring a global `allowUnfree` setting.
+
+Tests use the fake Delta CLI and faux model below: no Delta account, model credentials, browser or
+keyring is needed. Live use needs your own pi provider credentials and Delta sign-in. Delta also needs
+an available, unlocked Secret Service keyring in your desktop session; the shell does not configure
+one. Native macOS shells are not provided because `deltanix` currently packages Linux only.
+
+For a non-interactive check or formatting:
+
+```sh
+nix develop --command bash -c 'npm run check && npm test'
+nix develop --command prettier --write index.ts 'src/**/*.ts' 'test/**/*.ts'
+nix fmt
+nix flake check --all-systems --no-build
+```
+
+### Without Nix
+
+Install Node.js 22.19.0 or newer, Bun and Git, then:
+
+```sh
+npm ci
+npm run check
+npm test
+npx pi -e ./index.ts
+```
+
+`npm test` adds the local pi executable to `PATH`; no global pi installation is needed.
 
 The unit tests in `test/` are mostly the Claude Code plugin's own, ported; `test/fixtures/cli` holds the
 Delta CLI's output examples that the plugin keeps in step with the native CLI.
