@@ -1,7 +1,7 @@
 /**
  * A model for end-to-end tests: pi's faux provider, answering each request from the conversation
- * so far. `run <command>` asks for a bash call, `write <path> <text>` for a write call, and anything
- * else is echoed back.
+ * so far. `run <command>` asks for a bash call, `write <path> <text>` for a write call, `message
+ * <thread>: <text>` for a `delta_thread` call, and anything else is echoed back.
  */
 import {
   createFauxCore,
@@ -25,6 +25,11 @@ const respond: FauxResponseFactory = (context) => {
   const run = /^run (.+)$/s.exec(text)
   if (run)
     return fauxAssistantMessage([fauxText('Running.'), fauxToolCall('bash', { command: run[1]! })], {
+      stopReason: 'toolUse',
+    })
+  const message = /^message ([^:]+): (.+)$/s.exec(text)
+  if (message)
+    return fauxAssistantMessage([fauxToolCall('delta_thread', { thread: message[1]!, message: message[2]! })], {
       stopReason: 'toolUse',
     })
   const write = /^write (\S+) (.+)$/s.exec(text)

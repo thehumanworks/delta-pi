@@ -7,6 +7,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import type { Clock } from './clock.ts'
 import type { ProcessStream, RunInit, RunResult, SpawnInit } from './process.ts'
 import type { Store } from './store.ts'
+import type { Launch } from '../subagents/pi-child.ts'
 
 /** One answer a question offers, with a short hint shown beside it. */
 export type AskRequest = {
@@ -31,6 +32,8 @@ export type Host = {
     spawn(init: SpawnInit): ProcessStream
   }
   store: Store
+  /** How this pi was started, so a Delta thread it runs as a subagent starts the same way. */
+  launch: Launch
   env: {
     windows(): boolean
     /** An environment variable of this pi process, which the programs it starts inherit. */
@@ -53,6 +56,14 @@ export type Host = {
      * its entry's ID. Pi commits a message once every extension's `message_end` has run, so it is final.
      */
     committed(): { id: string; message: AgentMessage }[]
+    /**
+     * Whether pi's session holds, as its latest entry, the custom message the extension just sent with
+     * `details`. pi adds a message sent while it is idle at once, keeping its details as given; when it
+     * fails to, it says so only on its own error channel.
+     */
+    holds(details: unknown): boolean
+    /** The custom messages of `customType` pi's session holds, on any branch, in order. */
+    customMessages(customType: string): { content: unknown; details: unknown }[]
     /** How many prompts and replies the current branch holds: none means a new session. */
     turns(): number
     name(): string | undefined
@@ -102,6 +113,7 @@ export type Platform = {
   dataDir: string
   clock: Clock
   process: Host['process']
+  launch: Launch
   env: Host['env']
   /** Write to the terminal's error stream, which print mode shows. */
   stderr(text: string): void

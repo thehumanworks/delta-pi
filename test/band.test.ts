@@ -4,7 +4,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent'
 import { getCapabilities, getOsc8LinkAtColumn, setCapabilities, visibleWidth } from '@earendil-works/pi-tui'
 import { BandWidget, bandText, clearProgress, setProgress, stopBandTimers, styled } from '../src/band/band.ts'
 import type { Host } from '../src/core/host.ts'
-import { activation, sessions, stateFor } from '../src/core/session-state.ts'
+import { activation, requests, sessions, stateFor } from '../src/core/session-state.ts'
 import * as updates from '../src/updates/updates.ts'
 import { feed } from '../src/watch/watch.ts'
 
@@ -19,6 +19,7 @@ const theme = {
 } as Theme
 const host = {
   clock: { now: () => 0, after: () => ({ cancel() {} }) },
+  session: { idle: () => true },
   ui: { invalidate: vi.fn() },
 } as unknown as Host
 
@@ -33,6 +34,8 @@ afterEach(() => {
   activation.session = ''
   feed.connection = { phase: 'stopped' }
   setCapabilities(capabilities)
+  requests.share = undefined
+  requests.join = undefined
   vi.restoreAllMocks()
 })
 
@@ -105,5 +108,60 @@ test('wrapped link rows fit the same four-row budget the layout reserves', () =>
           .map((line) => stripVTControlCharacters(line).trim())
           .join(''),
       ).toBe(LINK)
+  }
+})
+
+test('the update notice is one colored row under the band that fits every width', () => {
+  const colored = {
+    ...theme,
+    fg: (color: string, text: string) => `${color === 'accent' ? '\x1b[36m' : '\x1b[2m'}${text}\x1b[39m`,
+  } as Theme
+  const widget = new BandWidget(host, () => colored)
+  stateFor(SESSION).reminder = 'manual'
+  for (let width = 10; width <= 120; width++) {
+    const lines = widget.render(width)
+    expect(lines.filter((line) => stripVTControlCharacters(line).includes('↑'))).toEqual([lines.at(-1)])
+    expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true)
+    if (width > NOTICE.length + 3) expect(stripVTControlCharacters(lines.at(-1)!)).toBe(` ↑ ${NOTICE}`)
+  }
+  expect(widget.render(80).at(-1)).toContain('\x1b[36m↑')
+  stateFor(SESSION).reminder = undefined
+  expect(widget.render(80).map((line) => stripVTControlCharacters(line))).toEqual([` ↑ ${NOTICE}`])
+})
+
+test.each(['turn', 'share', 'join'] as const)('the update notice gives way while a %s runs', (running) => {
+  const busy = { ...host, session: { idle: () => running !== 'turn' } } as unknown as Host
+  if (running === 'share') requests.share = { session: SESSION } as typeof requests.share
+  if (running === 'join') requests.join = { session: SESSION } as typeof requests.join
+  expect(bandText(busy)).toBeUndefined()
+  expect(new BandWidget(busy, () => theme).render(80)).toEqual([])
+})
+
+test('a failure keeps its explanation in the band, above the update notice', () => {
+  setProgress(host, "Delta couldn't share: this folder isn't a Git checkout.", 'error')
+  expect(bandText(host)).toContain("this folder isn't a Git checkout")
+  expect(bandText(host)).toContain(NOTICE)
+  for (const width of [40, 80, 120]) {
+    const lines = new BandWidget(host, () => theme).render(width).map((line) => stripVTControlCharacters(line))
+    const failure = lines.findIndex((line) => line.includes("Delta couldn't"))
+    expect(failure).toBeGreaterThanOrEqual(0)
+    expect(lines.findIndex((line) => line.includes('↑'))).toBeGreaterThan(failure)
+  }
+})
+
+// Upstream measures its update row's bracketed buttons; pi shows the update as a notice naming its command.
+test('a plugin update notice fits one row at every width', () => {
+  for (const version of ['0.1.25', '10.100.1000']) {
+    const notice = `Delta extension ${version} is available · /delta-plugin-update`
+    vi.mocked(updates.pluginUpdateNotice).mockReturnValue(notice)
+    const widget = new BandWidget(host, () => theme)
+    for (let width = 12; width <= 160; width++) {
+      const lines = widget.render(width)
+      expect(lines).toHaveLength(1)
+      expect(visibleWidth(lines[0]!)).toBeLessThanOrEqual(width)
+      expect(lines[0]).not.toContain('\n')
+      // Where the row holds the whole notice, the command that installs it is on it.
+      if (width >= notice.length + 3) expect(stripVTControlCharacters(lines[0]!)).toContain('/delta-plugin-update')
+    }
   }
 })

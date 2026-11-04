@@ -18,26 +18,48 @@ import { fakeDelta, type FakeIo } from '../fake-delta/cli.ts'
 
 export type Environment = Record<string, string | undefined>
 
-/** One command the extension ran, as the fake CLI saw it. */
-export type Ran = { argv: string[]; env: Environment }
+/**
+ * One command the extension ran, as the fake CLI saw it: run to completion within `timeoutMs`, or
+ * `spawned` to be read as it streams.
+ */
+export type Ran = { argv: string[]; env: Environment; timeoutMs?: number; spawned?: true }
+
+/** Output past this is cut and reported as truncated, as src/core/process.ts's `run` does. */
+const CAPTURE_LIMIT = 4 * 1024 * 1024
 
 /**
- * A program a test stands in for, by its name (`pi`, `npm`, `git`): it answers each run, or, returning
- * undefined, lets the real program run.
+ * A program a test stands in for, by its name (`pi`, `npm`, `git`, `where.exe`): it answers each run, or,
+ * returning undefined, lets the real program run. A spawned program's answer is streamed, stderr first;
+ * a fake can instead return the stream itself, to report as it goes, hold, or see itself stopped.
  */
 export type FakeProgram = (
   argv: string[],
   init: RunInit & { env: Record<string, string> },
-) => RunResult | undefined | Promise<RunResult | undefined>
+) => RunResult | ProcessStream | undefined | Promise<RunResult | ProcessStream | undefined>
+
+/** A program's name, from a POSIX or Windows path: `delta` for `C:\Delta\bin\delta.exe`. */
+const programName = (path: string | undefined) =>
+  path
+    ?.split(/[\\/]/)
+    .pop()
+    ?.replace(/\.exe$/i, '')
+const isStream = (value: RunResult | ProcessStream): value is ProcessStream => 'next' in value
 
 export function kitProcesses(
   environment: () => Environment,
   programs: Map<string, FakeProgram> = new Map(),
-): Host['process'] & { ran: Ran[]; others: Ran[]; busy(): number; stopAll(): Promise<void> } {
+): Host['process'] & {
+  ran: Ran[]
+  others: Ran[]
+  busy(): number
+  running(): string[][]
+  stopAll(): Promise<void>
+} {
   const ran: Ran[] = []
   /** The other programs the extension ran, real or faked. */
   const others: Ran[] = []
-  const live = new Set<ProcessStream>()
+  /** The long-running delta commands not yet stopped or ended, with their arguments. */
+  const live = new Map<ProcessStream, string[]>()
   let busy = 0
   const merged = (extra: Record<string, string> | undefined): Record<string, string> =>
     Object.fromEntries(
@@ -45,20 +67,27 @@ export function kitProcesses(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     )
-  const isDelta = (argv: string[]) => argv[0] !== undefined && basename(argv[0]) === 'delta'
+  const isDelta = (argv: string[]) => programName(argv[0]) === 'delta'
+  const fakeFor = (argv: string[]) => {
+    const name = argv[0] === undefined ? undefined : basename(argv[0])
+    return (name ? programs.get(name) : undefined) ?? programs.get(programName(argv[0]) ?? '')
+  }
   return {
     ran,
     others,
     /** How many one-shot commands are still running. */
     busy: () => busy,
+    /** The long-running delta commands still running, as argument lists without the program. */
+    running: () => [...live.values()],
     async run(argv, init = {}) {
       const env = merged(init.env)
       if (!isDelta(argv)) {
         others.push({ argv, env })
-        const fake = argv[0] === undefined ? undefined : programs.get(basename(argv[0]))
-        return (await fake?.(argv, { ...init, env })) ?? run(argv, { ...init, env })
+        const answer = await fakeFor(argv)?.(argv, { ...init, env })
+        if (!answer) return run(argv, { ...init, env })
+        return isStream(answer) ? collect(answer) : answer
       }
-      ran.push({ argv, env })
+      ran.push({ argv, env, ...(init.timeoutMs !== undefined ? { timeoutMs: init.timeoutMs } : {}) })
       busy++
       try {
         let stdout = ''
@@ -72,28 +101,87 @@ export function kitProcesses(
           },
           hold: () => Promise.reject(new Error(`fake delta: ${argv.join(' ')} holds, but was run to completion`)),
         })
-        return { stdout, stderr, exitCode, isStdoutTruncated: false, isStderrTruncated: false }
+        return {
+          stdout: stdout.slice(0, CAPTURE_LIMIT),
+          stderr: stderr.slice(0, CAPTURE_LIMIT),
+          exitCode,
+          isStdoutTruncated: stdout.length > CAPTURE_LIMIT,
+          isStderrTruncated: stderr.length > CAPTURE_LIMIT,
+        }
       } finally {
         busy--
       }
     },
     spawn(init) {
       const env = merged(init.env)
-      if (!isDelta(init.argv)) return spawn({ ...init, env })
-      ran.push({ argv: init.argv, env })
+      if (!isDelta(init.argv)) {
+        const fake = fakeFor(init.argv)
+        if (!fake) return spawn({ ...init, env })
+        others.push({ argv: init.argv, env })
+        return answered(Promise.resolve(fake(init.argv, { ...init, env })), () => spawn({ ...init, env }))
+      }
+      ran.push({ argv: init.argv, env, spawned: true })
       const stream = deltaStream(init.argv.slice(1), env)
-      live.add(stream)
+      live.set(stream, init.argv.slice(1))
       const stop = stream.return.bind(stream)
       stream.return = async () => {
         live.delete(stream)
         return stop()
       }
+      // A command that ends by itself is no longer running once its end is read.
+      const next = stream.next.bind(stream)
+      stream.next = async () => {
+        const piece = await next()
+        if (piece.done) live.delete(stream)
+        return piece
+      }
       return stream
     },
     /** End every long-running command still running, as the end of their process would. */
     async stopAll() {
-      for (const stream of [...live]) await stream.return()
+      for (const stream of [...live.keys()]) await stream.return()
     },
+  }
+}
+
+/** A fake program's answer as the stream `spawn` returns: its own stream, its output, or the real program's. */
+function answered(answer: Promise<RunResult | ProcessStream | undefined>, real: () => ProcessStream): ProcessStream {
+  const stream = answer.then((value) => {
+    if (!value) return real()
+    if (isStream(value)) return value
+    const pieces: Output[] = [
+      ...(value.stderr ? [{ stream: 'stderr' as const, text: value.stderr }] : []),
+      ...(value.stdout ? [{ stream: 'stdout' as const, text: value.stdout }] : []),
+    ]
+    const exit: Exit = { code: value.exitCode, signal: null }
+    return {
+      pid: undefined,
+      next: async () => {
+        const piece = pieces.shift()
+        return piece ? { done: false, value: piece } : { done: true, value: exit }
+      },
+      return: async () => ({ done: true, value: exit }),
+      terminate: () => {},
+    } satisfies ProcessStream
+  })
+  return {
+    pid: undefined,
+    next: async () => (await stream).next(),
+    return: async (value) => (await stream).return(value),
+    terminate: () => void stream.then((value) => value.terminate()),
+  }
+}
+
+/** A fake program's stream run to its end, as `run` answers it. */
+async function collect(stream: ProcessStream): Promise<RunResult> {
+  let stdout = ''
+  let stderr = ''
+  for (;;) {
+    const piece = await stream.next()
+    if (piece.done)
+      return { stdout, stderr, exitCode: piece.value.code, isStdoutTruncated: false, isStderrTruncated: false }
+    if (piece.value.stream === 'stdout') stdout += piece.value.text
+    else stderr += piece.value.text
   }
 }
 
@@ -166,6 +254,13 @@ function deltaStream(args: string[], env: Record<string, string>): ProcessStream
         wake()
       }
       return { done: true, value: exit }
+    },
+    // A fake command keeps nothing to report as it stops, so it stops as at once.
+    terminate() {
+      if (exit) return
+      exit = { code: null, signal: 'SIGTERM' }
+      stop?.()
+      wake()
     },
   }
 }

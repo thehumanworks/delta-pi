@@ -12,6 +12,8 @@ export class MockClock implements Clock {
   private scheduled: Scheduled[] = []
   /** What scheduled work threw, as the system clock would swallow it, for a test to check. */
   readonly failures: unknown[] = []
+  /** How many timers have run, so a test can tell that nothing ran meanwhile. */
+  fired = 0
 
   now(): number {
     return this.time
@@ -42,6 +44,7 @@ export class MockClock implements Clock {
 
   /** As the system clock does: the work starts, and the clock does not wait for it, since it may itself wait on the clock. */
   private start(due: Scheduled) {
+    this.fired++
     void Promise.resolve()
       .then(due.run)
       .catch((error: unknown) => this.failures.push(error))

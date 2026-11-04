@@ -65,3 +65,24 @@ jobs:
       - run: npx pi --version
       - run: npm run check
       - run: npm test
+
+  macos:
+    # Advisory: most of the people working on Delta develop on macOS, so the checks should run there too.
+    name: Verify on macOS (advisory)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Configure Git for the tests' throwaway checkouts
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name CI
+      - run: npm run verify

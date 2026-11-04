@@ -31,10 +31,15 @@ type Fault = {
 
 // Shared through globalThis: pi loads a fresh copy of the extension, and so of this module, per session.
 const registry = Symbol.for('pi-delta.test.disk')
-type Registry = { faults: Fault[]; touched: { operation: DiskOperation; path: string }[] }
+type Registry = {
+  faults: Fault[]
+  touched: { operation: DiskOperation; path: string }[]
+  /** What reads of matching paths answer in place of the file's contents. */
+  contents: { match: PathMatch; text: string }[]
+}
 function state(): Registry {
   const global = globalThis as unknown as Record<symbol, Registry | undefined>
-  return (global[registry] ??= { faults: [], touched: [] })
+  return (global[registry] ??= { faults: [], touched: [], contents: [] })
 }
 
 const matches = (match: PathMatch, path: string, text?: string) =>
@@ -86,6 +91,18 @@ export const disk = {
       release()
     }
   },
+  /**
+   * Make reads of matching paths answer `text`, as if another process had written it there, until the
+   * returned function, or the next such call for the same paths.
+   */
+  content(match: PathMatch, text: string): () => void {
+    const entry = { match, text }
+    state().contents.unshift(entry)
+    return () => {
+      const { contents } = state()
+      if (contents.includes(entry)) contents.splice(contents.indexOf(entry), 1)
+    }
+  },
   /** The paths the extension touched with `operation`, in order. */
   touched(operation?: DiskOperation): string[] {
     return state()
@@ -97,15 +114,19 @@ export const disk = {
     const current = state()
     current.faults.length = 0
     current.touched.length = 0
+    current.contents.length = 0
   },
 }
+
+/** What a test made reads of `path` answer, if anything. */
+const contentOf = (path: string) => state().contents.find((entry) => matches(entry.match, path))?.text
 
 /** files.ts's functions, `real`, each checking the test's faults first. */
 export function faultyFiles(real: typeof Files): typeof Files {
   return {
-    exists: async (path) => (await check('read', path), real.exists(path)),
-    readText: async (path) => (await check('read', path), real.readText(path)),
-    readIfExists: async (path) => (await check('read', path), real.readIfExists(path)),
+    exists: async (path) => (await check('read', path), contentOf(path) !== undefined || real.exists(path)),
+    readText: async (path) => (await check('read', path), contentOf(path) ?? real.readText(path)),
+    readIfExists: async (path) => (await check('read', path), contentOf(path) ?? real.readIfExists(path)),
     writePrivate: async (path, text) => (await check('write', path, text), real.writePrivate(path, text)),
     writeExclusive: async (path, text) => (await check('write', path, text), real.writeExclusive(path, text)),
     writeShared: async (path, text) => (await check('write', path, text), real.writeShared(path, text)),
