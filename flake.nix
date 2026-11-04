@@ -33,6 +33,7 @@
               bashInteractive
               coreutils
               curl
+              yazi
               fd
               ripgrep
               prettier
