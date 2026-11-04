@@ -56,8 +56,14 @@
   (or comment), as the Claude Code plugin does.
 - A `!` shell command run while sharing refuses prompts is staged at once and delivered by the next share.
 
+- A subagent stopped mid-turn by its parent ending (SIGTERM) aborts and records its turn as cancelled
+  instead of leaving it open until it is resumed.
+- A thread run's answer says when some of its records had not reached Delta as its pi stopped.
 ### Added
 
+- `DELTA_PI_PARENT` is now set by every session, recorded or not, as `{"sender": <session ID>}` plus
+  `"thread"` once recorded; it no longer carries `reference` or `directories`. An extension that read
+  those fields should read the parent's thread from Delta instead.
 - `delta_thread`: run another thread of the session's Delta conversation here as a subagent, as the
   Claude Code plugin does through `SendMessage`.
 - A subagent's own subagents record under its thread, and a subagent still running when its session is

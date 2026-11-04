@@ -108,6 +108,13 @@ Where this port behaves differently from upstream on purpose or because pi makes
 - **Two shares cannot start in the same Windows session from different folders**: pi fixes a session's
   folder when it starts, so upstream's tests of a share whose folder changes during installation do not
   apply.
+- **A thread run records with local acknowledgement** even when its parent is a joined session; upstream
+  uses the parent's mode.
+- **`/delta-plugin-update` asks npm's registry once** before it runs `pi update`, to name the release it
+  installs; upstream's marketplace update makes no request of its own.
+- **Binding saves queue per session runtime**, where upstream's queue is per process: a session resumed in
+  the same pi while its predecessor's last acknowledgement is still being saved could interleave with it.
+  Deliveries themselves run once per session per process, so no record is sent or acknowledged twice.
 - **The once-per-repository setup offer** is claimed by a read and a write, so two sessions starting at
   the same moment may both offer it. Inherited from upstream.
 
