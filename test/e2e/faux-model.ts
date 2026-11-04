@@ -1,7 +1,8 @@
 /**
  * A model for end-to-end tests: pi's faux provider, answering each request from the conversation
  * so far. `run <command>` asks for a bash call, `write <path> <text>` for a write call, `message
- * <thread>: <text>` for a `delta_thread` call, and anything else is echoed back.
+ * <thread>: <text>` for a `delta_thread` call, `fail <text>` ends the reply with an error, and anything
+ * else is echoed back.
  */
 import {
   createFauxCore,
@@ -37,6 +38,8 @@ const respond: FauxResponseFactory = (context) => {
     return fauxAssistantMessage([fauxToolCall('write', { path: write[1]!, content: `${write[2]!}\n` })], {
       stopReason: 'toolUse',
     })
+  // An error pi does not retry, as a provider's refusal of the request.
+  if (/^fail /.test(text)) return fauxAssistantMessage([], { stopReason: 'error', errorMessage: 'The model refused' })
   return fauxAssistantMessage(`Echo: ${text}`)
 }
 
