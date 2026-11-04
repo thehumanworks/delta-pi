@@ -776,8 +776,9 @@
     },
     {
       "upstream": "recording/bash.test.ts > backticks cannot close an output or command fence",
-      "status": "missing",
-      "note": "The shell test covers inline backticks, but not output or multiline commands containing runs of three or more backticks. Add those shellMarkdown cases."
+      "status": "ported",
+      "ours": ["test/content.test.ts > content > backticks cannot close an output or command fence"],
+      "note": "The same fences, through shellMarkdown: pi's shell output and a multiline command holding runs of backticks."
     },
     {
       "upstream": "recording/bash.test.ts > bash input alone names the command, fencing multiline commands",
@@ -806,17 +807,20 @@
     {
       "upstream": "recording/bash.test.ts > nonempty stderr is labelled and fenced",
       "status": "not-applicable",
-      "note": "Pi bashExecution exposes combined output, not Claude's separate bash-stderr tagged row."
+      "note": "pi's bashExecution message (core/messages.d.ts) carries one combined `output` and an exit code; it has no separate stderr stream to label, so the port says the exit code instead (test/content.test.ts > a shell command's failure or cancellation is said after its output)."
     },
     {
       "upstream": "recording/bash.test.ts > unrelated prose, partial tags, and other text are untouched",
-      "status": "not-applicable",
-      "note": "The pi adapter uses the bashExecution role and never parses Claude's bash XML tags out of arbitrary prose."
+      "status": "covered",
+      "ours": [
+        "test/content.test.ts > content > filters metadata by row provenance while preserving literal lookalike human messages"
+      ],
+      "note": "pi has no bash-tag rows to rewrite: a shell command is its own bashExecution message. The covering test asserts that a prompt holding a whole `<bash-input>` row, framing tags and a Delta-looking line is recorded verbatim."
     },
     {
       "upstream": "recording/content.test.ts > content > a cached final status never closes an input-only row, including failed and empty results",
       "status": "not-applicable",
-      "note": "This specifically tests Claude's independent structured-result cache racing its input row. The pi adapter has no such final-status cache; details arrive with the result."
+      "note": "The cache is Claude's structured tool result, which can arrive before the assistant's input row. pi has no such cache: a call's result is its toolResult message, committed after the assistant message that made the call, so an input row never has a final status to take."
     },
     {
       "upstream": "recording/content.test.ts > content > an edit records its patch relative to the checkout in place of its raw result",
@@ -836,8 +840,11 @@
     },
     {
       "upstream": "recording/content.test.ts > content > filters metadata by row provenance while preserving literal lookalike human messages",
-      "status": "missing",
-      "note": "Our role-filter test checks ordinary prompts and framing roles, but not literal human prompts containing system-reminder, command-name, or Delta-looking text. Add preservation assertions alongside role filtering."
+      "status": "ported",
+      "ours": [
+        "test/content.test.ts > content > filters metadata by row provenance while preserving literal lookalike human messages"
+      ],
+      "note": "pi's provenance is the message role: a prompt or reply holding system-reminder, command-name, bash-tag or Delta-looking text is recorded as written, while custom, compaction and branch-summary messages (other extensions' context, the remote rows this extension adds) are not, whatever they say."
     },
     {
       "upstream": "recording/content.test.ts > content > keeps input-only rows open and closes with source result content and a recorded diff",
@@ -858,7 +865,7 @@
     {
       "upstream": "recording/content.test.ts > content > leaves plan approvals and their results out of the transcript",
       "status": "not-applicable",
-      "note": "Pi has no built-in Claude ExitPlanMode/plan-approval tool."
+      "note": "pi has no plan-approval tool: its built-in tools are read, bash, edit, write, grep, find and ls, and plan mode exists only as an example extension (examples/extensions/plan-mode) whose approval is a UI choice, not a tool call in the transcript."
     },
     {
       "upstream": "recording/content.test.ts > content > preserves interleaved complete segments and opaque thought metadata",
@@ -879,12 +886,15 @@
     {
       "upstream": "recording/content.test.ts > content > retains malformed optional data as opaque text instead of invalid ACP",
       "status": "not-applicable",
-      "note": "The tested ACP annotations, resource-link size/icons and content _meta are not fields of pi's typed TextContent/ImageContent. The adapter does not forward those optional ACP fields."
+      "note": "pi's TextContent and ImageContent have no annotations, resource links, icons or _meta, and the port forwards only text and canonical-base64 images, so no optional ACP field can be malformed; anything else becomes JSON text (test/content.test.ts > content > wraps MCP tool result content in ACP v2 variants and preserves payloads)."
     },
     {
       "upstream": "recording/content.test.ts > content > skips blank text and signature-only thoughts while preserving redacted and nonblank content",
-      "status": "missing",
-      "note": "The ordered-reply test covers a blank text block and redacted thinking, but not signature-only/whitespace-only nonredacted thoughts or all-blank messages. Add the full matrix."
+      "status": "ported",
+      "ours": [
+        "test/content.test.ts > content > skips blank text and signature-only thoughts while preserving redacted and nonblank content"
+      ],
+      "note": "The same matrix with pi's blocks: thinking with only a thinkingSignature, whitespace-only thinking, and blank text are skipped; redacted thinking and nonblank text are kept, merged into one message."
     },
     {
       "upstream": "recording/content.test.ts > content > titles and kinds tool calls as Claude's ACP adapter does, with paths relative to the root",
@@ -896,8 +906,11 @@
     },
     {
       "upstream": "recording/content.test.ts > content > wraps MCP tool result content in ACP v2 variants and preserves payloads",
-      "status": "missing",
-      "note": "Our result test covers text only. Add pi TextContent/ImageContent payload and ACP wrapping tests, including valid/invalid base64. Claude-specific audio, document, resource and source-URL variants are not supplied by pi's typed message content."
+      "status": "covered",
+      "ours": [
+        "test/content.test.ts > content > wraps MCP tool result content in ACP v2 variants and preserves payloads"
+      ],
+      "note": "pi's tool results hold text and images: a text and a canonical-base64 image become ACP content; a non-canonical image, one without a MIME type, and another block stay visible as JSON text; the raw result keeps the payload; an error result fails. Claude's audio, document, resource and image-URL variants have no pi source."
     },
     {
       "upstream": "recording/delivery-policy.test.ts > delivery policy > a failed checkout check still pauses verification, not delivery",
@@ -982,7 +995,7 @@
     {
       "upstream": "recording/snapshot.test.ts > snapshot drops the synthetic \"Tool loaded.\" block only beside tool results",
       "status": "not-applicable",
-      "note": "Pi does not normalize deferred-tool loading into Claude user rows with the synthetic Tool loaded. text block."
+      "note": "pi does not add a synthetic text block to tool results that load deferred tools; its tool results are their own toolResult messages."
     },
     {
       "upstream": "recording/snapshot.test.ts > snapshot drops whole engine framing blocks and Delta context, not literal prompts or other content",
@@ -994,28 +1007,32 @@
     },
     {
       "upstream": "recording/snapshot.test.ts > snapshot export keeps the last 4096 messages in order without changing them",
-      "status": "missing",
-      "note": "Add a snapshotMessages test with more than 4096 recordable branch messages and framing between them. No existing test checks this limit."
+      "status": "ported",
+      "ours": ["test/snapshot.test.ts > snapshot export keeps the last 4096 messages in order without changing them"],
+      "note": "Same limit and order over 4100 prompts, the source unchanged. The limit counts recorded messages: pi's branch also holds custom messages (other extensions' context), which take none of the export's room."
     },
     {
       "upstream": "recording/snapshot.test.ts > snapshot formats separate and combined bash rows without changing assistant text",
-      "status": "missing",
-      "note": "The shell translator has unit coverage, but snapshotMessages itself is never called by our tests. Add a branch containing user-shell, ordinary user and assistant messages and assert export content/order and source nonmutation."
+      "status": "covered",
+      "ours": [
+        "test/snapshot.test.ts > snapshot formats separate and combined bash rows without changing assistant text"
+      ],
+      "note": "pi keeps a shell command and its output as one bashExecution message, exported as the person's readable row; a `!!` command stays out; a prompt and reply holding bash tags are exported unchanged, and the branch is not mutated."
     },
     {
       "upstream": "recording/title.test.ts > session title > a transcript is read from an offset with tail, or on Windows with PowerShell given the path as data",
       "status": "not-applicable",
-      "note": "The port reads the session name through pi's API rather than executing a transcript reader."
+      "note": "The title is pi's session name, which pi.getSessionName() returns; no transcript is read, so there is no offset reader."
     },
     {
       "upstream": "recording/title.test.ts > session title > an unfinished last line is not read",
       "status": "not-applicable",
-      "note": "Depends on Claude JSONL title scanning, which the documented pi session-name adaptation removes."
+      "note": "No transcript is read: pi.getSessionName() returns the session's name."
     },
     {
       "upstream": "recording/title.test.ts > session title > the last rename wins over any title Claude chose; otherwise Claude's latest",
       "status": "not-applicable",
-      "note": "README explicitly replaces Claude ai-title/custom-title transcript precedence with pi.getSessionName(), falling back to the first prompt. Rename delivery still needs the integration case listed below."
+      "note": "pi has one session name, which a rename (/name, or an extension's pi.setSessionName) replaces; pi chooses no title of its own to rank against. A rename's delivery is tested by recording.test.ts > a shared session records each new title once, a rename over Claude's own."
     },
     {
       "upstream": "recording/title.test.ts > session title > titles are one bounded line, and blank or malformed rows are skipped",
@@ -1026,67 +1043,91 @@
     {
       "upstream": "recording/title.test.ts > session title > titles split across pieces are found, and other rows are passed over",
       "status": "not-applicable",
-      "note": "Pi exposes the name directly; no streamed transcript title scanner is needed."
+      "note": "pi exposes the name directly; no streamed transcript is scanned."
     },
     {
       "upstream": "recording/tool-records.test.ts > tool records > a completed turn keeps its unpaired tools for a late row, and the next completed turn releases them",
       "status": "not-applicable",
-      "note": "Pi awaits ordinary tool-result messages before final settlement; there is no completed structured-call half awaiting a separately arriving result row. The port's own nested before-file cache leak is reported independently."
+      "note": "pi's agent loop commits every toolResult before agent_settled (agent-loop.js), so no call's result row arrives after its turn; there is nothing to keep for a late row."
     },
     {
       "upstream": "recording/tool-records.test.ts > tool records > clearing releases everything, including pairing state, so a reused ID is not mistaken for settled",
       "status": "not-applicable",
-      "note": "The ToolRecords pairing state is intentionally absent, and pi replaces the extension runtime on session replacement."
+      "note": "There is no pairing state to clear: pi delivers a call's details with its toolResult message, and the port keeps only the call's inputs until that message is recorded."
     },
     {
       "upstream": "recording/tool-records.test.ts > tool records > entries stay until both the call and its row are recorded (call first)",
       "status": "not-applicable",
-      "note": "Pi delivers structured details with toolResult; it has no independent completed call-hook result to pair with a later transcript row."
+      "note": "Claude's two halves (the tool.call hook's structured result and the transcript row) are one toolResult message in pi."
     },
     {
       "upstream": "recording/tool-records.test.ts > tool records > entries stay until both the call and its row are recorded (row first)",
       "status": "not-applicable",
-      "note": "The two independently arriving halves are a Claude hook feature, absent from pi's message-result adapter."
+      "note": "Claude's two halves (the tool.call hook's structured result and the transcript row) are one toolResult message in pi."
     },
     {
       "upstream": "register.test.ts > native turns > a completion whose append outlasts the budget returns and leaves delivery to the outbox",
-      "status": "missing",
-      "note": "Hold append beyond five seconds, assert a durable finish and bounded completion, then release it and assert background delivery with subsequent records still correctly scoped."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/turns.test.ts > a completion whose append outlasts the budget returns and leaves delivery to the outbox"
+      ],
+      "note": "agent_settled waits for its held finish for the five-second budget, then returns; the next turn's start and output are staged behind it, scoped to that turn. pi runs the next prompt only after the settle returns, so it starts after the budget rather than during it."
     },
     {
       "upstream": "register.test.ts > native turns > a failed durable start write aborts its local ID without publishing a partial start",
-      "status": "missing",
-      "note": "Inject a failed outbox start write, verify pi abort, no published partial start, unchanged durable next sequence and capture-failure reporting."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a failed durable start write aborts its local ID without publishing a partial start"
+      ],
+      "note": "Outbox writes fail at the kit disk: the run is aborted, no start reaches Delta, the next sequence is unchanged and the band says sharing paused."
     },
     {
       "upstream": "register.test.ts > native turns > a fenced receipt for an earlier turn's late output leaves the running turn alone",
-      "status": "missing",
-      "note": "For pi, queue an earlier turn's records across a later start instead of relying on a late Claude callback; fence those records and assert the newer execution is not aborted."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/turns.test.ts > a fenced receipt for an earlier turn's late output leaves the running turn alone"
+      ],
+      "note": "pi has no tool callback that outlives its turn, so the earlier turn's late output (the reply that arrived after its loss) is held in the outbox across the next turn's start; its fence names the earlier turn and leaves the running one alone."
     },
     {
       "upstream": "register.test.ts > native turns > a fenced receipt for the running turn aborts exactly that Claude turn with a notice",
-      "status": "missing",
-      "note": "The e2e supersession test uses a watch event, not a fenced append receipt. Test receipt-driven abort, one notice, durable finish and no second abort on settlement."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a fenced receipt for the running turn aborts exactly that Claude turn with a notice"
+      ],
+      "note": "The running turn is superseded at the fake Delta, so its next record comes back fenced: one abort of the pi run, one notice, the execution closed, and one finish however the run then ends."
     },
     {
       "upstream": "register.test.ts > native turns > a local prompt takes over a running remote turn, and rows wait for its turn",
-      "status": "missing",
-      "note": "Our steering e2e checks held rows during an own turn, not takeover of an existing remote turn. Add running-remote status, local scoped start arbitration and correct release of late remote rows."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a local prompt takes over a running remote turn, and rows wait for its turn"
+      ],
+      "note": "A teammate's running turn shows in the band; a prompt admitted while pi is still starting its run holds a remote row that arrives then; the start is delivered scoped to itself; Delta's own running turn is not a loss; the held row reaches the model once the turn ends."
     },
     {
       "upstream": "register.test.ts > native turns > a malformed finish receipt and failed durable retry retain the immutable pending finish",
-      "status": "missing",
-      "note": "Corrupt a finish acknowledgment and fail saving its retry acknowledgment across restart; assert unchanged finish bytes, cleared execution and eventual single finish."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a malformed finish receipt and failed durable retry retain the immutable pending finish"
+      ],
+      "note": "The finish's receipt is for another operation, and saving the retry's acknowledgment fails across a restart: the finish's file is unchanged, and /delta share delivers it once."
     },
     {
       "upstream": "register.test.ts > native turns > a malformed lifecycle receipt leaves its pending start unchanged without blocking entry",
-      "status": "missing",
-      "note": "Receipt parsing has unit coverage, but no test corrupts an actual start acknowledgment and verifies admitted execution, immutable pending bytes and eventual recovery."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a malformed lifecycle receipt leaves its pending start unchanged without blocking entry"
+      ],
+      "note": "The start's receipt names no turn and Delta is then unreachable: the prompt runs, the start's file is unchanged, and /delta share delivers the start and finish once."
     },
     {
       "upstream": "register.test.ts > native turns > a prompt enters without delivery permission; actual start binds lifecycle before output",
-      "status": "missing",
-      "note": "Hold or fail append delivery while admitting a prompt and steering, then assert that the durable start and all output share the new execution sequence before eventual delivery."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a prompt enters without delivery permission; actual start binds lifecycle before output"
+      ],
+      "note": "Appends fail throughout the turn: the prompt and a steered prompt are accepted, the durable start names its version, and every output and both prompts carry the start's sequence; the finish follows them once delivered."
     },
     {
       "upstream": "register.test.ts > native turns > a queued own finish does not block a new prompt",
@@ -1096,28 +1137,40 @@
     },
     {
       "upstream": "register.test.ts > native turns > a raced busy start is observed independently of snapshots and cancels only its local ID",
-      "status": "missing",
-      "note": "Fence a start after prompt admission and test supersession during that race, including no extra lifecycle for a subsequently refused prompt."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a raced busy start is observed independently of snapshots and cancels only its local ID"
+      ],
+      "note": "The turn's own start comes back fenced: one abort, its finish. Upstream's refusing hook is another pi extension's input handler, which starts no turn."
     },
     {
       "upstream": "register.test.ts > native turns > a remote Bash call reaches the receiver once with output (assistant row first)",
-      "status": "missing",
-      "note": "The applicable pi call/result lifecycle is partly covered by recording e2e and RemoteView unit tests, but no test routes produced records through a receiving view and checks one complete row with output and no false correction."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a remote Bash call reaches the receiver once with output (assistant row first)"
+      ],
+      "note": "pi's two records for a bash call (its input, then its result) folded into a teammate's RemoteView draw one completed row with its output, and only a real later edit draws a correction."
     },
     {
       "upstream": "register.test.ts > native turns > a remote Bash call reaches the receiver once with output (call hook first)",
       "status": "not-applicable",
-      "note": "Pi has no independently completed structured call hook that can precede the assistant call row; the documented adapter receives details with toolResult."
+      "note": "pi has no structured call hook that completes before the assistant's row: a call's result is its toolResult message, committed after the assistant message that made it."
     },
     {
       "upstream": "register.test.ts > native turns > a watch supersession and a fenced receipt for the same turn abort it once",
-      "status": "missing",
-      "note": "Deliver both signals concurrently and assert a single pi abort, notice and durable finish."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > a watch supersession and a fenced receipt for the same turn abort it once"
+      ],
+      "note": "Both signals for the same turn, together: one abort, one notice, one finish."
     },
     {
       "upstream": "register.test.ts > native turns > an observer loss queued across session end cannot write or abort the restarted execution",
-      "status": "missing",
-      "note": "Hold the supersession operation across runtime replacement and verify stale work cannot save or abort in the resumed lifetime."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > an observer loss queued across session end cannot write or abort the restarted execution"
+      ],
+      "note": "The loss is held at its first read of the binding while pi quits without stopping its run (pi's dispose), and the session resumes: nothing is aborted and the resumed runtime closes the turn once."
     },
     {
       "upstream": "register.test.ts > native turns > completion delivers its finish before the hook returns, so a host that exits right after a reply still records it",
@@ -1130,37 +1183,41 @@
     {
       "upstream": "register.test.ts > native turns > completion finishes its lifecycle without waiting for an unresolved tool callback",
       "status": "not-applicable",
-      "note": "This relies on Claude completing a turn while an independent tool.call callback is unresolved. Pi's documented final agent_settled boundary follows ordinary tool-result processing."
+      "note": "pi's agent loop finishes every tool call, and commits its result, before agent_end and agent_settled (agent-loop.js executeToolCalls), so a turn cannot end with a call outstanding."
     },
     {
       "upstream": "register.test.ts > native turns > execution location follows only an explicit Claude host flag (false)",
       "status": "not-applicable",
-      "note": "Pi lacks the Claude host flag; treating a pi process as necessarily local would invent the location."
+      "note": "CLAUDE_CODE_REMOTE says where Claude Code itself runs; pi has no flag or API saying whether it runs locally or hosted, and inferring 'local' would invent it. The flag-missing case applies to pi and is covered."
     },
     {
       "upstream": "register.test.ts > native turns > execution location follows only an explicit Claude host flag (missing)",
-      "status": "not-applicable",
-      "note": "The conditional Claude host-flag feature is absent; the port omits execution_location."
+      "status": "covered",
+      "ours": ["test/behaviour/turns.test.ts > execution location follows only an explicit Claude host flag (missing)"],
+      "note": "pi never has the flag, so a turn's start names the extension's version and no execution_location."
     },
     {
       "upstream": "register.test.ts > native turns > execution location follows only an explicit Claude host flag (true)",
       "status": "not-applicable",
-      "note": "CLAUDE_CODE_REMOTE describes Claude's hosting surface. Pi has no equivalent confirmed host-location flag."
+      "note": "CLAUDE_CODE_REMOTE says Claude Code runs hosted; pi has no equivalent flag or API, so no start may claim a remote location."
     },
     {
       "upstream": "register.test.ts > native turns > late and subagent completions cannot close a newer main turn",
       "status": "not-applicable",
-      "note": "Pi agent_settled is a serialized final boundary without a native turn ID, and subagents run in separate session runtimes/processes rather than sending agentId-tagged completions into the parent's hook stream."
+      "note": "pi's agent_settled carries no turn ID and is serialized with agent_start (agent-session.js awaits each event's listeners), so a completion cannot arrive late; subagents are separate pi processes recording their own threads, never completions in the parent's event stream."
     },
     {
       "upstream": "register.test.ts > native turns > late tool output keeps the sequence captured by its own turn",
       "status": "not-applicable",
-      "note": "The specific test releases a Claude tool callback after the next main turn starts. Pi settles only after its normal tool results; nested tool callbacks do not become independent transcript toolResult messages."
+      "note": "The test releases a tool callback after the next turn started; pi's tools all finish within their run (agent-loop.js), so no output arrives in a later turn. The pi form, output held in the outbox across the next start, is test/behaviour/turns.test.ts > a fenced receipt for an earlier turn's late output leaves the running turn alone."
     },
     {
       "upstream": "register.test.ts > native turns > live capture failure cancels the exact local turn even when the store is unavailable",
-      "status": "missing",
-      "note": "Fail persistence after a running start, verify abortion of the active pi run and refusal of later prompts until capture is repaired."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > live capture failure cancels the exact local turn even when the store is unavailable"
+      ],
+      "note": "Every store write fails mid-turn: the run is aborted once and the next prompt is refused."
     },
     {
       "upstream": "register.test.ts > native turns > live turns report the installed plugin version and only confirmed finish reasons",
@@ -1173,23 +1230,32 @@
     },
     {
       "upstream": "register.test.ts > native turns > malformed saved control {\"schemaVersion\":2} is not translated or discarded",
-      "status": "missing",
-      "note": "pendingRecordTurn rejects malformed envelopes in isolation, but no activation test verifies that a corrupt saved control preserves its binding/files and issues no append."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > malformed saved control {\"schemaVersion\":2} is not translated or discarded"
+      ],
+      "note": "A seeded record with schemaVersion 2: the resumed session keeps its binding and files, appends nothing and pauses with the reason."
     },
     {
       "upstream": "register.test.ts > native turns > output whose turn's start is still staging waits for that start",
       "status": "not-applicable",
-      "note": "Claude can run independent output hooks while turn.start is pending. Pi awaits agent_start before its ordinary message stream, so the specific held-row race is absent."
+      "note": "pi awaits every agent_start listener before the run's first message (agent-session.js _handleAgentEvent; agent.js awaits listeners), and the start is staged in that listener, so no output can precede it."
     },
     {
       "upstream": "register.test.ts > native turns > ownership loss aborts exactly the bound native turn and fences its later output",
-      "status": "missing",
-      "note": "test/e2e/collaboration.test.ts's takeover test asserts abortion, idle and notice, but never asserts the late-output sequence despite its title. Add ignored stale sequence, exactly-once abort and scoped late-output assertions."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > ownership loss aborts exactly the bound native turn and fences its later output"
+      ],
+      "note": "A stale supersession for another sequence changes nothing; the turn's own aborts it once, and the reply that arrives after the loss keeps the lost turn's sequence."
     },
     {
       "upstream": "register.test.ts > native turns > restart delivers a queued abandoned start and its matching finish without aborting a saved Claude ID",
-      "status": "missing",
-      "note": "Seed a durable pending start/execution from an earlier runtime, resume it, and assert matching idle delivery without aborting the new pi runtime."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/turns.test.ts > restart delivers a queued abandoned start and its matching finish without aborting a saved Claude ID"
+      ],
+      "note": "A start and open execution seeded as an earlier pi process left them; the resumed runtime delivers the start and its finish without aborting pi."
     },
     {
       "upstream": "register.test.ts > plugin updates > Desktop attachment triggers production discovery after startup saw no surface",
@@ -1396,17 +1462,23 @@
     {
       "upstream": "register.test.ts > recording > a call recorded before its input row names itself, and plan approvals record nothing",
       "status": "not-applicable",
-      "note": "Pi has neither independently completed Claude call hooks arriving before assistant input rows nor the built-in ExitPlanMode tool."
+      "note": "pi commits an assistant's tool-call message before running its calls, so no call's record can precede its input row; and pi has no plan-approval tool (plan mode is an example extension whose approval is a UI choice)."
     },
     {
       "upstream": "register.test.ts > recording > a detached checkout pauses delivery until a later successful check lifts the pause it set",
-      "status": "missing",
-      "note": "Detach the checkout during delivery, queue additional messages, reattach, and verify only a successful verification clears the latched pause."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a detached checkout pauses delivery until a later successful check lifts the pause it set"
+      ],
+      "note": "The fake reports the checkout detached mid-turn: delivery pauses with the reason; reattaching alone does not resume it, even as more records queue and time passes; the next prompt's check lifts the pause and everything is delivered in order."
     },
     {
       "upstream": "register.test.ts > recording > a drain that fails after its session ended cannot revive the session with a pause",
-      "status": "missing",
-      "note": "Hold a status check across shutdown, fail it after the old runtime ends, and verify no revived pause and successful resumed delivery."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a drain that fails after its session ended cannot revive the session with a pause"
+      ],
+      "note": "A delivery's checkout check is held, pi quits, and the check is then refused (not_visible); the resumed session is not paused by it and delivers the queued records, showing nothing of the old failure."
     },
     {
       "upstream": "register.test.ts > recording > a failed append shows the CLI error in the transcript once, keeps the record queued, and retries it",
@@ -1426,18 +1498,27 @@
     },
     {
       "upstream": "register.test.ts > recording > a growing backlog reports the same reason once, and ending the session cancels and resets its retry",
-      "status": "missing",
-      "note": "Grow the queue across failed drains, check notice suppression, end the runtime, and verify cancellation plus reset initial backoff after resumption."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a growing backlog reports the same reason once, and ending the session cancels and resets its retry"
+      ],
+      "note": "Three turns' deliveries fail with growing batches and the reason shows once; ending the session cancels the retry; the resumed session retries after the initial two seconds. Appends keep failing through pi's shutdown delivery, which upstream's session end does not attempt."
     },
     {
       "upstream": "register.test.ts > recording > a lost acknowledgment replays identical records and accepts the advanced cumulative frontier",
-      "status": "missing",
-      "note": "Accept records then lose the append response, retry/restart, and compare exact replayed bytes and sequence/frontier without re-exporting."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a lost acknowledgment replays identical records and accepts the advanced cumulative frontier"
+      ],
+      "note": "Delta accepts the whole export and its answer is lost; sharing again replays the same records as duplicates, the thread is unchanged, and the next turn takes the following sequences."
     },
     {
       "upstream": "register.test.ts > recording > a partial append retains exactly the unacknowledged suffix and never restages the export",
-      "status": "missing",
-      "note": "Inject a partial append failure, restart, and assert the exact retained suffix, immutable bytes, single export and continued sequence."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > a partial append retains exactly the unacknowledged suffix and never restages the export"
+      ],
+      "note": "/delta share's append is accepted for its first record and then fails (the fake's `accept`); across a restart with the conversation changed meanwhile, the exact queued suffix (the export's reply and the thread's title) is delivered byte for byte and nothing is exported again."
     },
     {
       "upstream": "register.test.ts > recording > a permanent append failure pauses with its reason instead of retrying a poison record",
@@ -1449,48 +1530,61 @@
     },
     {
       "upstream": "register.test.ts > recording > an acknowledgment that cannot be saved replays the exact marked record after restart",
-      "status": "missing",
-      "note": "Fail only the manifest write saving an accepted append acknowledgment, then restart and assert immutable marked-record replay and subsequent sequence continuity."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > an acknowledgment that cannot be saved replays the exact marked record after restart"
+      ],
+      "note": "Only the store write saving Delta's acknowledgment of a live reply fails (the kit disk sees the text written); after a restart the identical record, with its live marks, is replayed once and the sequence continues."
     },
     {
       "upstream": "register.test.ts > recording > marks recorded live Claude messages and tool activity",
-      "status": "missing",
-      "note": "test/e2e/recording.test.ts checks live user metadata only. Add assertions for agent messages, thoughts preserving pi metadata, tool calls, and edit results with each activity_kind and origin/surface field."
+      "status": "ported",
+      "ours": ["test/behaviour/recording.test.ts > marks recorded live Claude messages and tool activity"],
+      "note": "pi's prompt, thinking (keeping pi's block in _meta.pi), reply, a write call and its diff carry their activity kind, origin and surface."
     },
     {
       "upstream": "register.test.ts > recording > outbox collection follows durable acknowledgments and never blocks delivery",
-      "status": "missing",
-      "note": "The selector has pure tests, but actual collection does not. Test removal failure/blocked listing, pending-file retention, unrelated files, continued delivery and cleanup retry on activation."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/delivery.test.ts > outbox collection follows durable acknowledgments and never blocks delivery"
+      ],
+      "note": "With removal failing at the kit disk, delivery goes on and a warning is shown; acknowledged files are collected on the next activation while queued records and an unrelated file stay; with listing held and removal failing, delivery completes; finally only the unrelated file remains."
     },
     {
       "upstream": "register.test.ts > recording titles > a session finds its transcript in another project's folder after a move",
       "status": "not-applicable",
-      "note": "Depends on Claude moving its transcript between projects directories. Pi exposes session history/name through its session manager."
+      "note": "The title is pi's session name, from pi.getSessionName(), or the first prompt's line; the port reads no transcript, so there is none to find after a move."
     },
     {
       "upstream": "register.test.ts > recording titles > a session that keeps no transcript stops looking for one after a few turns",
       "status": "not-applicable",
-      "note": "The pi adapter never searches Claude-style transcript directories, including in no-session mode."
+      "note": "The port never searches for a transcript: pi.getSessionName() answers whether or not pi saves the session (in-memory sessions included)."
     },
     {
       "upstream": "register.test.ts > recording titles > a shared session records each new title once, a rename over Claude's own",
-      "status": "missing",
-      "note": "Adapt to pi session_info_changed and the documented first-prompt fallback. Assert initial title, no duplicates, rename delivery and persisted title. Existing e2e only checks one fallback title."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/recording.test.ts > a shared session records each new title once, a rename over Claude's own"
+      ],
+      "note": "pi's adaptation: the first prompt names the thread, a later turn does not record it again, and naming the session (/name, session_info_changed) renames it once and is saved."
     },
     {
       "upstream": "register.test.ts > recording titles > a title still arrives when reading from an offset fails, and a missing transcript fails nothing",
       "status": "not-applicable",
-      "note": "The offset-reader/fallback feature is removed by the documented pi session-name API adaptation; no transcript read is required to obtain a title."
+      "note": "There is no transcript read to fail: the title comes from pi.getSessionName() or the branch's first prompt, both in memory."
     },
     {
       "upstream": "register.test.ts > recording titles > an automatic session takes Claude's title at its first reply, before its thread exists",
-      "status": "missing",
-      "note": "Use pi's fallback/session name and hold automatic activation. Verify a title can be durably queued before the thread is attached and is delivered once. Existing tests wait for watch startup before prompting."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/recording.test.ts > an automatic session takes Claude's title at its first reply, before its thread exists"
+      ],
+      "note": "With the checkout's attach held, the first reply stages the title (the first prompt's line) while the turn still runs and before the thread exists; it is delivered once. The port recorded titles only when a turn ended; it now records them at the turn's first reply, as upstream does."
     },
     {
       "upstream": "register.test.ts > recording titles > an untitled session reads its transcript at the first reply of each turn, not at every reply",
       "status": "not-applicable",
-      "note": "Pi supplies the session name directly and the documented fallback uses the branch's first prompt; there is no filesystem title-read scheduling."
+      "note": "The test counts transcript reads (`tail` runs); the port reads none. Its pi form, the title taken at a turn's reply and recorded once, is tested by recording.test.ts > an automatic session takes Claude's title at its first reply, before its thread exists and > a shared session records each new title once, a rename over Claude's own."
     },
     {
       "upstream": "register.test.ts > remote activity > a comment-only send draws each comment as its own row and gives it to Claude, with no empty message",
@@ -1828,23 +1922,33 @@
     },
     {
       "upstream": "register.test.ts > the recording contract > a CLI that predates thread contract is treated as too old",
-      "status": "missing",
-      "note": "Simulate the CLI's unknown-subcommand response to thread contract, then assert update-Delta guidance and no sharing side effects."
+      "status": "ported",
+      "ours": ["test/behaviour/contract.test.ts > a CLI that predates thread contract is treated as too old"],
+      "note": "The CLI answers `thread contract` with clap's usage error: /delta share says to update Delta and runs nothing else."
     },
     {
       "upstream": "register.test.ts > the recording contract > a contract answer for an ended session is neither remembered nor used once it resumes",
-      "status": "missing",
-      "note": "Hold an incompatible contract response across shutdown/reload, then verify a fresh compatible check, no stale notice/cache pollution and exactly one recovered append."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/contract.test.ts > a contract answer for an ended session is neither remembered nor used once it resumes"
+      ],
+      "note": "The held contract check answers a too-old range after its session ended; the resumed session asks again, says nothing about the stale answer and appends the record once."
     },
     {
       "upstream": "register.test.ts > the recording contract > a resumed session refuses to participate against an incompatible contract",
-      "status": "missing",
-      "note": "Resume a recorded session with an incompatible CLI; assert preserved state, no new watch/append, update guidance and refused prompt."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/contract.test.ts > a resumed session refuses to participate against an incompatible contract"
+      ],
+      "note": "A recorded session resumes against a newer-only CLI: its binding is unchanged, no watch starts, the band and a note say to update the extension, and a prompt is refused with that text."
     },
     {
       "upstream": "register.test.ts > the recording contract > an interrupted share negotiates the contract before recovering its outbox",
-      "status": "missing",
-      "note": "Seed pending records with snapshot false, verify negotiation precedes append, and verify incompatible recovery appends nothing while compatible recovery names the pi producer."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/contract.test.ts > an interrupted share negotiates the contract before recovering its outbox"
+      ],
+      "note": "A seeded pending record with no committed snapshot: an incompatible CLI appends nothing; a compatible one is asked before the append, which names the producer Pi."
     },
     {
       "upstream": "register.test.ts > the recording contract > an out-of-range recording contract refuses to share, and a later retry re-checks",

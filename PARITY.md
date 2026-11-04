@@ -36,11 +36,10 @@ Each entry gives its reason. Three checks keep the record honest:
 <!-- parity-summary:start -->
 | Status | Upstream tests |
 | --- | --- |
-| ported | 331 |
-| covered | 72 |
-| missing | 36 |
+| ported | 363 |
+| covered | 78 |
 | unsupported | 1 |
-| not-applicable | 69 |
+| not-applicable | 67 |
 <!-- parity-summary:end -->
 
 Every upstream test that applies to pi is ported or covered: the whole-plugin tests (`register.test.ts`,
