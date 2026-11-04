@@ -93,6 +93,7 @@ import {
   forgetThreadNotes,
   messageThread,
   noteForParent,
+  notesKept,
   takeHandoff,
 } from './src/subagents/thread-runs.ts'
 import { deliverNote } from './src/watch/rows.ts'
@@ -568,6 +569,8 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     // A subagent's own checkout is released before its pi exits, so whatever started it may remove it.
     if (event.reason !== 'reload') await releaseChildCheckout(host, binding)
     await releaseOnEnd(host, session, event.reason)
+    // A thread's pi stores what it told the person before it exits, for the session that runs it.
+    await notesKept()
     forgetRuntime(session, runtime)
     tui = undefined
     context = undefined
