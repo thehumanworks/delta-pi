@@ -92,14 +92,27 @@ joined session later mounts its worktrees again.
 ### Subagents
 
 Pi runs subagents as separate pi sessions, usually separate `pi` processes started by an extension.
-A recorded session passes its thread to everything it starts through the `DELTA_PI_PARENT`
-environment variable. A pi session that starts empty with that variable set, while the session that
-started it is still live, records into a child thread under the parent's, named for its first prompt
-(or `DELTA_PI_SUBAGENT_NAME`), with its prompts shown as sent by the parent. A child working in the
-parent's checkout shares its worktrees; one working in a checkout of its own, such as a Git worktree,
-even one inside the parent's checkout, attaches that checkout to its thread while it runs. A subagent's
-own subagents record under the top-level session's thread. A link left in an environment that outlives
-its session, as a long-running worker's does, records nothing once that session has ended.
+Every session passes a link to itself to everything it starts through the `DELTA_PI_PARENT` environment
+variable. A pi session that starts empty with that link, while the session that started it is live and
+recorded, records into a child thread under its parent's, named for its first prompt (or
+`DELTA_PI_SUBAGENT_NAME`), with its prompts shown as sent by the parent. A subagent's own subagents nest
+under it the same way. A child working in its parent's checkout shares its worktrees; one working in a
+checkout of its own, such as a Git worktree, even one inside the parent's checkout, attaches that
+checkout to its thread while it runs, and its pi does not exit until Delta has stopped syncing that
+checkout, so whatever started it can remove it safely. A subagent still running when its parent is
+shared records from then on, its earlier runs included; one that already ended is not recorded. A link
+left in an environment that outlives its session, as a long-running worker's does, records nothing once
+that session has ended.
+
+### Delta threads as subagents
+
+In an interactive recorded session whose Delta conversation has other threads, pi is told their names
+and gets a `delta_thread` tool to send any of them a message. The thread then runs here as a subagent: a
+child `pi` that works in the thread's worktrees, starts from the thread's history (or, run again, from
+what happened in Delta since its last run), records on that thread, and answers with its reply. You are
+asked once per thread before it first runs, and again before taking over a thread someone else is running
+in Delta. The child uses the parent's model, thinking level and tool options; when someone takes the
+thread over in Delta, it stops, and pi is told Delta's reply once that turn ends.
 
 ### Commands
 
@@ -123,7 +136,8 @@ menu of these actions.
 | `/delta resolve` | Choose Fork & Restore or Discard for offline changes Delta refused |
 
 Sharing, joining and setup need pi's interactive terminal or an RPC client that shows dialogs. In print
-mode (`pi -p`), Delta's notes and command answers go to stderr, leaving stdout to the model.
+and JSON modes (`pi -p`, `pi --mode json`), Delta's notes and command answers go to stderr, leaving
+stdout to the model.
 
 ## Privacy
 
@@ -146,9 +160,9 @@ The recording, delivery, retry, watch, share, setup and sign-in logic is the plu
 its tests. Where Claude Code's host and pi differ, the behaviour is adapted: a Delta turn runs from pi's
 `agent_start` to `agent_settled`, Delta records the messages pi commits to the session, a join opens a
 new pi session in the thread's folder, the band's buttons are `/delta` commands, and the extension
-updates through npm and `pi update`. [PARITY.md](PARITY.md) lists each adaptation, what is not ported
-(Claude Code Desktop's join hand-off, `/background`, running a Delta thread through `SendMessage`, and
-recording subagents that started before the session was recorded), the known differences, and how each
+updates through npm and `pi update`, and a Delta thread runs as a subagent through the `delta_thread`
+tool rather than `SendMessage`. [PARITY.md](PARITY.md) lists each adaptation, what pi has no counterpart
+for (such as Claude Code Desktop's join hand-off and `/background`), the known differences, and how each
 of the plugin's tests is covered here.
 
 ## Development

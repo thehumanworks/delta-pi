@@ -43,11 +43,12 @@ Each entry gives its reason. Three checks keep the record honest:
 | not-applicable | 69 |
 <!-- parity-summary:end -->
 
-Most missing tests are upstream's engine tests (`register.test.ts`, `setup/auto.test.ts`,
-`sharing/join.test.ts`, `cli/auth.test.ts`), which run the whole plugin in Claude Code's test kit. Their
-counterpart here is the in-process kit in `test/kit`, which runs the whole extension against a fake pi on
-a clock the test moves; porting them onto it is the main remaining work. `test/behaviour` holds the
-first ones, written for the defects below.
+Every upstream test that applies to pi is ported or covered: the whole-plugin tests (`register.test.ts`,
+`setup/auto.test.ts`, `sharing/join.test.ts`, `cli/auth.test.ts`, `subagents/children.test.ts`) run on the
+in-process kit in `test/kit` (`test/behaviour`), which runs the whole extension against a fake pi on a
+clock the test moves, and the pure modules' tests are unit tests in `test/`. The one **unsupported** test
+and every **not-applicable** one give their reason in the record; [Not provided](#not-provided) and
+[Known differences](#known-differences) below summarise them.
 
 ## Where pi's host differs
 
@@ -62,44 +63,53 @@ host provides differently is adapted:
 | Remote rows drawn as the plugin's own command output | Custom messages with a renderer, held until pi settles | `test/rows.test.ts`, `test/e2e/recording.test.ts` |
 | The band's buttons (copy link, share, Fork & Restore, Discard, Later) | `/delta copy`, `/delta share` (queued until a running turn ends), `/delta resolve`, `/delta-plugin-update later` | `test/link.test.ts`, `test/behaviour/sharing.test.ts`, `test/updates.test.ts` |
 | `/clear` then `/cd` into the thread folder on join | A new pi session whose working directory is the thread folder; a join that cannot finish there retries in place | `test/behaviour/join.test.ts`, `test/e2e/collaboration.test.ts` |
-| Title Claude chose for the session | pi's session name, else the first prompt's first line | `test/e2e/recording.test.ts` |
-| Claude's `Agent` subagents | pi processes a recorded session starts, linked through `DELTA_PI_PARENT` | `test/behaviour/subagents.test.ts`, `test/e2e/collaboration.test.ts` |
+| Title Claude chose for the session | pi's session name, else the first prompt's first line, recorded at a turn's first reply | `test/e2e/recording.test.ts`, `test/behaviour/turns.test.ts` |
+| Claude's `Agent` subagents | pi processes a session starts, linked through `DELTA_PI_PARENT`; a subagent's own subagents nest under it | `test/behaviour/subagents.test.ts`, `test/e2e/collaboration.test.ts` |
+| `SendMessage` to a Delta thread, run as a Claude subagent | The `delta_thread` tool, which runs the thread in a child `pi --mode json` and returns its reply | `test/behaviour/threads.test.ts`, `test/delta-threads.test.ts`, `test/e2e/collaboration.test.ts` |
+| Claude Code's permission modes before a thread runs | The person is asked once per thread; the tool is offered only in interactive recorded sessions, never beyond the parent's own `--tools` | `test/behaviour/threads.test.ts` |
 | Marketplace self-update | npm check and `pi update <source>` | `test/updates.test.ts` |
 | Paths as Claude's tools resolve them | Paths as pi's tools resolve them (`@`, `~`, `file://`) | `test/content.test.ts` |
-| Notices in Claude Code's transcript | Notes in pi's transcript; notifications in RPC; stderr in print mode | `test/e2e/accounts.test.ts` |
+| Notices in Claude Code's transcript | Notes in pi's transcript; notifications in RPC; stderr in print and JSON modes | `test/e2e/accounts.test.ts`, `test/behaviour/organization.test.ts` |
 
 ## Not provided
 
-Each is a capability, not a host difference; the record marks their tests **unsupported**.
+- **Recording subagents that ended before their session was shared.** A session shared while a subagent
+  runs records it from then on, its earlier runs included; one that already ended is not recorded. pi keeps
+  no list of the processes a session started, and a subagent run with `--no-session`, as pi's own subagent
+  example runs them, leaves no transcript once it exits. Upstream reads Claude Code's agent inventory and
+  transcripts. (`subagents/children.test.ts > sharing records the subagents that already ran…`,
+  **unsupported**.)
 
-- Claude Code Desktop's hand-off of a join to a new Desktop session.
-- Following a conversation Claude moves to a background session (`/background`).
-- Running a Delta thread as a subagent through `SendMessage`.
-- Recording subagents that started before the session was recorded.
-- Nesting: a subagent's own subagents record under the top-level session's thread, not under the
-  subagent that started them.
+What upstream does in Claude Code features pi has no counterpart of is **not-applicable**, each with its
+reason in the record: Claude Code Desktop's hand-off of a join to a new Desktop session (pi can only
+replace the session in its own process), following a conversation Claude moves to a background session
+(pi has no `/background` or agents overview), Claude's isolation worktrees, forks, teammates and managed
+agents, its transcript files and title scanning, its plan approvals, its command-output rows, and the
+`CLAUDE_CODE_REMOTE` host flag.
 
 ## Known differences
 
-What an audit of the port against upstream found and this port has not changed, with why:
+Where this port behaves differently from upstream on purpose or because pi makes it so, with why:
 
-- **A subagent's session ends without waiting for Delta to release its own checkout.** Upstream waits,
-  so the code that started the subagent can then remove its worktree safely. Not done yet.
-- **Remote rows are drawn as they first arrived.** A teammate's later edit or removal reaches the model
-  as a correction, but the row drawn for the person is not redrawn, and quoted comment context is cut
-  for a 100-column width. Upstream redraws from the live thread. Not done yet.
-- **A remote row pi fails to add is still counted as added.** pi's `sendMessage` reports its failures on
-  pi's own error channel, not to the caller; a row lost to a failing session file is not offered again.
-- **Two writes to one file in the same turn** can record the second's patch against the file before
-  both, since the prior contents are read when each call starts, not in pi's mutation queue.
-- **Records a failing disk could not save** are flushed when the session ends; if the disk still fails,
-  they are lost with the session's runtime. Upstream keeps them for the life of the process.
 - **A joined session is not moved when its thread's worktrees change.** It is told their new paths;
-  `/delta-join` again opens a session in the thread's folder. pi keeps one directory per session, where
-  Claude Code moves its own.
-- **A message Delta cannot translate is logged and skipped.** Recording goes on with the next message
-  rather than pausing; the debug log says which. Upstream pauses capture on a failed local write, as this
-  port does, but has no translation step that can fail.
+  `/delta-join` again opens a session in the thread's folder. A pi session's working directory is fixed
+  when its runtime is created, read-only to extensions, and only a command (never a watch event) can switch
+  sessions.
+- **Delta threads as subagents** (`delta_thread`): the tool waits for the thread's reply and returns it,
+  where upstream returns at once and the reply arrives as a new prompt; a message to a thread whose run is
+  still going is refused, where upstream feeds it to the running subagent; the thread's history reaches
+  the child after its message, not before (pi's `before_agent_start` adds context after the prompt); a
+  message starting with `/` is refused, since pi would run it as a command; subagents other extensions
+  start are not resumed by a message; and an `--api-key` given on the parent's command line is not passed
+  on, since it would show in the process list.
+- **A remote row whose session file write fails** stays in this process's context and is counted as added;
+  it is offered again only when the session resumes. pi's `sendMessage` reports a failed write on pi's own
+  error channel, not to the caller; a row pi did not add at all is offered again.
+- **A drawn remote row after a restart** shows its saved display until the watch is back, and nothing once
+  a complete snapshot lacks it, where upstream shows a placeholder.
+- **Two shares cannot start in the same Windows session from different folders**: pi fixes a session's
+  folder when it starts, so upstream's tests of a share whose folder changes during installation do not
+  apply.
 - **The once-per-repository setup offer** is claimed by a read and a write, so two sessions starting at
   the same moment may both offer it. Inherited from upstream.
 
