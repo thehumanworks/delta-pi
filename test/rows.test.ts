@@ -115,10 +115,14 @@ test('a drawn row shows the item as it is now while the watch holds its thread, 
   expect(liveDisplay(saved).display()).toBe('gone')
   live.remove('a')
   expect(liveDisplay(saved).display()).toBe('gone')
-  // Missing from a complete snapshot, as when it was removed while pi was not running, it draws nothing.
+  // Missing from a complete snapshot, as when it was removed while pi was not running, it says so.
   feed.view = new RemoteView('t', { thread: 't', items: {} })
   feed.view.endSnapshot()
-  expect(liveDisplay(saved).display()).toBe('gone')
+  expect(liveDisplay(saved).display()).toEqual({ kind: 'missing', text: 'A Delta item that is not in this session.' })
+  expect(liveDisplay({ ...saved, id: 'comment:c' }).display()).toEqual({
+    kind: 'missing',
+    text: 'A Delta comment that is not in this session.',
+  })
   // A row saved before rows carried their item draws as it was saved.
   const { id: _id, thread: _thread, ...old } = saved
   expect(liveDisplay(old).display()).toBe(old)

@@ -1,6 +1,8 @@
 // A teammate's activity in pi: the rows the model reads, what the person sees drawn, and that nothing
 // arriving from the thread runs or is recorded back. Ported from the upstream plugin's engine tests
 // (hooks/register.test.ts, "remote activity") onto the kit.
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import type { WatchComment, WatchItem } from '../../src/cli/thread-commands.ts'
 import { styled } from '../../src/band/band.ts'
@@ -210,6 +212,7 @@ test("a snapshot's comments follow their messages, and a restart repeats none of
   await kit.until(() => kit.commands().filter((args) => args[1] === 'watch').length > watches, 'the reconnect')
   await kit.until(() => kit.pi.statuses.get('delta')?.startsWith('●'), 'the watch to be live again')
   await kit.settle()
+  await kit.quiet()
   expect(rows(kit)).toHaveLength(2)
   // Nor does a new pi process resuming the session.
   await kit.whileTimePasses(kit.pi.shutdown('quit'))
@@ -218,6 +221,7 @@ test("a snapshot's comments follow their messages, and a restart repeats none of
   await again.until(() => again.commands().some((args) => args[1] === 'watch'), 'the resumed watch')
   await again.until(() => again.pi.statuses.get('delta')?.startsWith('●'), 'the resumed watch to be live')
   await again.settle()
+  await again.quiet()
   expect(rows(again)).toHaveLength(2)
 })
 
@@ -327,6 +331,26 @@ test("the command output row draws its author and the item's own markdown", asyn
     await kit.until(() => drawn(kit, id)?.length === 0, `the row for ${id} to be cleared`)
   }
   expect(drawn(kit, 'r')!.join('\n')).toContain('Reply')
+  // A drawn row whose item the next complete snapshot does not hold, as one removed while the watch was
+  // away, says so instead of drawing nothing.
+  const watches = kit.commands().filter((args) => args[1] === 'watch').length
+  kit.world.endWatch(THREAD)
+  await kit.until(() => kit.pi.noticeTexts().some((text) => text.startsWith('Connection interrupted')), 'the drop')
+  const events = join(kit.world.state, `events-${THREAD}.jsonl`)
+  writeFileSync(
+    events,
+    readFileSync(events, 'utf8')
+      .split('\n')
+      .filter((line) => !line.includes('"id":"r"'))
+      .join('\n'),
+  )
+  await kit.advance(1000)
+  await kit.until(() => kit.commands().filter((args) => args[1] === 'watch').length > watches, 'the reconnect')
+  await kit.until(
+    () => drawn(kit, 'r')?.join('\n').includes('A Delta item that is not in this session.'),
+    'the row to say its item is gone',
+  )
+  expect(drawn(kit, 'r')!.join('\n')).not.toContain('Reply')
 })
 
 test("a drawn row redraws a teammate's edit, and its quote fits the terminal's width", async () => {
@@ -449,13 +473,16 @@ test('a row pi fails to add is not counted as added, and the next snapshot offer
   // pi reports a message it could not add on its own error channel, never to the extension.
   kit.pi.failMessages = 1
   kit.world.remote(THREAD, { type: 'item', item: item('Lost once', { id: 'lost' }) })
-  await kit.until(
-    () => kit.pi.noticeTexts().some((text) => text.startsWith("Couldn't add Delta activity to pi's context")),
-    'the failure to be shown',
-  )
+  await kit.until(() => kit.pi.failMessages === 0, 'the row to be sent to pi')
+  await kit.quiet()
+  expect(
+    kit.pi.noticeTexts().filter((text) => text.startsWith("Couldn't add Delta activity to pi's context")),
+    'the failure is shown',
+  ).toHaveLength(1)
   expect(rows(kit)).toEqual([])
   await reconnect(kit)
-  await offered(kit, 1)
+  // The live watch's snapshot is handled once the extension is quiet: the row is offered by then, or never.
+  await kit.quiet()
   expectOffered(kit, ['lost'])
   expect(drawn(kit, 'lost')!.join('\n')).toContain('Lost once')
 })
@@ -479,6 +506,7 @@ test('a row the session file never kept is offered again when the session resume
   const again = await startDelta({ world: kit.world, session: kit.pi.session })
   kits.push(again)
   await again.until(() => again.pi.statuses.get('delta')?.startsWith('●'), 'the resumed watch to be live')
-  await offered(again, 2)
+  // The live watch's snapshot is handled once the extension is quiet: the row is offered by then, or never.
+  await again.quiet()
   expectOffered(again, ['kept', 'unsaved'])
 })
