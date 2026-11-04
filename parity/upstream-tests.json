@@ -3000,33 +3000,53 @@
     },
     {
       "upstream": "subagents/children.test.ts > Delta threads as subagents > Claude takes over a thread someone else is running only when the person agrees",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/behaviour/threads.test.ts > Delta threads as subagents > Claude takes over a thread someone else is running only when the person agrees"
+      ],
+      "note": "Asked 'pi wants to take over …' (after the once-per-thread consent question); 'Leave it running' refuses with 'running in Delta (Antonio)' and starts no pi, 'Take it over' runs it. Adapted: a session no one can answer is never offered the tool at all, so the non-interactive half checks the tool is inactive rather than the refusal text."
     },
     {
       "upstream": "subagents/children.test.ts > Delta threads as subagents > a message to a thread is not delivered when no subagent starts for it",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/threads.test.ts > Delta threads as subagents > a message to a thread is not delivered when no subagent starts for it",
+        "test/behaviour/threads.test.ts > Delta threads as subagents > a thread whose pi cannot start says why"
+      ],
+      "note": "A thread's pi that does not start a recorded run within 30 s (or reaches agent_start without the extension taking its hand-off) is stopped and the call answers 'pi started no subagent…'; no run record, nothing appended. Different detection from upstream's wait for a Claude hook naming the agent."
     },
     {
       "upstream": "subagents/children.test.ts > Delta threads as subagents > a message to a thread of the conversation runs it here, recorded on that thread, and the parent hears its reply",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/threads.test.ts > Delta threads as subagents > a message to a thread of the conversation runs it here, recorded on that thread, and the parent hears its reply",
+        "test/e2e/threads.test.ts > a message to a thread of the conversation runs it in a pi of its own, recorded on that thread"
+      ],
+      "note": "The model calls delta_thread; a pi process of its own (an in-process child kit; the real pi in e2e) records the turn on the existing thread as its producer, prompted with the message alone attributed to the parent, with no thread create. The parent hears the reply as the tool result rather than a submitted prompt."
     },
     {
       "upstream": "subagents/children.test.ts > Delta threads as subagents > a subagent resumed by a message hears what happened in Delta since it last ran, and its message is recorded",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/threads.test.ts > Delta threads as subagents > a subagent resumed by a message hears what happened in Delta since it last ran, and its message is recorded"
+      ],
+      "note": "The subagent is a thread pi first ran through delta_thread; the second message resumes the same pi session (--session <file>), is handed the items after its own last one (actor from thread status) but not its own, and is recorded as the message alone at the next turn sequence; its own turn's end is not reported. DELTA_PI_PARENT subagents other extensions start are not resumed by a message."
     },
     {
       "upstream": "subagents/children.test.ts > Delta threads as subagents > a takeover in Delta stops a running subagent at once, and the parent hears Delta's reply, then later Delta turns as context",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/threads.test.ts > Delta threads as subagents > a takeover in Delta stops a running subagent at once, and the parent hears Delta's reply, then later Delta turns as context"
+      ],
+      "note": "A thread run inside a long call is stopped by its turn watch when Delta supersedes it; the tool returns the takeover note, Delta's next turn end starts a parent turn with its reply (sendUserMessage), and the one after is only context, reported from where the last report ended. Difference declared: pi records the superseded turn's idle state (which Delta fences) where upstream appends nothing; and the subagent is a thread run, not an Agent subagent."
     },
     {
       "upstream": "subagents/children.test.ts > Delta threads as subagents > each session is told which threads it can message, even when an earlier session in the process was told the same",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "covered",
+      "ours": [
+        "test/behaviour/threads.test.ts > Delta threads as subagents > each session is told which threads it can message, even when an earlier session in the process was told the same"
+      ],
+      "note": "The threads note (naming delta_thread) is a context row delivered when the listed names change. Adapted: the same session resumed after another one in the same pi process is told again (module state is per session runtime and notes are forgotten at shutdown), not a second session recording the same conversation, which pi has no notion of."
     },
     {
       "upstream": "subagents/children.test.ts > isolated subagents > Claude's worktrees a session left moved aside are put back when the next one starts, unless a fork still has their place",
@@ -3161,33 +3181,51 @@
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > a Delta turn's report names who ran it, its messages and its tool calls, and nothing is reported without a message",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/delta-threads.test.ts > Delta threads as subagents > a Delta turn's report names who ran it, its messages and its tool calls, and nothing is reported without a message"
+      ],
+      "note": "Verbatim, with 'SendMessage' replaced by the tool name delta_thread in the expected parts."
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > a SendMessage names a thread by its name, id or reference, and a name two threads share names neither",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/delta-threads.test.ts > Delta threads as subagents > a SendMessage names a thread by its name, id or reference, and a name two threads share names neither"
+      ],
+      "note": "Verbatim on namedThread."
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > a run's prompt with no history is the message alone",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/delta-threads.test.ts > Delta threads as subagents > a run's prompt with no history is the message alone"
+      ],
+      "note": "Verbatim on adoptionPrompt/resumePrompt."
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > a thread's history keeps its newest items within the budget and says how to read the rest",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/delta-threads.test.ts > Delta threads as subagents > a thread's history keeps its newest items within the budget and says how to read the rest"
+      ],
+      "note": "Verbatim on historyText with the port's renderItem."
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > links and references are told apart from agent names",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/delta-threads.test.ts > Delta threads as subagents > links and references are told apart from agent names"
+      ],
+      "note": "Verbatim on looksLikeThreadLink."
     },
     {
       "upstream": "subagents/delta-threads.test.ts > Delta threads as subagents > what happened since a subagent last ran is everything after its own last item",
-      "status": "unsupported",
-      "note": "Running a Delta thread as a subagent through SendMessage is not ported (README, Not ported)."
+      "status": "ported",
+      "ours": [
+        "test/delta-threads.test.ts > Delta threads as subagents > what happened since a subagent last ran is everything after its own last item"
+      ],
+      "note": "Verbatim on itemsSince, author name 'Claude Code' read as 'pi'."
     },
     {
       "upstream": "subagents/git-worktrees.test.ts > a worktree's branch is the one git lists for its path; a detached or unlisted one has none",
