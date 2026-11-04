@@ -479,12 +479,12 @@ describe('Delta threads as subagents', () => {
     kit.world.stopFailing('thread contract')
   })
 
-  test("what a thread's pi reports while it runs, such as Delta pausing its recording, comes back with its reply", async () => {
+  test("a thread's pi whose records had not reached Delta when it exited says so with its reply", async () => {
     const { kit, program, root } = await parent({ answers: [RUN_HERE] })
     const notes_ = teammateThread(kit, root)
     listed(kit, root, notes_, 'inactive')
     await kit.until(() => notes(kit).length, 'the threads note')
-    let answer!: () => void
+    let answer: (() => void) | undefined
     program.model = () => new Promise((resolve) => (answer = () => resolve({ text: 'Wrote it' })))
     kit.pi.model = messages('Release notes', 'Write RELEASE.md')
     const sending = kit.pi.prompt('delegate')
@@ -494,11 +494,49 @@ describe('Delta threads as subagents', () => {
         recordsOf(kit, notes_.thread_id, child.pi.session.id).some((record: any) => record.update.state === 'running'),
       "the thread's running turn",
     )
+    // Delta does not answer before the thread's pi has given up waiting at its end, so nothing it could
+    // say about the outcome reaches the session first.
+    // The thread's model is asked once its turn is under way, which can be after the turn's start is recorded.
+    const reply_ = await kit.until(() => answer, "the thread's model to be asked")
+    const release = kit.world.hold('thread append')
+    reply_()
+    // Time passes for the thread's pi, which waits on Delta only as long as its budgets allow.
+    await child.whileTimePasses(
+      kit.until(() => kit.pi.toolResults.length, "the thread's answer", 60_000),
+      60_000,
+    )
+    release()
+    await sending
+    expect(reply(kit)).toMatch(
+      /^The Delta thread "Release notes" finished its turn\. Its reply:\n\nWrote it\n\nThe thread's pi reported:\n\d+ of its records had not reached Delta when its pi stopped; they are sent the next time the thread runs here\.$/,
+    )
+  })
+
+  test("what a thread's pi reports while it runs, such as Delta pausing its recording, comes back with its reply", async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    let answer: (() => void) | undefined
+    program.model = () => new Promise((resolve) => (answer = () => resolve({ text: 'Wrote it' })))
+    kit.pi.model = messages('Release notes', 'Write RELEASE.md')
+    const sending = kit.pi.prompt('delegate')
+    const child = await program.child(0)
+    await kit.until(
+      () =>
+        recordsOf(kit, notes_.thread_id, child.pi.session.id).some((record: any) => record.update.state === 'running'),
+      "the thread's running turn",
+    )
+    // The thread's model is asked once its turn is under way, which can be after the turn's start is recorded.
+    const reply_ = await kit.until(() => answer, "the thread's model to be asked")
     kit.world.fail('thread append', { times: 1_000, code: 'invalid_reference', retryable: false })
-    answer()
+    reply_()
     await sending
     kit.world.stopFailing('thread append')
-    expect(reply(kit)).toMatch(/finished its turn[\s\S]*\n\nThe thread's pi reported:\n.*Delta/)
+    // Delta refused what it recorded, which its pi left unsent, whatever it managed to say before it exited.
+    expect(reply(kit)).toMatch(
+      /finished its turn[\s\S]*\n\nThe thread's pi reported:\n(.*\n)*\d+ of its records had not reached Delta when its pi stopped; they are sent the next time the thread runs here\.$/,
+    )
   })
 })
 

@@ -425,17 +425,16 @@ async function claimedRun(
   const takenBefore = childBinding?.child?.takenOver
   await host.store.delete(notesKey(run.child))
   const outcome = await runChild(host, claim, run, message, resume, call)
+  // Read once its pi has exited, which stores its notes before it does.
   const told = await host.store.get(notesKey(run.child))
   await host.store.delete(notesKey(run.child))
-  const reported = Array.isArray(told) ? told.filter((text) => typeof text === 'string').join('\n') : ''
+  const notes = Array.isArray(told) ? told.filter((text): text is string => typeof text === 'string') : []
   if (over()) {
     if (!outcome.report.started) await host.store.delete(handoffKey(run.child))
     return ended(name)
   }
   if (outcome.aborted) throw new Error(`The run of the Delta thread "${name}" was stopped.`)
   const report = outcome.report
-  // What the thread's pi reported, such as Delta pausing its recording, goes with its answer.
-  const said = reported ? `\n\nThe thread's pi reported:\n${reported}` : ''
   if (!report.started) {
     await host.store.delete(handoffKey(run.child))
     if (created) await forgetRun(host, run)
@@ -443,6 +442,15 @@ async function claimedRun(
     return refused(`pi could not run the Delta thread "${name}": ${outcome.error || `exit ${outcome.code}`}`)
   }
   const after = await storedBinding(host, key(run.child))
+  // What reached Delta is told by what the thread's pi left unsent, which its binding keeps whatever it
+  // managed to say before it exited: a delivery its end gave up on says nothing at all.
+  const unsent = after?.pending.length ?? 0
+  if (unsent)
+    notes.push(
+      `${unsent} of its records had not reached Delta when its pi stopped; they are sent the next time the thread runs here.`,
+    )
+  // What the thread's pi reported, such as Delta pausing its recording, goes with its answer.
+  const said = notes.length ? `\n\nThe thread's pi reported:\n${notes.join('\n')}` : ''
   if (after?.child?.takenOver !== undefined && after.child.takenOver !== takenBefore) {
     await saveRun(host, { ...((await loadRun(host, session, thread)) ?? run), awaited: 'delta' })
     return {
@@ -704,6 +712,11 @@ function reportReply(host: Host, session: string, text: string) {
 
 /** Notes a thread's pi keeps for the session that runs it, one write at a time. */
 let keeping: Promise<void> = Promise.resolve()
+
+/** The notes kept so far, once stored: a thread's pi waits for them before it exits. */
+export function notesKept(): Promise<void> {
+  return keeping
+}
 
 /**
  * Keep a note this pi showed while it runs a thread for another session, such as Delta pausing its
