@@ -59,7 +59,12 @@ export type Answer = string | undefined | ((dialog: Dialog) => string | undefine
 type Entry = { type: string; id: string; parentId: string | null; timestamp: string; [field: string]: unknown }
 type Handler = (event: Record<string, unknown>, ctx: unknown) => unknown
 type Command = { handler: (args: string, ctx: unknown) => Promise<void> }
-type ToolResult = { content: { type: string; text?: string }[]; isError?: boolean; details?: unknown }
+type ToolResult = {
+  content: { type: string; text?: string }[]
+  isError?: boolean
+  details?: unknown
+  terminate?: boolean
+}
 /** A tool an extension registered, as pi calls it. */
 type Tool = {
   name: string
@@ -182,6 +187,8 @@ export class FakePi {
   /** Observers of pi's events, as pi's JSON mode prints them; `message_end` follows each commit. */
   readonly observers: ((type: string, event: Record<string, unknown>) => void)[] = []
   private controller = new AbortController()
+  /** Tool results that asked pi to end the run after their batch. */
+  private readonly terminating = new WeakSet<AgentMessage>()
   private followUps: string[] = []
   session: FakeSession
   private runtime: Runtime | undefined
@@ -485,6 +492,8 @@ export class FakePi {
       for (const entry of this.pendingCustom.splice(0)) this.append(entry)
       next = this.steering.splice(0).map(user)
       if (this.aborted || (!results.length && !next.length)) break
+      // pi skips its follow-up request when every tool of the batch asked to stop the run.
+      if (results.length && results.every((result) => this.terminating.has(result))) break
     }
     await this.emit('agent_end', { messages: [] })
     this.streaming = false
@@ -519,7 +528,7 @@ export class FakePi {
     const blocked: boolean[] = []
     for (const call of calls) blocked.push(await prepare(call))
     // pi starts every prepared call at once; its file mutation queue runs writes to one file in order.
-    for (const [index, call] of calls.entries()) results.push(await finish(call, blocked[index]!))
+    results.push(...(await Promise.all(calls.map((call, index) => finish(call, blocked[index]!)))))
     for (const result of results) await this.message(result)
     return results
   }
@@ -586,7 +595,9 @@ export class FakePi {
       const text = result.content
         .flatMap((block) => (block.type === 'text' && block.text ? [block.text] : []))
         .join('\n')
-      return toolResult(call, text, !!result.isError)
+      const message = toolResult(call, text, !!result.isError)
+      if (result.terminate) this.terminating.add(message)
+      return message
     }
     if (call.name === 'bash') {
       const { stdout, code } = await sh(String(call.arguments.command), this.session.cwd, this.environment())

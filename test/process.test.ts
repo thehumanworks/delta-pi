@@ -76,4 +76,19 @@ describe('processes', () => {
     expect(result.status).toBe(0)
     expect(Date.now() - started).toBeLessThan(10_000)
   })
+
+  test('a program asked to stop ends its stream once it exits, even with a descendant holding its output', async () => {
+    const stream = spawn({ argv: ['sh', '-c', 'sleep 60 & echo started; wait'] })
+    expect((await stream.next()).done).toBe(false)
+    stream.terminate()
+    const ended = (async () => {
+      for (;;) if ((await stream.next()).done) return 'ended'
+    })()
+    const outcome = await Promise.race([
+      ended,
+      new Promise((resolve) => setTimeout(() => resolve('still open'), KILL_GRACE_MS + 3_000)),
+    ])
+    await stream.return()
+    expect(outcome).toBe('ended')
+  }, 15_000)
 })

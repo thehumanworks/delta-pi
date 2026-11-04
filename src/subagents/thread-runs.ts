@@ -18,7 +18,7 @@ import {
   storedBinding,
 } from '../core/session-state.ts'
 import { errorText } from '../core/text.ts'
-import type { ProcessStream } from '../core/process.ts'
+import { KILL_GRACE_MS, type ProcessStream, TERMINATE_GRACE_MS } from '../core/process.ts'
 import { threadStatus, threadWatch, verifiedContract, watchEvents } from '../cli/delta-cli.ts'
 import { CHILD_CONTRACT_VERSION, type WatchChild, type WatchItem } from '../cli/thread-commands.ts'
 import { mountThread, requireMounted, unmountThread } from '../sharing/join.ts'
@@ -92,11 +92,21 @@ export type ThreadRun = {
 export type ThreadHandoff = { note?: string }
 
 const runKey = (session: string, thread: string) => `thread-run:${session}:${thread}`
+/** What a thread's pi told the person while it ran, which the session that runs it reads afterwards. */
+const notesKey = (child: string) => `thread-notes:${child}`
 /** The hand-off a thread's pi process takes when its run starts; `takeHandoff` deletes it. */
 export const handoffKey = (child: string) => `thread-prompt:${child}`
 
-/** The threads this runtime is running now, by thread ID. */
-const running = new Map<string, { stream: ProcessStream; stopping: boolean; exited: Promise<void> }>()
+/**
+ * A `delta_thread` call in this runtime, from the moment it claims a run, before anything is awaited,
+ * until its pi exits: `thread` once it is known, its pi once started, and whether the session ended.
+ */
+type Claim = { thread?: string; stream?: ProcessStream; ended: boolean; exited: Promise<void>; finish: () => void }
+const claims = new Set<Claim>()
+/** This runtime's session is ending, so no thread run starts any more. */
+let ending = false
+/** How long a session's end waits for the threads it runs to exit: their pi's own end, then its kill. */
+const RUNS_END_MS = TERMINATE_GRACE_MS + 2 * KILL_GRACE_MS
 /** The threads the person agreed pi may run, in this runtime. */
 const agreed = new Set<string>()
 
@@ -104,11 +114,19 @@ const agreed = new Set<string>()
 export type ThreadReply = {
   text: string
   isError?: true
+  /** pi should not ask its model again after this call, as when the session is ending. */
+  terminate?: true
   usage?: ChildReport['usage']
   details?: { thread: string; name: string; child: string; turns: number }
 }
 
 const refused = (text: string): ThreadReply => ({ text, isError: true })
+/** What a call answers once its session ended: it failed, and pi runs nothing more for it. */
+const ended = (name: string): ThreadReply => ({
+  text: `The session ended, so pi stopped running the Delta thread "${name}".`,
+  isError: true,
+  terminate: true,
+})
 
 /**
  * Whether this session can run its conversation's threads now: it records a thread of its own whose CLI
@@ -276,14 +294,37 @@ export async function messageThread(
   },
 ): Promise<ThreadReply> {
   const session = host.session.id()
-  const current = stillActive(session)
   if (!canRunThreads(host, session))
     return refused('Delta threads can be run only from an interactive pi session that Delta records.')
   if (!call.model) return refused('pi has no model selected to run the Delta thread with.')
   if (message.trimStart().startsWith('/'))
     return refused('A message to a Delta thread cannot start with "/", which pi would run as a command.')
-  if (running.size >= MAX_CONCURRENT_RUNS)
-    return refused(`pi already runs ${running.size} Delta threads; wait for one to answer.`)
+  if (ending) return ended(to)
+  if (claims.size >= MAX_CONCURRENT_RUNS)
+    return refused(`pi already runs ${claims.size} Delta threads; wait for one to answer.`)
+  // The run is claimed before anything is awaited, so calls made together count against the limit, and
+  // the session's end finds every one.
+  let finish!: () => void
+  const claim: Claim = { ended: false, exited: new Promise((resolve) => (finish = resolve)), finish }
+  claims.add(claim)
+  try {
+    return await claimedRun(host, session, to, message, call, claim)
+  } finally {
+    claims.delete(claim)
+    claim.finish()
+  }
+}
+
+async function claimedRun(
+  host: Host,
+  session: string,
+  to: string,
+  message: string,
+  call: Parameters<typeof messageThread>[3],
+  claim: Claim,
+): Promise<ThreadReply> {
+  const current = stillActive(session)
+  const over = () => claim.ended || !current()
   const binding = stateFor(session).binding!
   let target: ThreadTarget | undefined
   const listed = watchedSession() === session ? namedThread(to, feed.children) : undefined
@@ -298,8 +339,11 @@ export async function messageThread(
   const read = await readThread(host, target.reference)
   const thread = read.thread_id
   if (thread === binding.thread) return refused("That is this session's own Delta thread.")
-  if (running.has(thread))
+  // Checked and claimed with nothing awaited between, so two calls to one thread start one pi.
+  if ([...claims].some((other) => other !== claim && other.thread === thread))
     return refused(`pi is already running the Delta thread "${target.name}"; its reply comes back to that call.`)
+  claim.thread = thread
+  if (over()) return ended(target.name)
   let run = await loadRun(host, session, thread)
   const name =
     run?.name ??
@@ -310,7 +354,7 @@ export async function messageThread(
     (!run && (await consentRefusal(host, name, thread))) ||
     (read.running && (await takeoverRefusal(host, name, read.running)))
   if (refusal) return refused(refusal)
-  if (!current()) return refused('The session ended.')
+  if (over()) return ended(name)
 
   // A run whose pi session is still there resumes it; otherwise the thread starts afresh from its history.
   const childBinding = run && (await storedBinding(host, key(run.child)))
@@ -318,18 +362,30 @@ export async function messageThread(
   const resume = run && file && (await exists(file)) ? file : undefined
   let note: string
   let created = false
+  // A mount made here is released again when the call goes no further.
+  let mounted: { reference: string; owner: string } | undefined
+  const unmount = async () => {
+    if (mounted) await unmountThread(host, mounted.reference, mounted.owner)
+  }
   if (run && resume) {
-    if (run.mountOwner) await mountFor(host, session, run.reference, thread, run.mountOwner)
+    if (run.mountOwner) {
+      await mountFor(host, session, run.reference, thread, run.mountOwner)
+      mounted = { reference: run.reference, owner: run.mountOwner }
+    }
     const since = itemsSince(read.items, await childActor(host, run).catch(() => undefined))
     note = resumePrompt(name, historyText(since, run.reference, HISTORY_BUDGET), message)
   } else {
     if (!read.worktrees.length) return refused(`The Delta thread "${name}" has no worktree for pi to work in.`)
     const shares = read.worktrees.every((tree) => (feed.worktrees ?? []).includes(tree))
     const mountOwner = shares ? undefined : `${session}-${thread.slice(-12)}`
-    const cwd = shares ? boundDirectory(binding) : await mountFor(host, session, target.reference, thread, mountOwner!)
-    if (!cwd) return refused('This session has no checkout for the thread to work in.')
     const child = run ? `${session}-${crypto.randomUUID().slice(0, 8)}` : `${session}-${thread.slice(-12)}`
     if (!isSessionId(child)) return refused(`pi cannot name a session ${child} for the Delta thread "${name}".`)
+    let cwd = boundDirectory(binding)
+    if (mountOwner) {
+      cwd = await mountFor(host, session, target.reference, thread, mountOwner)
+      mounted = { reference: target.reference, owner: mountOwner }
+    }
+    if (!cwd) return refused('This session has no checkout for the thread to work in.')
     run = {
       session,
       thread,
@@ -352,6 +408,10 @@ export async function messageThread(
       message,
     )
   }
+  if (over()) {
+    await unmount()
+    return ended(name)
+  }
   const last = read.items.at(-1)
   await saveRun(host, { ...run, ...(last ? { reportedItem: last.id } : {}) })
   await serial(async () => {
@@ -363,10 +423,19 @@ export async function messageThread(
   // with nothing new is the message alone.
   await host.store.set(handoffKey(run.child), { ...(note !== message ? { note } : {}) } satisfies ThreadHandoff)
   const takenBefore = childBinding?.child?.takenOver
-  const outcome = await runChild(host, run, message, resume, call)
-  if (!current()) return refused('The session ended.')
+  await host.store.delete(notesKey(run.child))
+  const outcome = await runChild(host, claim, run, message, resume, call)
+  const told = await host.store.get(notesKey(run.child))
+  await host.store.delete(notesKey(run.child))
+  const reported = Array.isArray(told) ? told.filter((text) => typeof text === 'string').join('\n') : ''
+  if (over()) {
+    if (!outcome.report.started) await host.store.delete(handoffKey(run.child))
+    return ended(name)
+  }
   if (outcome.aborted) throw new Error(`The run of the Delta thread "${name}" was stopped.`)
   const report = outcome.report
+  // What the thread's pi reported, such as Delta pausing its recording, goes with its answer.
+  const said = reported ? `\n\nThe thread's pi reported:\n${reported}` : ''
   if (!report.started) {
     await host.store.delete(handoffKey(run.child))
     if (created) await forgetRun(host, run)
@@ -377,19 +446,19 @@ export async function messageThread(
   if (after?.child?.takenOver !== undefined && after.child.takenOver !== takenBefore) {
     await saveRun(host, { ...((await loadRun(host, session, thread)) ?? run), awaited: 'delta' })
     return {
-      text: `[Delta] Someone took over the thread "${name}" in Delta, so pi stopped its run here. Delta's agent continues it in that thread; its reply is added here when Delta's turn ends. Send "${name}" a message with ${THREAD_TOOL} to run it here again.`,
+      text: `[Delta] Someone took over the thread "${name}" in Delta, so pi stopped its run here. Delta's agent continues it in that thread; its reply is added here when Delta's turn ends. Send "${name}" a message with ${THREAD_TOOL} to run it here again.${said}`,
       usage: report.usage,
     }
   }
   const details = { thread, name, child: run.child, turns: report.turns }
   if (report.stopReason === 'error')
     return {
-      text: `The Delta thread "${name}" failed: ${report.errorMessage ?? 'its model reported an error'}`,
+      text: `The Delta thread "${name}" failed: ${report.errorMessage ?? 'its model reported an error'}${said}`,
       isError: true,
       usage: report.usage,
       details,
     }
-  return { text: finishedReport(name, report.reply), usage: report.usage, details }
+  return { text: `${finishedReport(name, report.reply)}${said}`, usage: report.usage, details }
 }
 
 async function mountFor(host: Host, session: string, reference: string, thread: string, owner: string) {
@@ -447,6 +516,7 @@ type ChildOutcome = {
  */
 async function runChild(
   host: Host,
+  claim: Claim,
   run: ThreadRun,
   message: string,
   resume: string | undefined,
@@ -465,18 +535,14 @@ async function runChild(
     host.plugin.root,
     ...(await keptArguments(host.launch, exists)),
   ]
-  const stream = host.process.spawn({ argv, cwd: run.cwd, stdin: message })
-  let finish!: () => void
-  const entry = { stream, stopping: false, exited: new Promise<void>((resolve) => (finish = resolve)) }
-  running.set(run.thread, entry)
   const report = emptyReport()
+  if (claim.ended) return { report, aborted: false, unrecorded: false, code: null, error: '' }
+  const stream = host.process.spawn({ argv, cwd: run.cwd, stdin: message })
+  claim.stream = stream
   let unrecorded = false
   let aborted = false
   let error = ''
-  const stop = () => {
-    entry.stopping = true
-    stream.terminate()
-  }
+  const stop = () => stream.terminate()
   const startTimer = host.clock.after(CHILD_START_TIMEOUT_MS, () => {
     if (report.started) return
     unrecorded = true
@@ -521,27 +587,33 @@ async function runChild(
   } finally {
     startTimer.cancel()
     call.signal?.removeEventListener('abort', onAbort)
-    running.delete(run.thread)
-    finish()
   }
   return { report, aborted, unrecorded, code, error: error.trim().split('\n').at(-1) ?? '' }
 }
 
 /**
  * Stop the threads this session runs and wait for their pi processes to exit, which flush what they
- * recorded, then release the mounts the session made for them.
+ * recorded, then release the mounts the session made for them. Answers whether any was running.
  */
-export async function endThreadRuns(host: Host, session: string, binding: Binding | undefined) {
-  const stopping = [...running.values()]
-  for (const entry of stopping) {
-    entry.stopping = true
-    entry.stream.terminate()
+export async function endThreadRuns(host: Host, session: string, binding: Binding | undefined): Promise<boolean> {
+  ending = true
+  const stopping = [...claims]
+  for (const claim of stopping) {
+    claim.ended = true
+    claim.stream?.terminate()
   }
-  await Promise.all(stopping.map((entry) => entry.exited))
+  // A call still preparing its run sees the end and starts none, and a pi that will not exit is killed.
+  const expiry = new AbortController()
+  await Promise.race([
+    Promise.all(stopping.map((claim) => claim.exited)),
+    host.clock.sleep(RUNS_END_MS, { signal: expiry.signal }).catch(() => {}),
+  ])
+  expiry.abort()
   for (const thread of binding?.threadRuns ?? []) {
     const run = await loadRun(host, session, thread).catch(() => undefined)
     if (run?.mountOwner) await unmountThread(host, run.reference, run.mountOwner)
   }
+  return stopping.length > 0
 }
 
 /**
@@ -599,7 +671,7 @@ export function observeThreads(host: Host, session: string) {
  */
 async function reportDeltaTurn(host: Host, session: string, thread: WatchChild) {
   const run = await loadRun(host, session, thread.thread_id)
-  if (!run || running.has(run.thread)) return
+  if (!run || [...claims].some((claim) => claim.thread === run.thread)) return
   const read = await readThread(host, run.reference)
   const actor = await childActor(host, run).catch(() => undefined)
   // A turn of pi's own ending is no news to the session.
@@ -628,4 +700,22 @@ function reportReply(host: Host, session: string, text: string) {
     host.ui.debug(`Couldn't hand pi a Delta thread's reply: ${String(error)}`)
     void deliverNote(host, session, text)
   }
+}
+
+/** Notes a thread's pi keeps for the session that runs it, one write at a time. */
+let keeping: Promise<void> = Promise.resolve()
+
+/**
+ * Keep a note this pi showed while it runs a thread for another session, such as Delta pausing its
+ * recording, so that session's answer carries it: nobody sees this pi's own output.
+ */
+export function noteForParent(host: Host, session: string, text: string) {
+  if (!stateFor(session).binding?.child?.adopted) return
+  keeping = keeping
+    .then(async () => {
+      const kept = await host.store.get(notesKey(session))
+      const notes: unknown[] = Array.isArray(kept) ? kept : []
+      await host.store.set(notesKey(session), [...notes, text].slice(-20))
+    })
+    .catch((error: unknown) => host.ui.debug(`A note for the session running this thread was lost: ${String(error)}`))
 }

@@ -17,8 +17,11 @@ export type PiProgram = {
   starts: { argv: string[]; stdin: string | undefined; cwd: string | undefined }[]
   /** The model the next child answers with. */
   model?: Model
-  /** How the next start goes instead of running: it prints nothing, or fails as pi does without a model. */
-  next?: 'silent' | { stderr: string; code: number }
+  /**
+   * How the next start goes instead of running: it prints nothing, prints nothing and will not exit
+   * when asked to stop (as a pi whose descendant holds its output), or fails as pi does without a model.
+   */
+  next?: 'silent' | 'deaf' | { stderr: string; code: number }
   /** Wait for the child kit started for the `index`th start. */
   child(index: number): Promise<Kit>
 }
@@ -50,6 +53,11 @@ export function piProgram(parent: Kit): PiProgram {
       queue.push({ stream: 'stdout', text: `${JSON.stringify(record)}\n` })
       wake()
     }
+    /** What the child wrote to stderr, as its pi would before exiting. */
+    const reportStderr = () => {
+      for (const text of kit?.stderr.splice(0) ?? []) queue.push({ stream: 'stderr', text })
+      wake()
+    }
     const end = (code: number | null, signal: string | null = null) => {
       exit ??= { code, signal }
       wake()
@@ -63,11 +71,12 @@ export function piProgram(parent: Kit): PiProgram {
         if (!kit) return end(null, 'SIGTERM')
         await kit.stop()
         kit.pi.abort()
+        reportStderr()
         end(143)
       })()
     }
     void (async () => {
-      if (behaviour === 'silent') return
+      if (behaviour === 'silent' || behaviour === 'deaf') return
       if (behaviour) {
         queue.push({ stream: 'stderr', text: behaviour.stderr })
         return end(behaviour.code)
@@ -88,7 +97,8 @@ export function piProgram(parent: Kit): PiProgram {
         sessions.set(path, session)
       }
       print({ type: 'session', version: 3, id: session.id, cwd })
-      kit = await startDelta({ world: parent.world, cwd, env: init.env, session, start: false })
+      // pi's JSON mode has no UI, so the extension's notes go to its stderr, as in print mode.
+      kit = await startDelta({ world: parent.world, cwd, env: init.env, session, start: false, mode: 'print' })
       program.children.push(kit)
       if (program.model) kit.pi.model = program.model
       kit.pi.observers.push((type, event) => {
@@ -101,6 +111,7 @@ export function piProgram(parent: Kit): PiProgram {
       await kit.pi.prompt(init.stdin ?? '')
       if (stopping) return
       await kit.stop()
+      reportStderr()
       end(0)
     })().catch((error: unknown) => {
       queue.push({ stream: 'stderr', text: String(error) })
@@ -122,7 +133,9 @@ export function piProgram(parent: Kit): PiProgram {
         end(null, 'SIGTERM')
         return { done: true, value: exit! }
       },
-      terminate: stop,
+      terminate: () => {
+        if (behaviour !== 'deaf') stop()
+      },
     }
     return stream
   })
