@@ -257,7 +257,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     io.write('stdout', JSON.stringify(value) + '\n')
   }
   function fail(code: string, message: string, retryable = false, reason?: string): never {
-    out({ error: { code, ...(reason ? { reason } : {}), message, retryable } })
+    // Delta's envelope always carries a diagnostic `reason`; without a more specific one, it repeats the code.
+    out({ error: { code, reason: reason ?? code, message, retryable } })
     throw new Exit(1)
   }
   function option(args: string[], name: string): string | undefined {
@@ -279,7 +280,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   }
   /** A positional argument the command requires. */
   function required(value: string | undefined, what: string): string {
-    return value ?? fail('invalid_arguments', `missing ${what}`)
+    return value ?? fail('invalid_invocation', `missing ${what}`)
   }
   /** The turns of the producer `external` that a test fenced (`world().fence`). */
   function fencedTurns(external: string | undefined): (number | undefined)[] {
@@ -505,7 +506,14 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         const thread_id = `thread_${++state.counter}`
         const parentThread = parent ? resolve(state, parent) : undefined
         if (parent && !parentThread)
-          return { error: { code: 'invalid_reference', message: `no thread ${parent}`, retryable: false } }
+          return {
+            error: {
+              code: 'invalid_reference',
+              reason: 'invalid_reference',
+              message: `no thread ${parent}`,
+              retryable: false,
+            },
+          }
         // A thread created with an upload organization gets its link from Delta's background upload.
         const uploads = !!option(rest, '--organization')
         state.threads[thread_id] = {
@@ -852,12 +860,22 @@ async function run(args: string[], io: FakeIo): Promise<void> {
             for (const entry of tree.directories) if (entry.state === 'restoring') entry.state = 'waiting'
         })
       const state = read()
+      // In the shape of test/fixtures/cli/worktree-list.json; how many mounts hold a checkout stays the fake's.
       out({
         operation: 'listed',
         worktrees: state.worktrees.map((tree) => ({
           worktree_id: tree.worktree_id,
           reference: tree.reference,
-          directories: tree.directories,
+          repository: tree.name ?? 'repo',
+          timeline: tree.reference.split('#t=')[1] ?? 'main',
+          directories: tree.directories.map(({ directory, state: checkout }) => ({
+            directory,
+            state: checkout,
+            error: checkout === 'waiting' ? 'waiting for a connection to Delta' : null,
+            owners: Object.values(state.threads)
+              .filter((thread) => thread.worktrees.includes(tree.reference))
+              .map((thread) => thread.thread_id),
+          })),
         })),
       })
       break

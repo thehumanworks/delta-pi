@@ -11,7 +11,7 @@
 import { join } from 'node:path'
 import { expect, vi } from 'vitest'
 import type { Platform } from '../../src/core/host.ts'
-import { FAKE_BIN, until, world, type World } from '../world.ts'
+import { FAKE_BIN, removeWorlds, until, world, type World } from '../world.ts'
 import { flush, MockClock } from './clock.ts'
 import { type Answer, FakePi, type FakeSession, type Mode } from './pi.ts'
 import { fileStore } from '../../src/core/store.ts'
@@ -23,6 +23,23 @@ export { echoModel, FAKE_THEME, FakeSession, type Model, type Reply, themeColor 
 export type { FakeProgram } from './processes.ts'
 
 export type Kit = Awaited<ReturnType<typeof startDelta>>
+
+/** How to end the commands of each kit not yet stopped, shared through globalThis as the worlds are. */
+const live = ((globalThis as Record<symbol, Set<() => Promise<void>> | undefined>)[Symbol.for('pi-delta.test.kits')] ??=
+  new Set())
+
+/**
+ * End every kit a test left running, as a crash would, and remove every world, even one a failed test
+ * left behind: each behaviour test's setup (./setup.ts) runs this after the test's own cleanup.
+ */
+export async function endKits() {
+  try {
+    for (const stop of [...live]) await stop()
+  } finally {
+    live.clear()
+    removeWorlds()
+  }
+}
 
 /** Start pi with the extension in a new world, and wait for its session to start. */
 export async function startDelta(
@@ -122,6 +139,57 @@ export async function startDelta(
     /** Let work already under way run. */
     settle: flush,
     /**
+     * Wait until the extension is quiet: no Delta command, other program or disk operation under way,
+     * beyond the `running` commands and `programs` a test holds, and none started, no timer fired and
+     * nothing shown for a stretch of real time. `advance` and `settle` only let promise callbacks run, so
+     * work a fired timer starts after reading the disk can still be on its way; a check that nothing more
+     * happened comes after this.
+     */
+    async quiet({
+      running = 0,
+      programs = 0,
+      timeoutMs = 10_000,
+    }: { running?: number; programs?: number; timeoutMs?: number } = {}) {
+      const QUIET_MS = 100
+      const activity = () =>
+        [
+          processes.ran.length,
+          processes.others.length,
+          processes.busy(),
+          processes.othersBusy(),
+          disk.touched().length,
+          disk.busy(),
+          clock.fired,
+          pi.errors.length,
+          clock.failures.length,
+          pi.notices.length,
+          pi.session.entries.length,
+          pi.dialogs.length,
+        ].join()
+      const deadline = Date.now() + timeoutMs
+      let seen = activity()
+      let since = Date.now()
+      for (;;) {
+        await flush()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        const now = activity()
+        if (now !== seen) {
+          seen = now
+          since = Date.now()
+        } else if (
+          processes.busy() <= running &&
+          processes.othersBusy() <= programs &&
+          disk.busy() === 0 &&
+          Date.now() - since >= QUIET_MS
+        )
+          return
+        if (Date.now() > deadline)
+          throw new Error(
+            `The extension did not go quiet: ${processes.busy()} commands, ${processes.othersBusy()} other programs and ${disk.busy()} disk operations still running`,
+          )
+      }
+    },
+    /**
      * Wait for `work` while time passes, a second at a time, as it would while pi waits on a bounded
      * budget such as shutdown's. Between steps the real I/O under way gets a moment, so a loaded machine
      * cannot outrun the work; a real deadline of `timeoutMs` stops a wait that never ends.
@@ -147,12 +215,23 @@ export async function startDelta(
       const unlabelled = processes.ran.filter((call) => call.env.DELTA_CLI_INTEGRATION !== 'pi')
       expect(unlabelled.map((call) => call.argv.slice(1).join(' '))).toEqual([])
     },
-    /** End the session, as quitting pi does, and remove the world unless another kit shares it. */
+    /**
+     * End the session, as quitting pi does, and remove the world unless another kit shares it. What the
+     * shutdown threw, or work it scheduled, fails the test as `expectClean` does for what came before.
+     */
     async stop() {
-      if (!stopped) await kit.whileTimePasses(pi.shutdown('quit'))
-      stopped = true
-      await processes.stopAll()
-      if (!options.world) w.cleanup()
+      const errors = pi.errors.length
+      const failures = clock.failures.length
+      try {
+        if (!stopped) await kit.whileTimePasses(pi.shutdown('quit'))
+        stopped = true
+        await processes.stopAll()
+      } finally {
+        live.delete(stopAll)
+        if (!options.world) w.cleanup()
+      }
+      expect(pi.errors.slice(errors).map(String), 'what the shutdown threw').toEqual([])
+      expect(clock.failures.slice(failures).map(String), 'what failed in work the shutdown ran').toEqual([])
     },
     /** End this pi as a crash would: its commands end with its process, and it says nothing. */
     async crash() {
@@ -161,6 +240,8 @@ export async function startDelta(
     },
   }
   let stopped = false
+  const stopAll = () => processes.stopAll()
+  live.add(stopAll)
   if (options.start !== false) await pi.start()
   return kit
 }

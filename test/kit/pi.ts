@@ -10,12 +10,16 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
 import { promisify, stripVTControlCharacters } from 'node:util'
 import { vi } from 'vitest'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import { type ExtensionAPI, initTheme, type Theme } from '@earendil-works/pi-coding-agent'
+import {
+  createEditTool,
+  createWriteTool,
+  type ExtensionAPI,
+  initTheme,
+  type Theme,
+} from '@earendil-works/pi-coding-agent'
 import type { Component } from '@earendil-works/pi-tui'
 import type { Platform } from '../../src/core/host.ts'
 
@@ -23,14 +27,19 @@ import type { Platform } from '../../src/core/host.ts'
 export type Reply = {
   thinking?: string
   text?: string
-  /** Calls of pi's `bash` and `write`, or of a tool an extension registered. */
+  /** Calls of pi's `bash`, `edit` and `write`, or of a tool an extension registered. */
   calls?: { name: string; arguments: Record<string, unknown> }[]
   stopReason?: 'stop' | 'length' | 'error'
+  /** Why a reply that ended with an error did, as pi's provider reports it. */
+  errorMessage?: string
 }
 /** The model answers the conversation so far; `signal` is aborted when the run is. */
 export type Model = (messages: AgentMessage[], signal?: AbortSignal) => Reply | Promise<Reply>
 
-/** The end-to-end tests' faux model: `run <command>` runs it, `write <path> <text>` writes, anything else is echoed. */
+/**
+ * The end-to-end tests' faux model (test/e2e/faux-model.ts): `run <command>` runs it, `write <path> <text>`
+ * writes, `fail <text>` ends its reply with an error, anything else is echoed.
+ */
 export const echoModel: Model = (messages) => {
   const last = messages.at(-1) as { role: string; content: unknown } | undefined
   if (last?.role === 'toolResult') return { text: 'Done.' }
@@ -39,6 +48,7 @@ export const echoModel: Model = (messages) => {
   if (run) return { text: 'Running.', calls: [{ name: 'bash', arguments: { command: run[1] } }] }
   const write = /^write (\S+) (.+)$/s.exec(text)
   if (write) return { calls: [{ name: 'write', arguments: { path: write[1], content: `${write[2]}\n` } }] }
+  if (/^fail /.test(text)) return { stopReason: 'error', errorMessage: 'The model refused' }
   return { text: `Echo: ${text}` }
 }
 
@@ -175,6 +185,11 @@ export class FakePi {
    * run; `sequential` prepares, runs and adds each call in turn.
    */
   toolExecution: 'parallel' | 'sequential' = 'parallel'
+  /**
+   * Which of pi's own tool calls fail, and with what message, as a write to a full disk does: pi reports
+   * the call's result as an error, and the call changes nothing.
+   */
+  failTool: ((call: { name: string; arguments: Record<string, unknown> }) => string | undefined) | undefined
   /** Other extensions' handlers, which pi runs after this extension's, by event. */
   readonly others = new Map<string, Handler[]>()
   model: Model = echoModel
@@ -513,7 +528,8 @@ export class FakePi {
     }
     const finish = async (call: ToolCallBlock, blocked: boolean) => {
       const result = blocked ? toolResult(call, 'Blocked by an extension', true) : await this.execute(call)
-      await this.emit('tool_execution_end', { toolCallId: call.id, toolName: call.name, result, isError: false })
+      const isError = (result as { isError?: boolean }).isError === true
+      await this.emit('tool_execution_end', { toolCallId: call.id, toolName: call.name, result, isError })
       return result
     }
     const results: AgentMessage[] = []
@@ -568,6 +584,7 @@ export class FakePi {
       model: 'faux-1',
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
       stopReason: this.aborted ? 'aborted' : (reply.stopReason ?? (reply.calls?.length ? 'toolUse' : 'stop')),
+      ...(reply.errorMessage === undefined ? {} : { errorMessage: reply.errorMessage }),
       timestamp: Date.now(),
     } as unknown as AgentMessage
   }
@@ -603,10 +620,18 @@ export class FakePi {
       const { stdout, code } = await sh(String(call.arguments.command), this.session.cwd, this.environment())
       return toolResult(call, stdout, code !== 0)
     }
-    const path = resolve(this.session.cwd, String(call.arguments.path).replace(/^@/, ''))
-    await mkdir(dirname(path), { recursive: true })
-    await writeFile(path, String(call.arguments.content))
-    return toolResult(call, `Wrote ${path}`, false)
+    // pi's own edit and write tools: an edit replaces text as pi's does, and reports its patch.
+    const builtin = call.name === 'edit' ? createEditTool(this.session.cwd) : createWriteTool(this.session.cwd)
+    try {
+      const failure = this.failTool?.(call)
+      if (failure) throw new Error(failure)
+      const args = builtin.prepareArguments?.(call.arguments) ?? call.arguments
+      const result = await builtin.execute(call.id, args as never, this.controller.signal)
+      return toolResult(call, textOf(result.content), false, result.details)
+    } catch (error) {
+      // pi reports what the tool threw as the call's result, an error.
+      return toolResult(call, error instanceof Error ? error.message : String(error), true, {})
+    }
   }
 
   private async emit(type: string, event: Record<string, unknown>): Promise<unknown> {
@@ -723,7 +748,11 @@ export class FakePi {
   private async ask(dialog: Dialog): Promise<string | undefined> {
     this.dialogs.push(dialog)
     const answer = this.answers.length ? this.answers.shift() : this.respond
-    return typeof answer === 'function' ? answer(dialog) : answer
+    const value = await (typeof answer === 'function' ? answer(dialog) : answer)
+    // pi's terminal picks one of a selection's options; a test answering anything else is mistaken.
+    if (dialog.method === 'select' && value !== undefined && !dialog.options?.includes(value))
+      throw new Error(`"${value}" is not an option of the selection "${dialog.title}"`)
+    return value
   }
 
   /** The API pi hands the extension; like pi's, it throws once the runtime is replaced. */
@@ -800,15 +829,16 @@ function user(text: string): AgentMessage {
   return { role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() }
 }
 
-function toolResult(call: ToolCallBlock, text: string, isError: boolean): AgentMessage {
+function toolResult(call: ToolCallBlock, text: string, isError: boolean, details?: unknown): AgentMessage {
   return {
     role: 'toolResult',
     toolCallId: call.id,
     toolName: call.name,
     content: [{ type: 'text', text }],
+    ...(details === undefined ? {} : { details }),
     isError,
     timestamp: Date.now(),
-  }
+  } as AgentMessage
 }
 
 function textOf(content: unknown): string {

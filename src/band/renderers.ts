@@ -45,7 +45,9 @@ class RemoteRow implements Component {
     const lines =
       display === 'gone' || display.kind === 'context'
         ? []
-        : remoteBox(display, this.theme, this.outputPad, width).render(width)
+        : display.kind === 'missing'
+          ? new Text(this.theme.fg('dim', display.text), this.outputPad, 0).render(width)
+          : remoteBox(display, this.theme, this.outputPad, width).render(width)
     this.drawn = { sources, width, lines }
     return lines
   }

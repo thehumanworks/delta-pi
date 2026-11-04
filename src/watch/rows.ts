@@ -52,6 +52,15 @@ export type RemoteDisplay = (
   | { kind: 'context' }
 ) & { id?: string; thread?: string }
 
+/**
+ * What a drawn row shows for an item or comment a complete snapshot of its thread does not hold. The
+ * watch never saw it go, as when it was removed while pi was not running, so the row says it is not
+ * in this session rather than drawing nothing. Never saved: it is worked out each time the row draws.
+ */
+export type MissingDisplay = { kind: 'missing'; text: string }
+const MISSING_ITEM: MissingDisplay = { kind: 'missing', text: 'A Delta item that is not in this session.' }
+const MISSING_COMMENT: MissingDisplay = { kind: 'missing', text: 'A Delta comment that is not in this session.' }
+
 /** How much of a quoted passage's line a saved row keeps, more than any terminal row shows. */
 const QUOTE_ROOM = 1_000
 
@@ -145,21 +154,26 @@ function commentDisplay(view: RemoteView, comment: WatchComment): RemoteDisplay 
 
 /**
  * What a drawn row shows now. While the watch holds the row's thread, that is the item or comment as
- * it is now, nothing (`gone`) once it was removed, emptied, or is missing from a complete snapshot,
- * and what was saved while its snapshot is still arriving. Otherwise, as after a restart before the
- * watch is back, it is what was saved. `sources` are the objects the answer is made from, so a
- * renderer works it out again, with `display`, only when one of them was replaced.
+ * it is now, nothing (`gone`) once it was removed or emptied, a placeholder (`MissingDisplay`) when a
+ * complete snapshot does not hold it, and what was saved while its snapshot is still arriving.
+ * Otherwise, as after a restart before the watch is back, it is what was saved. `sources` are the
+ * objects the answer is made from, so a renderer works it out again, with `display`, only when one of
+ * them was replaced.
  */
-export function liveDisplay(saved: RemoteDisplay): { sources: unknown[]; display: () => RemoteDisplay | 'gone' } {
+export function liveDisplay(saved: RemoteDisplay): {
+  sources: unknown[]
+  display: () => RemoteDisplay | MissingDisplay | 'gone'
+} {
   const view = feed.view
   const asSaved = { sources: [saved], display: () => saved }
   const gone = (...sources: unknown[]) => ({ sources, display: () => 'gone' as const })
+  const missing = (placeholder: MissingDisplay) => ({ sources: [view], display: () => placeholder })
   if (!view || saved.id === undefined || saved.thread !== view.thread) return asSaved
   if (view.wasRemoved(saved.id)) return gone(view, 'removed')
   const commentId = keyedComment(saved.id)
   if (commentId !== undefined) {
     const comment = view.comments.get(commentId)
-    if (!comment) return view.snapshotDone ? gone(view) : asSaved
+    if (!comment) return view.snapshotDone ? missing(MISSING_COMMENT) : asSaved
     const target = view.commentTarget(comment)
     const quoted = target?.kind === 'transcript' && target.item_id !== null ? view.items.get(target.item_id) : undefined
     return {
@@ -168,7 +182,7 @@ export function liveDisplay(saved: RemoteDisplay): { sources: unknown[]; display
     }
   }
   const item = view.items.get(saved.id)
-  if (!item) return view.snapshotDone ? gone(view) : asSaved
+  if (!item) return view.snapshotDone ? missing(MISSING_ITEM) : asSaved
   return { sources: [item], display: () => itemDisplay(item, view.thread) ?? 'gone' }
 }
 

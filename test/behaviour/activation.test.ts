@@ -15,6 +15,7 @@ afterEach(async () => {
 const PRIVATE = { mode: 'private', organization: 'org-1' }
 const records = (kit: Kit): any[] => kit.thread()?.records ?? []
 const delivered = (kit: Kit, text: string) => JSON.stringify(records(kit)).includes(text)
+const binding = (kit: Kit) => kit.store.get(`session:${kit.pi.session.id}`)
 const ran = (kit: Kit, command: string) => kit.commands().some((args) => args.join(' ').startsWith(command))
 
 test('a resumed session never activates', async () => {
@@ -31,7 +32,10 @@ test('a resumed session never activates', async () => {
   delta = await startDelta({ world: base.world, session })
   await delta.settle()
   await delta.pi.prompt('after')
+  await delta.quiet()
+  expect(delta.thread()).toBeUndefined()
   expect(ran(delta, 'thread create')).toBe(false)
+  expect(await binding(delta)).toBeUndefined()
   delta.expectClean()
   await delta.stop()
   delta = undefined
@@ -68,7 +72,9 @@ test('a CLI this extension cannot record against leaves automatic recording off 
     'the refusal',
   )
   await delta.pi.prompt('unrecorded')
+  await delta.quiet()
   expect(delta.thread()).toBeUndefined()
+  expect(await binding(delta)).toBeUndefined()
 })
 
 test('a session that ends while its checkout is attached starts no watcher and gives no share advice', async () => {

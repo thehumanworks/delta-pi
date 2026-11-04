@@ -96,10 +96,19 @@ export function policyFile(kit: Kit): string {
   return join(kit.world.checkout, '.delta', 'settings.json')
 }
 
-/** The repository's saved Delta settings, or undefined while none are saved. */
+/**
+ * The repository's saved Delta settings, or undefined while none are saved, including while a write is
+ * still under way: settings are written in place, so a read meanwhile can find them partly written.
+ */
 export function savedPolicy(kit: Kit): unknown {
   const path = policyFile(kit)
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined
+  if (!existsSync(path)) return undefined
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined
+    throw error
+  }
 }
 
 /**

@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, type Reply, startDelta } from '../kit/index.ts'
-import { RECORDED_TURNS } from '../world.ts'
+import { RECORDED_FAILURE, RECORDED_PROMPTS, RECORDED_SHELL, RECORDED_TURNS, recordedTurns } from '../world.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -15,24 +15,18 @@ test('a repository that syncs automatically records each turn, its tools and its
   delta = await startDelta({ policy: { mode: 'organization', organization: 'org-1' } })
   const { pi } = delta
   await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
-  await pi.prompt('hello there')
-  await pi.prompt('run echo hi')
+  for (const prompt of RECORDED_PROMPTS) await pi.prompt(prompt)
+  await pi.shell(RECORDED_SHELL)
+  await pi.prompt(RECORDED_FAILURE)
   const thread = await delta.until(
-    () =>
-      delta!.thread()?.records.some((record: any) => JSON.stringify(record.update).includes('Done.')) &&
-      delta!.thread(),
-    "the second turn's reply to reach Delta",
+    () => delta!.thread()?.records.some((record: any) => record.update.stopReason === 'error') && delta!.thread(),
+    "the failed turn's end to reach Delta",
   )
   expect(thread.records.map((record: any) => record.sequence)).toEqual(
     thread.records.map((_: unknown, i: number) => i + 1),
   )
   // The real pi records the same (test/e2e/recording.test.ts).
-  expect(thread.records.map((record: any) => record.update.sessionUpdate)).toEqual(RECORDED_TURNS)
-  expect(
-    thread.records
-      .filter((record: any) => record.update.state === 'idle')
-      .map((record: any) => record.update.stopReason),
-  ).toEqual(['end_turn', 'end_turn'])
+  expect(recordedTurns(thread.records)).toEqual(RECORDED_TURNS)
   expect(pi.errors).toEqual([])
 })
 
@@ -126,6 +120,56 @@ test("two writes to one file in a reply record the second's change against the f
   expect(diffs[0].patch.text).toContain('+one\n')
   expect(diffs[1].patch.text).toContain('-one\n+two\n')
   expect(diffs[2].patch.text).toContain('-two\n+three\n')
+})
+
+/** Answer the first prompt with `calls`, and the results with text, as one reply of several calls. */
+function oneReply(calls: Reply['calls']): Kit['pi']['model'] {
+  return (messages) => (messages.at(-1)?.role === 'toolResult' ? { text: 'Done.' } : { calls })
+}
+
+/** The diffs the thread's records carry, once `count` have reached Delta. */
+async function diffsOf(kit: Kit, count: number): Promise<any[]> {
+  return kit.until(() => {
+    const records: any[] = kit.thread()?.records ?? []
+    const found = records.flatMap((record) => (record.update.content ?? []).filter((item: any) => item.type === 'diff'))
+    return found.length === count && found
+  }, `${count} diffs to reach Delta`)
+}
+
+test('a write after an edit of its file in one reply records no patch against the file before the edit', async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  writeFileSync(join(delta.world.checkout, 'notes.txt'), 'one\n')
+  pi.model = oneReply([
+    { name: 'edit', arguments: { path: 'notes.txt', edits: [{ oldText: 'one', newText: 'two' }] } },
+    { name: 'write', arguments: { path: 'notes.txt', content: 'three\n' } },
+  ])
+  await pi.prompt('edit it, then write it')
+  expect(readFileSync(join(delta.world.checkout, 'notes.txt'), 'utf8')).toBe('three\n')
+  const [edit, write] = await diffsOf(delta, 2)
+  // The edit's patch is pi's own; what the edit left is not known when the write is prepared.
+  expect(edit.patch.text).toContain('-one\n+two\n')
+  expect(write.changes[0].operation).toBe('modify')
+  expect(write.patch).toBeUndefined()
+})
+
+test('a write after a failed write of its file in one reply records its change against what the failed one found', async () => {
+  delta = await startDelta({ policy: { mode: 'private', organization: 'org-1' } })
+  const { pi } = delta
+  await delta.until(() => delta!.commands().some((args) => args.includes('watch')), 'the thread watch to start')
+  writeFileSync(join(delta.world.checkout, 'notes.txt'), 'one\n')
+  pi.failTool = (call) => (call.arguments.content === 'two\n' ? 'ENOSPC: no space left on device' : undefined)
+  pi.model = oneReply([
+    { name: 'write', arguments: { path: 'notes.txt', content: 'two\n' } },
+    { name: 'write', arguments: { path: 'notes.txt', content: 'three\n' } },
+  ])
+  await pi.prompt('write it twice')
+  const results = pi.messages().filter((message) => message.role === 'toolResult')
+  expect(results.map((result) => (result as { isError: boolean }).isError)).toEqual([true, false])
+  // The failed write changed nothing, so its record carries no diff.
+  const [write] = await diffsOf(delta, 1)
+  expect(write.patch.text).toContain('-one\n+three\n')
 })
 
 test('a message Delta cannot translate is logged and skipped, and recording goes on', async () => {

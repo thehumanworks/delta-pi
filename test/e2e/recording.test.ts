@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { RECORDED_TURNS } from '../world.ts'
+import { RECORDED_FAILURE, RECORDED_PROMPTS, RECORDED_SHELL, RECORDED_TURNS, recordedTurns } from '../world.ts'
 import { EXTENSION, FAUX_MODEL, PI, Pi, REDACTOR, until, world, type World } from './harness.ts'
 
 let current: { pi?: Pi; world?: World } = {}
@@ -17,27 +17,24 @@ test('a repository that syncs automatically records each turn, its tools and its
   // Activation creates the thread, attaches and mounts the checkout, and starts watching.
   await until(() => w.calls().some((call) => call.argv.includes('watch')), 'the thread watch to start')
   const session = (await pi.state()).sessionId as string
-  await pi.prompt('hello there')
-  await pi.prompt('run echo hi')
+  for (const prompt of RECORDED_PROMPTS) await pi.prompt(prompt)
+  // A `!` command, as the person runs one between turns.
+  expect((await pi.send({ type: 'bash', command: RECORDED_SHELL })).success).toBe(true)
+  await pi.prompt(RECORDED_FAILURE)
   const thread = await until(() => {
     const found = Object.values(w.delta().threads)[0]
-    return (
-      found?.records.some(
-        (record: any) =>
-          record.update.sessionUpdate === 'agent_message' && JSON.stringify(record.update).includes('Done.'),
-      ) && found
-    )
-  }, "the second turn's reply to reach Delta")
+    return found?.records.some((record: any) => record.update.stopReason === 'error') && found
+  }, "the failed turn's end to reach Delta")
   const updates = thread.records.map((record: any) => record.update)
   // The kit's fake pi records the same (test/behaviour/recording.test.ts), which keeps it honest.
-  expect(updates.map((update: any) => update.sessionUpdate)).toEqual(RECORDED_TURNS)
+  expect(recordedTurns(thread.records)).toEqual(RECORDED_TURNS)
   expect(thread.records.every((record: any) => record.producer === session && record.name === 'Pi')).toBe(true)
   // Sequences are consecutive from 1, and each turn opens with its running start.
   expect(thread.records.map((record: any) => record.sequence)).toEqual(
     thread.records.map((_: unknown, index: number) => index + 1),
   )
   const starts = thread.records.filter((record: any) => record.update.state === 'running')
-  expect(starts).toHaveLength(2)
+  expect(starts).toHaveLength(4)
   for (const start of starts) expect(start.turnSequence).toBe(start.sequence)
   const prompt = thread.records.find((record: any) => record.update.sessionUpdate === 'user_message')
   expect(prompt.update.content).toEqual([{ type: 'text', text: 'hello there' }])
@@ -56,7 +53,7 @@ test('a repository that syncs automatically records each turn, its tools and its
   expect(result.toolCallId).toBe(call.toolCallId)
   expect(JSON.stringify(result.content)).toContain('hi')
   const idles = thread.records.filter((record: any) => record.update.state === 'idle')
-  expect(idles.map((record: any) => record.update.stopReason)).toEqual(['end_turn', 'end_turn'])
+  expect(idles.map((record: any) => record.update.stopReason)).toEqual(['end_turn', 'end_turn', 'end_turn', 'error'])
   // The checkout is attached to the thread and synchronized while pi runs.
   expect(thread.worktrees).toHaveLength(1)
   expect(w.delta().worktrees[0].directories[0]).toMatchObject({ directory: w.checkout, state: 'mounted' })

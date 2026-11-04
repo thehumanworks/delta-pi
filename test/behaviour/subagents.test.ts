@@ -118,10 +118,13 @@ test('a subagent resumed after its process died closes the turn it left running'
     env: { DELTA_PI_PARENT: root.env.DELTA_PI_PARENT! },
   })
   kits.push(again)
-  const thread = await again.until(
-    () => childThread(again, (record) => idle(record) && record.turnSequence === turn),
-    'the abandoned turn to be closed',
-  )
+  // Its activation closes the turn as it starts, before any prompt.
+  await again.quiet()
+  const thread = childThread(again)
+  expect(
+    thread.records.filter((record: any) => idle(record) && record.turnSequence === turn),
+    'the abandoned turn, closed',
+  ).toHaveLength(1)
   expect(thread.records.filter((record: any) => record.update.state === 'idle')).toHaveLength(1)
 })
 
@@ -155,7 +158,7 @@ test('a session started with a link its parent no longer holds records nothing, 
   const worker = await startDelta({ world: root.world, env: { DELTA_PI_PARENT: link } })
   kits.push(worker)
   await worker.pi.prompt('a task for the worker')
-  await worker.settle()
+  await worker.quiet()
   expect(worker.commands().some((args) => args[0] === 'thread' && args[1] === 'create')).toBe(false)
 })
 
@@ -263,7 +266,7 @@ test('a refusal Delta calls permanent stops recording the subagent, once', async
   await sub.until(() => refused().length > 0, 'the refusal to be shown')
   await sub.pi.prompt('and the lexer')
   await sub.advance(60_000)
-  await sub.settle()
+  await sub.quiet()
   root.world.stopFailing('thread create')
   expect(Object.values(sub.world.delta().threads).filter((thread) => thread.parent)).toEqual([])
   expect(sub.commands().filter((args) => args[0] === 'thread' && args[1] === 'create')).toHaveLength(1)
@@ -295,6 +298,7 @@ test("a subagent's run ends only once Delta stops syncing the worktree Claude ma
   await sub.until(() => listed() > before, 'Delta to be asked whether it still syncs the checkout')
   await sub.advance(1_000)
   await sub.settle()
+  await sub.quiet()
   expect(ended).toBe(false)
   release()
   // The next check of the directory finds it released.
@@ -487,7 +491,10 @@ test('a subagent that cannot read the session that started it goes on, and recor
   await share(root)
   sub.disk.fail('read', `session_${root.pi.session.id}`, { times: 1 })
   expect(await sub.pi.prompt('inspect the parser')).toBe('settled')
-  const thread = await root.until(() => childThread(root, idle), "the subagent's finished run")
+  // The run's end reads the parent again, and delivers the run under it.
+  await sub.quiet()
+  const thread = childThread(root, idle)
+  expect(thread, "the subagent's finished run, recorded under its parent").toBeDefined()
   expect(thread.parent).toBe(root.thread()?.thread_id)
   expect(thread.records.map((record: any) => record.update.sessionUpdate)).toEqual([
     'state_update',

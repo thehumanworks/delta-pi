@@ -216,6 +216,7 @@ test('a failed durable start write aborts its local ID without publishing a part
   await delta.whileTimePasses(pi.prompt('cannot save'))
   expect(pi.aborts).toBe(1)
   await delta.settle()
+  await delta.quiet()
   expect(starts(delta)).toEqual([])
   expect((await binding(delta)).next).toBe(before.next)
   expect(pi.statuses.get('delta-status')).toContain('Delta sharing paused')
@@ -493,6 +494,7 @@ test('an observer loss queued across session end cannot write or abort the resta
   await delta.until(() => finishes(delta!).includes(sequence!), 'the resumed session to close the turn')
   await delta.until(async () => (await binding(delta!)).pending.length === 0, 'the outbox to be delivered')
   await delta.settle()
+  await delta.quiet()
   expect(pi.aborts).toBe(0)
   expect((await binding(delta)).execution).toBeUndefined()
   expect(finishes(delta)).toEqual(starts(delta))
@@ -543,10 +545,12 @@ test('a remote Bash call reaches the receiver once with output (assistant row fi
     // The open call is not drawn; its result draws it once, complete.
     expect(rows).toHaveLength(index)
   }
-  expect(rows[0]!.text).toContain('tool call echo output')
-  expect(rows[0]!.text).toContain('output')
+  expect(rows[0]!.text).toContain('tool call echo output (completed)')
   expect(rows[0]!.text).not.toContain('changed an earlier')
   const item = view.items.get(id)!
+  // The command's output, as the call's content, which the row shows on its own line.
+  expect(item.content.content).toEqual([{ type: 'content', content: { type: 'text', text: 'output\n' } }])
+  expect(rows[0]!.text).toContain('\noutput\n')
   view.upsert({ ...item, content: { ...item.content, rawOutput: 'genuinely edited output' } })
   expect((await view.nextRow())!.text).toContain('changed an earlier tool call echo output')
 })

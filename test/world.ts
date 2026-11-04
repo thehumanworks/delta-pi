@@ -15,10 +15,24 @@ export const PI_BIN = join(REPO, 'node_modules', '.bin')
 
 export type Event = Record<string, any>
 
+// Every world made in this process, shared through globalThis as each test file's modules may be loaded
+// afresh: work a test left running can write into a world after it was removed, which makes it again.
+const worlds = ((globalThis as Record<symbol, Set<string> | undefined>)[Symbol.for('pi-delta.test.worlds')] ??=
+  new Set<string>())
+
+/**
+ * Remove every world, even one a failed test left behind or late work wrote into after its removal, as the
+ * behaviour tests' cleanup does after each test and once more after the last.
+ */
+export function removeWorlds() {
+  for (const base of worlds) rmSync(base, { recursive: true, force: true })
+}
+
 /** A temporary world: a checkout with a remote, a pi agent directory, and the fake CLI's state. */
 export function world(options: { policy?: Record<string, unknown> } = {}) {
   // Resolved, as pi's working directory and Git's answers are: macOS's temporary folder is a symlink.
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'pi-delta-e2e-')))
+  worlds.add(base)
   const checkout = join(base, 'repo')
   const agentDir = join(base, 'agent')
   const state = join(base, 'delta')
@@ -289,20 +303,49 @@ export async function until<T>(
 }
 
 /**
- * What a first turn answering in text, then a turn running one command, record. The end-to-end test asserts
- * it of the real pi and the behaviour test of the kit's fake pi, so the fake cannot drift from pi unseen.
+ * What the recording scenario records, a record at a time: a turn answering in text, a turn running one
+ * command, a turn writing a file, a `!` shell command, and a turn whose reply ends with an error. The
+ * end-to-end test asserts it of the real pi and the behaviour test of the kit's fake pi (each in its
+ * recording.test.ts), so the fake cannot drift from pi unseen in what these record. Read with
+ * {@link recordedTurns}.
  */
 export const RECORDED_TURNS = [
-  'state_update',
+  'state_update running',
   'user_message',
   'agent_message',
   'session_info_update',
-  'state_update',
-  'state_update',
+  'state_update idle end_turn',
+  'state_update running',
   'user_message',
   'agent_message',
-  'tool_call_update',
-  'tool_call_update',
+  'tool_call_update in_progress bash execute',
+  'tool_call_update completed content',
   'agent_message',
-  'state_update',
+  'state_update idle end_turn',
+  'state_update running',
+  'user_message',
+  'tool_call_update in_progress write edit',
+  'tool_call_update completed content diff patch',
+  'agent_message',
+  'state_update idle end_turn',
+  'user_message',
+  'state_update running',
+  'user_message',
+  'state_update idle error',
 ]
+
+/** The recording scenario's prompts, in order, with the `!` shell command run before the last. */
+export const RECORDED_PROMPTS = ['hello there', 'run echo hi', 'write notes.txt hello'] as const
+export const RECORDED_SHELL = 'echo shell'
+export const RECORDED_FAILURE = 'fail now'
+
+/** A thread's records as {@link RECORDED_TURNS} lists them: each record's kind, and what sets it apart. */
+export function recordedTurns(records: { update: Record<string, any> }[]): string[] {
+  return records.map(({ update }) => {
+    if (update.sessionUpdate === 'state_update')
+      return ['state_update', update.state, update.stopReason].filter(Boolean).join(' ')
+    if (update.sessionUpdate !== 'tool_call_update') return update.sessionUpdate
+    const content = (update.content ?? []).flatMap((item: any) => [item.type, ...(item.patch ? ['patch'] : [])])
+    return ['tool_call_update', update.status, update.name, update.kind, ...content].filter(Boolean).join(' ')
+  })
+}

@@ -147,12 +147,14 @@ test('animates only while a turn runs, and stops with the turn and with the watc
   // While a turn runs, the animation's redraw is the only timer work.
   let renders = kit.pi.renders
   await kit.advance(120)
+  await kit.quiet()
   expect(kit.pi.renders - renders).toBe(1)
 
   await deliver(kit, turn('idle'))
   expect(band(kit)).toContain(LIVE)
   renders = kit.pi.renders
   await kit.advance(1200)
+  await kit.quiet()
   expect(kit.pi.renders).toBe(renders)
 
   // Teardown cancels the running turn's timer as well: after it, no timer runs.
@@ -160,6 +162,7 @@ test('animates only while a turn runs, and stops with the turn and with the watc
   await kit.whileTimePasses(kit.pi.shutdown('quit'))
   const fired = kit.clock.fired
   await kit.advance(1200)
+  await kit.quiet()
   expect(kit.clock.fired).toBe(fired)
 
   // A finished share leaves a separate notice timer; teardown cancels that too.
@@ -172,6 +175,7 @@ test('animates only while a turn runs, and stops with the turn and with the watc
   await again.whileTimePasses(again.pi.shutdown('quit'))
   const after = again.clock.fired
   await again.advance(30_000)
+  await again.quiet()
   expect(again.clock.fired).toBe(after)
 })
 

@@ -52,6 +52,7 @@ export function kitProcesses(
   ran: Ran[]
   others: Ran[]
   busy(): number
+  othersBusy(): number
   running(): string[][]
   stopAll(): Promise<void>
 } {
@@ -61,6 +62,7 @@ export function kitProcesses(
   /** The long-running delta commands not yet stopped or ended, with their arguments. */
   const live = new Map<ProcessStream, string[]>()
   let busy = 0
+  let othersBusy = 0
   const merged = (extra: Record<string, string> | undefined): Record<string, string> =>
     Object.fromEntries(
       Object.entries({ ...environment(), ...extra }).filter(
@@ -77,15 +79,22 @@ export function kitProcesses(
     others,
     /** How many one-shot commands are still running. */
     busy: () => busy,
+    /** How many runs of other programs are still running. */
+    othersBusy: () => othersBusy,
     /** The long-running delta commands still running, as argument lists without the program. */
     running: () => [...live.values()],
     async run(argv, init = {}) {
       const env = merged(init.env)
       if (!isDelta(argv)) {
         others.push({ argv, env })
-        const answer = await fakeFor(argv)?.(argv, { ...init, env })
-        if (!answer) return run(argv, { ...init, env })
-        return isStream(answer) ? collect(answer) : answer
+        othersBusy++
+        try {
+          const answer = await fakeFor(argv)?.(argv, { ...init, env })
+          if (!answer) return await run(argv, { ...init, env })
+          return isStream(answer) ? await collect(answer) : answer
+        } finally {
+          othersBusy--
+        }
       }
       ran.push({ argv, env, ...(init.timeoutMs !== undefined ? { timeoutMs: init.timeoutMs } : {}) })
       busy++
