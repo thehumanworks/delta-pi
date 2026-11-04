@@ -262,14 +262,22 @@ async function resumeObserves(state: 'attached' | 'unshared') {
       { times: 1000 },
     )
   const second = await resumed(first)
+  // A shell command is recorded either way. pi commits it at the next event the extension reads, the
+  // prompt after it: delivered at once while the checkout is attached; while the thread is not
+  // published that prompt is refused, so it waits in the session for the first turn after the share.
+  await second.pi.shell('echo after resume')
   const submitted = await second.pi.prompt('continue after resume')
   if (state === 'attached') {
     expect(submitted).toBe('settled')
     await second.until(() => delivered(second, 'Echo: continue after resume'), 'the resumed turn')
+    expect(delivered(second, 'echo after resume')).toBe(true)
+    await second.until(async () => (await staged(second)).length === 0, 'the outbox to empty')
   } else {
     expect(submitted).toBe('handled')
-    await moment()
+    await second.advance(0)
+    await second.quiet()
     expect(records(second)).toHaveLength(shared)
+    expect(await staged(second)).toEqual([])
   }
   expect(setupCommands(second)).toEqual([])
   expect(checkouts(second)).toEqual([{ ...checkout!, state: 'mounted' }])
@@ -279,6 +287,12 @@ async function resumeObserves(state: 'attached' | 'unshared') {
   expect(second.world.delta().worktrees).toHaveLength(1)
   expect(await second.pi.prompt('after the share')).toBe('settled')
   await second.until(() => delivered(second, 'Echo: after the share'), 'the turn after the share')
+  // The command run while sharing was refused reaches the thread once, in its place before the turn.
+  const shell = records(second).flatMap((record, index) =>
+    JSON.stringify(record).includes('echo after resume') ? [index] : [],
+  )
+  expect(shell).toHaveLength(1)
+  if (state === 'unshared') expect(shell).toEqual([shared])
   expect(records(second).map((record) => record.sequence)).toEqual(records(second).map((_, index) => index + 1))
   expect((await binding(second)).pending).toEqual([])
   expect(exports(second)).toBe(1)
@@ -323,7 +337,7 @@ test('resume checks authenticated denied access without deriving it from a URL',
   expect(await second.pi.prompt('participate')).toBe('handled')
   await second.pi.shell('echo local')
   await second.advance(0)
-  await moment()
+  await second.quiet()
   expect(records(second)).toHaveLength(shared)
   expect(setupCommands(second)).toEqual([])
   expect(await binding(second)).toMatchObject({ thread: second.thread().thread_id, url })
@@ -384,6 +398,7 @@ test('first explicit share installs a missing CLI, never plugin load or contract
   kit.world.contract(0, 0)
   await kit.pi.start()
   await kit.settle()
+  await kit.quiet()
   expect(cli.setups).toEqual([])
   expect(await share(kit)).toContain('too old')
   expect(cli.setups).toEqual(['discover', 'install'])
@@ -411,6 +426,7 @@ test('share stops when its session changes during installation', async () => {
   await kit.advance(0)
   await moment()
   await kit.advance(0)
+  await kit.quiet()
   expect(exports(kit, original)).toBe(0)
   expect(setupCommands(kit)).toEqual([])
   expect(kit.thread()).toBeUndefined()

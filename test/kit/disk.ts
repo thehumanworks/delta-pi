@@ -36,10 +36,13 @@ type Registry = {
   touched: { operation: DiskOperation; path: string }[]
   /** What reads of matching paths answer in place of the file's contents. */
   contents: { match: PathMatch; text: string }[]
+  /** Operations started and not yet finished, and how many of those a hold is keeping waiting. */
+  running: number
+  held: number
 }
 function state(): Registry {
   const global = globalThis as unknown as Record<symbol, Registry | undefined>
-  return (global[registry] ??= { faults: [], touched: [], contents: [] })
+  return (global[registry] ??= { faults: [], touched: [], contents: [], running: 0, held: 0 })
 }
 
 const matches = (match: PathMatch, path: string, text?: string) =>
@@ -56,7 +59,9 @@ async function check(operation: DiskOperation, path: string, text?: string) {
       continue
     }
     if (fault.held) {
-      await fault.held
+      const current = state()
+      current.held++
+      await fault.held.finally(() => current.held--)
       continue
     }
     if (--fault.times <= 0) faults.splice(faults.indexOf(fault), 1)
@@ -109,21 +114,39 @@ export const disk = {
       .touched.filter((entry) => !operation || entry.operation === operation)
       .map((entry) => entry.path)
   },
+  /** How many operations are under way that no hold is keeping waiting. */
+  busy(): number {
+    const { running, held } = state()
+    return running - held
+  },
   /** Forget every fault and what was touched, as each test starts. */
   reset() {
     const current = state()
     current.faults.length = 0
     current.touched.length = 0
     current.contents.length = 0
+    current.running = 0
+    current.held = 0
   },
 }
 
 /** What a test made reads of `path` answer, if anything. */
 const contentOf = (path: string) => state().contents.find((entry) => matches(entry.match, path))?.text
 
+/** Run `operation`, counted as under way until it settles, so a test can tell when the disk is quiet. */
+async function counted<T>(operation: () => Promise<T>): Promise<T> {
+  const current = state()
+  current.running++
+  try {
+    return await operation()
+  } finally {
+    current.running--
+  }
+}
+
 /** files.ts's functions, `real`, each checking the test's faults first. */
 export function faultyFiles(real: typeof Files): typeof Files {
-  return {
+  const files: typeof Files = {
     exists: async (path) => (await check('read', path), contentOf(path) !== undefined || real.exists(path)),
     readText: async (path) => (await check('read', path), contentOf(path) ?? real.readText(path)),
     readIfExists: async (path) => (await check('read', path), contentOf(path) ?? real.readIfExists(path)),
@@ -134,4 +157,10 @@ export function faultyFiles(real: typeof Files): typeof Files {
     size: async (path) => (await check('read', path), real.size(path)),
     remove: async (path) => (await check('remove', path), real.remove(path)),
   }
+  return Object.fromEntries(
+    Object.entries(files).map(([name, operation]) => [
+      name,
+      (...args: unknown[]) => counted(() => (operation as (...args: unknown[]) => Promise<unknown>)(...args)),
+    ]),
+  ) as typeof Files
 }

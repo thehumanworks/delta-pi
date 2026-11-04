@@ -75,6 +75,7 @@ describe('offline recording', () => {
     // A delivery pause stops delivery, not pi: the next prompt retries and is accepted.
     expect(await delta.pi.prompt('next')).toBe('settled')
     await delta.advance(120_000)
+    await delta.quiet()
     // The turns ran to their end, and an automatic session never publishes as recovery.
     expect(aborted(delta)).toEqual([])
     expect(ran(delta, 'thread share')).toBe(0)
@@ -261,6 +262,7 @@ describe('offline recording', () => {
     // Nothing retries: the next prompt is accepted without another create or a new queue.
     expect(await delta.pi.prompt('after')).toBe('settled')
     await delta.advance(120_000)
+    await delta.quiet()
     expect(ran(delta, 'thread create')).toBe(1)
     expect(await binding(delta)).toBeUndefined()
   })

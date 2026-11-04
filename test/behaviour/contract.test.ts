@@ -53,6 +53,7 @@ test('a resumed session refuses to participate against an incompatible contract'
   await delta.pi.start('resume')
   await delta.until(() => delta!.pi.noticeTexts().some((text) => text.includes(NEWER)), 'the refusal')
   await delta.settle()
+  await delta.quiet()
   expect(await binding(delta)).toEqual(saved)
   expect(watches(delta)).toBe(watched)
   expect(delta.pi.statuses.get('delta')).toContain(NEWER)

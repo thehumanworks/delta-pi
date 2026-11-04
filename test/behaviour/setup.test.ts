@@ -19,6 +19,7 @@ import {
   signIns,
 } from '../kit/accounts.ts'
 import { FakeSession, type Kit, startDelta } from '../kit/index.ts'
+import { exports } from './sharing-kit.ts'
 import type { Dialog } from '../kit/pi.ts'
 
 let delta: Kit | undefined
@@ -30,7 +31,6 @@ afterEach(async () => {
 
 const SIGNED_OUT = { FAKE_DELTA_SIGNED_OUT: '1' }
 const option = (prefix: string) => (dialog: Dialog) => dialog.options?.find((label) => label.startsWith(prefix))
-const records = (kit: Kit): any[] => kit.thread()?.records ?? []
 const binding = (kit: Kit) => kit.store.get(`session:${kit.pi.session.id}`)
 
 /** Run `/delta <args>` and let the share it starts on the clock run. */
@@ -64,9 +64,10 @@ describe('setup command and policy problems', () => {
     for (const mode of ['print', 'json'] as const) {
       delta = await startDelta({ mode })
       await delta.advance(0)
-      await delta.settle()
+      await delta.quiet()
       expect(delta.commands().some((args) => args[0] === 'org')).toBe(false)
       await delta.pi.command('delta', 'setup')
+      await delta.quiet()
       expect(delta.stderr.join('')).toContain(
         "/delta-setup needs pi's interactive terminal or an RPC client that shows dialogs. Print and JSON modes cannot answer its questions.",
       )
@@ -207,8 +208,10 @@ describe('setup dialogs and notices', () => {
     await delta.until(() => delta!.pi.dialogs.some((dialog) => dialog.title.startsWith('Delta share')), 'the question')
     // The band drops the share's progress rather than reporting a failure.
     await delta.until(() => !band(delta!).includes('Preparing to share'), 'the share to end')
+    await delta.quiet()
+    expect(exports(delta)).toBe(0)
+    expect(await binding(delta)).toBeUndefined()
     expect(delta.thread()).toBeUndefined()
-    expect(records(delta)).toEqual([])
     expect(notes(delta).join('\n')).not.toContain('Delta sharing failed')
   })
 
@@ -254,6 +257,7 @@ describe('setup dialogs and notices', () => {
     await kit.advance(0)
     await kit.settle()
     await kit.pi.prompt('after')
+    await kit.quiet()
     expect(ran(kit, 'thread create')).toBe(false)
     expect(kit.pi.dialogs).toEqual([])
     kit.expectClean()

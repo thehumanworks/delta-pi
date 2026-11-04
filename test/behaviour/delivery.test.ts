@@ -3,8 +3,11 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
+import type { Host } from '../../src/core/host.ts'
+import { runningUpdate } from '../../src/recording/delivery.ts'
 import { echoModel, type Kit, type Reply, startDelta } from '../kit/index.ts'
-import { binding, bindingPath, restart, staged } from './recorded.ts'
+import { binding, bindingPath, restart, staged, watches } from './recorded.ts'
+import { exports } from './sharing-kit.ts'
 
 let delta: Kit | undefined
 afterEach(async () => {
@@ -27,6 +30,7 @@ const run = (command: string): Reply => ({ calls: [{ name: 'bash', arguments: { 
 const appends = (kit: Kit) => kit.commands().filter((args) => args[0] === 'thread' && args[1] === 'append').length
 const records = (kit: Kit): any[] => kit.thread()?.records ?? []
 const delivered = (kit: Kit, text: string) => JSON.stringify(records(kit)).includes(text)
+const contractChecks = (kit: Kit) => kit.commands().filter((args) => args.join(' ') === 'thread contract').length
 
 test('a failed append shows the CLI error in the transcript once, keeps the record queued, and retries it', async () => {
   delta = await recording()
@@ -37,6 +41,7 @@ test('a failed append shows the CLI error in the transcript once, keeps the reco
   const shown = () => delta!.pi.noticeTexts().filter((text) => text.includes('failed as the test asked'))
   await delta.until(() => shown().length, 'the failure to be shown')
   await delta.advance(10_000)
+  await delta.quiet()
   expect(delivered(delta, 'Echo: two')).toBe(false)
   // Nothing else happens to trigger delivery: the retry is scheduled by the failure itself.
   delta.world.stopFailing('thread append')
@@ -54,8 +59,10 @@ test('a permanent append failure pauses with its reason instead of retrying a po
   await delta.pi.prompt('poison')
   const paused = () => delta!.pi.noticeTexts().filter((text) => text.includes('invalid_record'))
   await delta.until(() => paused().length, 'the pause to be shown')
+  await delta.quiet()
   const attempts = appends(delta)
   await delta.advance(120_000)
+  await delta.quiet()
   expect(appends(delta)).toBe(attempts)
   // The pause stops delivery, not pi: the next prompt is accepted, retries delivery once, and the reason
   // is shown once.
@@ -108,11 +115,19 @@ test('an out-of-range recording contract refuses to share, and a later retry che
   delta.world.contract(7, 7)
   await delta.pi.command('delta', 'share')
   await delta.until(() => delta!.pi.noticeTexts().some((text) => text.includes('This Delta is too old')), 'the refusal')
+  await delta.quiet()
+  expect(watches(delta)).toBe(0)
+  // Nothing was created, attached, published, or staged.
   expect(delta.thread()).toBeUndefined()
+  expect(await binding(delta)).toBeUndefined()
+  expect(existsSync(join(delta.world.agentDir, 'delta', 'outbox', delta.pi.session.id))).toBe(false)
+  expect(contractChecks(delta)).toBe(1)
+  // The refusal is not remembered: an updated Delta shares the same session.
   delta.world.contract(8, 8)
   delta.pi.answers.push((dialog) => (dialog.title.includes('Who should see') ? 'Share with Zed' : undefined))
   await delta.pi.command('delta', 'share')
   await delta.until(() => delta!.thread()?.url, 'the session to be shared')
+  expect(contractChecks(delta)).toBe(2)
 })
 
 test('the recording contract is checked once per session, not per command', async () => {
@@ -121,7 +136,13 @@ test('the recording contract is checked once per session, not per command', asyn
   await delta.pi.prompt('two')
   await delta.pi.command('delta', 'link')
   await delta.until(() => delivered(delta!, 'Echo: two'), 'both turns')
-  expect(delta.commands().filter((args) => args.join(' ') === 'thread contract')).toHaveLength(1)
+  expect(contractChecks(delta)).toBe(1)
+  // A share reuses the verdict too.
+  delta.pi.answers.push((dialog) => (dialog.title.includes('Who should see') ? 'Share with Zed' : undefined))
+  await delta.pi.command('delta', 'share')
+  await delta.until(() => delta!.commands().some((args) => args.join(' ').startsWith('thread share')), 'the share')
+  await delta.quiet()
+  expect(contractChecks(delta)).toBe(1)
 })
 
 test('live turns report the installed extension version and only confirmed finish reasons', async () => {
@@ -130,14 +151,51 @@ test('live turns report the installed extension version and only confirmed finis
   await delta.pi.prompt('one')
   delta.pi.model = () => ({ text: 'done' })
   await delta.pi.prompt('two')
-  await delta.until(() => records(delta!).filter((record) => record.update.state === 'idle').length === 2, 'both turns')
-  const { version } = JSON.parse(
-    await import('node:fs').then((fs) => fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')),
-  ) as { version: string }
+  delta.pi.model = () => ({ text: 'failed', stopReason: 'error' })
+  await delta.pi.prompt('three')
+  await delta.until(() => records(delta!).filter((record) => record.update.state === 'idle').length === 3, 'the turns')
+  const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
   const starts = records(delta).filter((record) => record.update.state === 'running')
-  expect(starts.map((record) => record.update._meta?.delta?.producer_version)).toEqual([version, version])
+  expect(starts.map((record) => record.update)).toEqual(
+    [1, 2, 3].map(() => ({
+      sessionUpdate: 'state_update',
+      state: 'running',
+      _meta: { delta: { producer_version: version } },
+    })),
+  )
   const finishes = records(delta).filter((record) => record.update.state === 'idle')
-  expect(finishes.map((record) => record.update.stopReason)).toEqual([undefined, 'end_turn'])
+  expect(finishes.map((record) => record.turnSequence)).toEqual(starts.map((record) => record.sequence))
+  expect(finishes.map((record) => record.update)).toEqual([
+    // A reply cut at its length limit is a finish pi does not name.
+    { sessionUpdate: 'state_update', state: 'idle' },
+    { sessionUpdate: 'state_update', state: 'idle', stopReason: 'end_turn' },
+    {
+      sessionUpdate: 'state_update',
+      state: 'idle',
+      stopReason: 'error',
+      error: { code: -32603, message: 'External producer reported an error' },
+    },
+  ])
+  // A version that is not plain semver is left out rather than reported. pi loads the installed version
+  // from the package, so the running record is built for a host that reports another one.
+  expect(runningUpdate({ plugin: { version: '/private-version' } } as Host)).toEqual({
+    sessionUpdate: 'state_update',
+    state: 'running',
+  })
+  // Every command that created, published or appended to the thread said pi ran it.
+  for (const command of ['thread create', 'thread append']) {
+    const calls = delta.world.calls().filter(
+      (call) =>
+        call.argv
+          .filter((arg) => arg !== '--json')
+          .slice(0, 2)
+          .join(' ') === command,
+    )
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every((call) => call.env.integration === 'pi')).toBe(true)
+  }
 })
 
 test('a queued own finish does not block a new prompt', async () => {
@@ -216,7 +274,12 @@ test('a partial append retains exactly the unacknowledged suffix and never resta
   expect(sequences(delta)).toEqual([1])
   // The export is the prompt, its reply and the thread's title; all but the first stay queued.
   const saved = await binding(delta)
-  expect(saved).toMatchObject({ thread: delta.thread()!.thread_id, snapshot: true, next: 4 })
+  expect(saved).toMatchObject({
+    thread: delta.thread()!.thread_id,
+    checkout: delta.world.checkout,
+    snapshot: true,
+    next: 4,
+  })
   expect(saved.pending.map((entry: { sequence: number }) => entry.sequence)).toEqual([2, 3])
   const exported = saved.pending.map((entry: { files: string[] }) => readFileSync(entry.files[0]!, 'utf8'))
   expect(exported[0]).toContain('Echo: one')
@@ -240,6 +303,7 @@ test('a partial append retains exactly the unacknowledged suffix and never resta
     .map(({ producer: _producer, acknowledge: _acknowledge, name: _name, ...line }) => `${JSON.stringify(line)}\n`)
   expect(lines).toEqual(exported)
   expect((await binding(delta)).next).toBe(4)
+  expect(exports(delta)).toBe(1)
   expect(JSON.stringify(records(delta))).not.toContain('compacted-away')
   for (const file of outboxFiles(delta))
     expect(
@@ -257,11 +321,16 @@ test('a lost acknowledgment replays identical records and accepts the advanced c
   const accepted = structuredClone(records(delta))
   expect(accepted.map((record) => record.sequence)).toEqual([1, 2, 3, 4, 5])
   expect(await pending(delta)).toEqual([1, 2, 3, 4, 5])
+  // Every staged record keeps its files, and the thread was published.
+  for (const entry of (await binding(delta)).pending)
+    for (const file of entry.files) expect(existsSync(file)).toBe(true)
+  expect(delta.thread()!.url).toBeTruthy()
   // Sharing again sends the same records, which Delta acknowledges as already recorded.
   expect((await share(delta)).join('\n')).not.toContain('failed')
   await delta.until(async () => (await pending(delta!)).length === 0, 'the replay to be acknowledged')
   expect(records(delta)).toEqual(accepted)
   expect((await binding(delta)).next).toBe(6)
+  expect(exports(delta)).toBe(1)
   // Nothing remains pending: the next turn takes the next sequences.
   await delta.pi.prompt('after replay')
   await delta.until(() => delivered(delta!, 'Echo: after replay'), 'the next turn')
@@ -330,6 +399,7 @@ test('a detached checkout pauses delivery until a later successful check lifts t
   await delta.whileTimePasses(turn)
   await delta.advance(120_000)
   await delta.settle()
+  await delta.quiet()
   expect(sequences(delta)).toHaveLength(sent)
   expect((await pending(delta)).length).toBeGreaterThan(queued.length)
   // A prompt checks the checkout again, which lifts the pause that a failed check set.
@@ -353,15 +423,16 @@ test('a growing backlog reports the same reason once, and ending the session can
   expect(shown()).toHaveLength(1)
   // Ending the session cancels its retry.
   await delta.whileTimePasses(pi.shutdown('quit'))
+  await delta.quiet()
   const attempts = appends(delta)
   await delta.advance(120_000)
-  await delta.settle()
+  await delta.quiet()
   expect(appends(delta)).toBe(attempts)
   // The resumed session starts its backoff over rather than inheriting the old attempts.
   delta.world.fail('thread append', { times: 1, code: 'failed' })
   await pi.start('resume')
   await delta.until(() => appends(delta!) > attempts, 'the resumed session to try once')
-  await delta.settle()
+  await delta.quiet()
   expect(appends(delta)).toBe(attempts + 1)
   await delta.advance(2_000)
   await delta.until(async () => !(await pending(delta!)).length, 'the retry to deliver the backlog')
@@ -496,10 +567,15 @@ test('records a failing disk could not save outlive their session in the pi proc
   expect(pi.noticeTexts().at(-1)).toContain('local conversation capture is paused')
   pi.answers.push((dialog) => dialog.options?.find((option) => option.startsWith('Keep current sharing')))
   await pi.command('delta', 'share')
-  await delta.until(() => delivered(delta!, 'kept in memory'), 'the kept records')
+  // The share ends one way or the other; it says it finished only if it saved what the session kept.
+  const outcome = await delta.until(
+    () => pi.noticeTexts().find((text) => text.startsWith('Delta: ') || text.startsWith('Delta sharing failed')),
+    'the share to end',
+  )
+  expect(outcome).toMatch(/^Delta: /)
   await delta.until(async () => !(await pending(delta!)).length, 'the outbox to be delivered')
+  expect(delivered(delta, 'kept in memory'), 'the records kept in memory reached Delta').toBe(true)
   expect(sequences(delta)).toEqual(sequences(delta).map((_, index) => index + 1))
-  await delta.until(() => pi.noticeTexts().some((text) => text.startsWith('Delta: ')), 'the share to finish')
   expect(await pi.prompt('recorded again')).toBe('settled')
   await delta.until(() => delivered(delta!, 'Echo: recorded again'), 'the next turn')
 })

@@ -146,6 +146,7 @@ async function signInEnds(status: 'cancelled' | 'expired' | 'access_denied') {
   const calls = signIns(kit).length
   expect(await kit.pi.prompt('after sign-in stopped')).toBe('settled')
   await kit.settle()
+  await kit.quiet()
   expect(signIns(kit)).toHaveLength(calls)
   expect(cancelsOrLogsOut(kit)).toBe(false)
 
@@ -288,6 +289,7 @@ test('running /delta-share again while the beta terms are awaited offers to stop
   const polls = signIns(kit).length
   await kit.advance(10_000)
   await kit.settle()
+  await kit.quiet()
   expect(signIns(kit)).toHaveLength(polls)
   expect(kit.thread()).toBeUndefined()
   await share(kit)
@@ -299,13 +301,19 @@ test('keeping the wait leaves the share waiting for the beta terms, without a se
   const kit = delta
   await share(kit)
   await kit.until(() => band(kit).includes("Waiting for Delta's beta terms"), 'the wait for the terms')
+  const shown = notes(kit).length
   await kit.pi.command('delta', 'share')
   expect(kit.pi.dialogs.at(-1)?.title).toBe(
     'Delta: Delta is waiting for you to accept its beta terms in your browser. Stop waiting?',
   )
+  // The second share says nothing of its own: keeping the wait only answers its question.
+  expect(notes(kit).slice(shown)).toEqual([])
   // Delta reports the sign-in once the terms are accepted on the web; the first share carries on.
   await kit.until(async () => (await kit.advance(2_000), kit.thread()), 'the share to continue')
+  await kit.quiet()
   expect(signIns(kit)).toEqual([SIGN_IN, SIGN_IN, SIGN_IN])
+  expect(kit.commands().filter((args) => args.slice(0, 2).join(' ') === 'thread create')).toHaveLength(1)
+  expect(Object.keys(kit.world.delta().threads)).toHaveLength(1)
   expect(notes(kit).join('\n')).not.toContain('Stopped waiting')
   expect(notes(kit).join('\n')).not.toContain('already in progress')
 })
@@ -385,6 +393,7 @@ test('setup installs Delta and finishes browser sign-in before creating a team a
   const release = world.hold('auth wait')
   await pi.start()
   await delta.settle()
+  await delta.quiet()
   expect(signIns(delta)).toEqual([])
   const setup = pi.command('delta', 'setup')
   await delta.until(() => notes(delta!).some((text) => text.includes('Finish signing in')), 'the browser sign-in')

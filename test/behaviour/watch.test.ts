@@ -68,8 +68,10 @@ test('a gone thread pauses sharing with its reason instead of reconnecting', asy
     'the pause to be noted',
   )
   expect(paused).toContain('/delta-share')
+  await kit.quiet()
   const count = watches(kit).length
   await kit.advance(120_000)
+  await kit.quiet()
   expect(watches(kit)).toHaveLength(count)
   expect(band(kit)).toContain('not_visible')
   // A delivery pause stops delivery, not pi: the prompt is accepted while the reason stays shown.
@@ -87,8 +89,10 @@ const pausesOn = (code: string) => async () => {
     retryable: false,
   })
   await kit.until(() => band(kit).includes(code), 'the pause to be shown')
+  await kit.quiet()
   const count = watches(kit).length
   await kit.advance(120_000)
+  await kit.quiet()
   expect(watches(kit)).toHaveLength(count)
   expect(band(kit)).toContain(code)
   // The pause stops delivery, not pi: the prompt is accepted while the reason stays shown.
@@ -196,6 +200,7 @@ test('reconnection retries with capped backoff and session end stops the idle ch
   await again.until(() => !watching(), 'the watch to drop')
   expect(band(again).startsWith(LIVE)).toBe(true)
   await again.advance(999)
+  await again.quiet()
   expect(attempts()).toBe(1)
   let inspections = statuses(again).length
   await again.advance(1)
@@ -208,20 +213,24 @@ test('reconnection retries with capped backoff and session end stops the idle ch
   expect(band(again).startsWith(LIVE)).toBe(true)
   inspections = statuses(again).length
   await again.advance(1999)
+  await again.quiet()
   expect(attempts()).toBe(2)
   await again.advance(1)
   await again.until(() => attempts() === 3 && watching(), 'the idle third attempt')
   expect(band(again).startsWith(LIVE)).toBe(true)
   // Past the grace, counted from the drop, the band admits to reconnecting.
   await again.advance(2000)
+  await again.quiet()
   expect(band(again).startsWith(PENDING)).toBe(true)
   expect(statuses(again)).toHaveLength(inspections)
   // Participation lasts as long as a watch, so every reconnection asks for it again.
   expect(watches(again).every((args) => args.includes('--participate'))).toBe(true)
   await end(again)
   expect(watching()).toBe(false)
+  await again.quiet()
   const ended = attempts()
   await again.advance(120_000)
+  await again.quiet()
   expect(attempts()).toBe(ended)
 })
 
@@ -251,6 +260,7 @@ const endsDuringRead = (nth: 1 | 2) => async () => {
   await ending
   await starting
   await again.advance(60_000)
+  await again.quiet()
   expect(watches(again)).toEqual([])
   expect(again.running()).toEqual([])
 }
@@ -280,6 +290,7 @@ test('ending during watch CLI resolution never spawns the obsolete command', asy
   await ending
   await starting
   await again.advance(60_000)
+  await again.quiet()
   expect(watches(again)).toEqual([])
   expect(statuses(again)).toEqual([])
   expect(again.running()).toEqual([])
@@ -306,6 +317,7 @@ test('ending during status CLI resolution never spawns the obsolete command', as
   await ending
   await starting
   await again.advance(60_000)
+  await again.quiet()
   expect(watches(again)).toHaveLength(1)
   expect(statuses(again)).toEqual([])
   expect(again.running()).toEqual([])
@@ -340,23 +352,35 @@ test('readiness with lost acknowledged history fails closed without reset or rei
     for (const producer of Object.values<any>(state.producers)) producer.next = 1
   })
   const delivered = structuredClone(records(kit))
-  const again = await resume(kit)
+  // The share exported the conversation, its first prompt included.
+  expect(JSON.stringify(delivered)).toContain('"text":"one"')
+  const again = await resume(kit, false)
+  const before = appends(again)
+  await again.pi.start()
   await again.until(() => watches(again).length > 0, 'the watch to start')
   await again.advance(10_000)
   // A shell command run while Delta disagrees stays in the outbox.
   await again.pi.shell('echo queued while mismatched')
-  const before = appends(again)
+  await again.quiet()
+  expect(appends(again)).toBe(before)
+  expect(records(again)).toEqual(delivered)
+  // The conversation was exported once, by the share: nothing stages it again.
+  expect(stagedText((await binding(again)).pending)).not.toContain('"text":"one"')
   expect(await again.pi.prompt('continue')).toBe('handled')
   expect(appends(again)).toBe(before)
   expect(records(again)).toEqual(delivered)
-  // Explicit sharing is not a reset either.
-  again.pi.answers.push(SHARE)
+  // Explicit sharing is not a reset either. The session is shared with Zed already, so the share keeps that.
+  again.pi.answers.push((dialog) => dialog.options?.find((option) => option === 'Keep current sharing'))
   await again.pi.command('delta', 'share')
   await again.until(() => !band(again).includes('…'), 'the share to end')
+  await again.quiet()
   expect(again.pi.noticeTexts().some((text) => text.startsWith('Delta: Shared'))).toBe(false)
+  expect(again.pi.noticeTexts().at(-1)).toMatch(/^Delta sharing failed: Delta has lost acknowledged client history/)
   expect(appends(again)).toBe(before)
   expect(records(again)).toEqual(delivered)
-  expect(setupCommands(again)).toEqual([])
+  expect(stagedText((await binding(again)).pending)).not.toContain('"text":"one"')
+  // The share attaches and publishes the same thread again before it waits for the watch; it creates none.
+  expect(setupCommands(again)).toEqual(['worktree attach', 'thread share'])
 })
 
 test('unavailable inspection pauses participation and preserves binding and pending files across resume', async () => {

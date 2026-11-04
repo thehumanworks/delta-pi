@@ -138,6 +138,7 @@ test('share and join refuse a session without an interactive surface before cont
     )
   }
   await delta.advance(0)
+  await delta.quiet()
   expect(delta.commands()).toEqual([])
   expect(exports(delta)).toBe(0)
   expect(await binding(delta)).toBeUndefined()
@@ -162,6 +163,8 @@ test('a checkout Delta manages for another thread is named in the share failure,
 test('a staging record write failure contacts no Delta command and leaves no partial import', async () => {
   delta = await startDelta({ policy: MANUAL })
   await delta.pi.prompt('initial')
+  // Startup's background work, such as checking for a Delta update, is done before the baseline.
+  await delta.quiet()
   const commands = delta.commands().length
   const repaired = delta.disk.fail('write', '/outbox/', { times: 1000 })
   expect(await share(delta)).toContain('failed')

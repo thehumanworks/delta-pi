@@ -395,11 +395,14 @@ test('queued lifecycle survives disconnect and reconnect without replaying a pro
   await kit.until(model.asked, 'the turn to start')
   kit.world.endWatch(thread)
   await kit.until(() => shown(kit).includes("stopped pi's turn"), 'the drop to stop the turn')
+  expect(kit.pi.aborts).toBe(1)
   model.release()
   await kit.whileTimePasses(turn)
   // The turn's start and its end are saved, once each, before anything reaches Delta.
-  const pending = (await bindingOf(kit, session)).pending as { sequence: number }[]
-  expect(pending.length).toBeGreaterThanOrEqual(2)
+  const pending = (await bindingOf(kit, session)).pending as { files: string[] }[]
+  const queued = pending.map((entry) => JSON.parse(entry.files.map((file) => readFileSync(file, 'utf8')).join('')))
+  expect(turnStates(queued, 'running')).toHaveLength(1)
+  expect(turnStates(queued, 'idle')).toEqual(turnStates(queued, 'running'))
   kit.world.stopFailing('thread append')
   await kit.advance(60_000)
   await kit.until(async () => !(await bindingOf(kit, session)).pending.length, 'the queue to drain')
@@ -430,10 +433,13 @@ test('a prompt while a dropped watch is torn down is refused, then accepted once
   expect(shown(kit)).toContain('checkout sharing is paused')
   release()
   await kit.until(() => shown(kit).includes('Connection interrupted'), 'the teardown to finish')
+  // The teardown stops pi's running turn, once.
+  await kit.until(() => kit.pi.aborts > 0, "pi's turn to be stopped")
   model.release()
   await kit.whileTimePasses(turn)
   await kit.advance(1_000)
   expect(await kit.pi.prompt('after reconnect')).toBe('settled')
+  expect(kit.pi.aborts).toBe(1)
   expect(kit.pi.messages().filter((message) => message.role === 'user')).toHaveLength(2)
 })
 
@@ -444,6 +450,12 @@ test('a joined delivery refusal lifts only after explicit successful same-thread
   await kit.pi.prompt('run echo still queued')
   await kit.until(() => shown(kit).includes('Delta sharing paused'), 'the refusal')
   expect(await kit.pi.prompt('cannot run yet')).toBe('handled')
+  // The refused turn is held in the outbox, and nothing reached the thread.
+  expect(recordsOf(kit, thread)).toEqual([])
+  const queued = ((await bindingOf(kit, session)).pending as { files: string[] }[]).map((entry) =>
+    JSON.parse(entry.files.map((file) => readFileSync(file, 'utf8')).join('')),
+  )
+  expect(JSON.stringify(queued)).toContain('still queued')
   // Watching again cannot lift a refusal.
   kit.world.endWatch(thread)
   await kit.until(() => shown(kit).includes('Connection interrupted'), 'the watch to drop')
@@ -465,9 +477,11 @@ test('a joined delivery refusal lifts only after explicit successful same-thread
     'the queued records and the new turn',
   )
   const records = recordsOf(kit, thread)
-  // The refused turn's records went once each, and none of the refused prompts did.
+  // The refused turn's records went once each, as they were queued, and then only the authorized turn's;
+  // none of the refused prompts did.
   expect(records.map((record) => record.sequence)).toEqual(records.map((_, index) => index + 1))
-  expect(records.filter((record) => JSON.stringify(record.update).includes('still queued')).length).toBeGreaterThan(0)
+  expect(records.slice(0, queued.length).map(({ producer, acknowledge, name, ...record }) => record)).toEqual(queued)
+  expect(new Set(records.slice(queued.length).map((record) => record.turnSequence)).size).toBe(1)
   for (const refused of ['cannot run yet', 'reconnect cannot authorize', 'failed explicit check'])
     expect(JSON.stringify(records)).not.toContain(refused)
   expect(ran(kit, 'thread create')).toEqual([])
@@ -876,6 +890,7 @@ test('worktrees added and removed live update the mounts, tell Claude and the pe
   await kit.advance(1_000)
   await kit.until(() => ran(kit, 'thread watch').length > watches && band(kit).includes(LIVE), 'the watch to reconnect')
   await kit.settle()
+  await kit.quiet()
   expect(mounts()).toBe(joinMounts)
   expect(worktreeNotes(kit)).toEqual([])
 

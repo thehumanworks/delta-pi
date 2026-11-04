@@ -82,6 +82,7 @@ test('a stalled startup check cannot block prompts or sharing and expires withou
   // The held check answers once released; nothing waits for it any more.
   await new Promise((resolve) => setTimeout(resolve, 100))
   await delta.settle()
+  await delta.quiet()
   expect(notices(delta).some((text) => text.includes('0.24.0 is available'))).toBe(false)
 })
 
@@ -814,6 +815,7 @@ describe('plugin updates', () => {
     expect(extension.fetches).toHaveLength(1)
     release()
     await kit.settle()
+    await kit.quiet()
     expect(notices(kit).some((text) => text.includes(`Delta extension ${NEXT}`))).toBe(false)
     expect(extensionNotice(kit)).toBeUndefined()
     expect(extension.piUpdates).toEqual([])
@@ -831,6 +833,7 @@ describe('plugin updates', () => {
     await quiet(kit)
     release()
     await kit.settle()
+    await kit.quiet()
     await passes(kit, HOUR)
     expect(extension.fetches).toHaveLength(1)
     expect(notices(kit).some((text) => text.includes(`Delta extension ${NEXT}`))).toBe(false)
@@ -950,11 +953,12 @@ describe('startup and commands', () => {
             .filter((arg) => arg !== '--json')
             .slice(0, 2)
             .join(' '),
+          call.env.integration,
           call.env.form,
         ]),
     ).toEqual([
-      ['thread share', 'dedicated_command'],
-      ['thread share', 'delta_subcommand'],
+      ['thread share', 'pi', 'dedicated_command'],
+      ['thread share', 'pi', 'delta_subcommand'],
     ])
   })
 })
