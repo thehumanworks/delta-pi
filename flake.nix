@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     deltanix = {
-      url = "github:thehumanworks/deltanix";
+      url = "github:zed-industries/delta-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -38,7 +38,7 @@
               ripgrep
               prettier
               nixfmt
-              deltanix.packages.${system}.delta-cli
+              deltanix.packages.${system}.delta
             ];
 
             SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
