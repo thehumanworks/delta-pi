@@ -420,6 +420,9 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
         await deliverNote(host, ctx.sessionManager.getSessionId(), event.text)
         return { action: 'handled' }
       }
+      // What pi committed before the refused prompt, such as a shell command, is staged now, as the
+      // plugin stages a tool call while sharing is refused, for the next delivery to send.
+      await recordCommitted(host)
       refuse(ctx, event.text, refusal, 'warning')
     } catch (error) {
       refuse(

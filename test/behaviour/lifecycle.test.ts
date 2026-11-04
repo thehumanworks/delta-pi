@@ -2,7 +2,7 @@
 // lost, leaves for a later pi to retry, and what resuming a shared session does and does not do. Ported
 // from the upstream plugin's engine tests (hooks/register.test.ts, "sharing") onto the kit; a restart is
 // a new pi process resuming the session on the same machine.
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { type Kit, startDelta } from '../kit/index.ts'
@@ -264,7 +264,7 @@ async function resumeObserves(state: 'attached' | 'unshared') {
   const second = await resumed(first)
   // A shell command is recorded either way. pi commits it at the next event the extension reads, the
   // prompt after it: delivered at once while the checkout is attached; while the thread is not
-  // published that prompt is refused, so it waits in the session for the first turn after the share.
+  // published that prompt is refused, and the command is staged for the share to deliver.
   await second.pi.shell('echo after resume')
   const submitted = await second.pi.prompt('continue after resume')
   if (state === 'attached') {
@@ -277,7 +277,9 @@ async function resumeObserves(state: 'attached' | 'unshared') {
     await second.advance(0)
     await second.quiet()
     expect(records(second)).toHaveLength(shared)
-    expect(await staged(second)).toEqual([])
+    const pending = (await binding(second)).pending
+    expect(pending.map((entry: { sequence: number }) => entry.sequence)).toEqual([shared + 1])
+    expect(readFileSync(pending[0].files[0], 'utf8')).toContain('echo after resume')
   }
   expect(setupCommands(second)).toEqual([])
   expect(checkouts(second)).toEqual([{ ...checkout!, state: 'mounted' }])
