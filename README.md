@@ -15,8 +15,14 @@ It is a port of Zed Industries' [Delta plugin for Claude Code](https://github.co
 You need pi 1.4.0 or newer (older versions show a warning but are not blocked) and Git.
 
 ```sh
-pi install npm:@nothumanwork/pi-delta   # once published
-pi install /path/to/delta-pi           # from a checkout
+pi install npm:@nothumanwork/pi-delta
+```
+
+Alternatively, install directly from GitHub or a local checkout:
+
+```sh
+pi install git:github.com/thehumanworks/delta-pi
+pi install /path/to/delta-pi
 pi -e /path/to/delta-pi/index.ts       # for one run only
 ```
 
@@ -175,6 +181,32 @@ The end-to-end tests in `test/e2e` run the real `pi --mode rpc` with this extens
 PATH=$PWD/test/e2e/bin:$PATH FAKE_DELTA_STATE=/tmp/fake-delta PI_CODING_AGENT_DIR=/tmp/pi-agent \
   pi -e ./index.ts -e ./test/e2e/faux-model.ts --provider faux --model faux-1
 ```
+
+## Publishing to npm
+
+The package is published as `@nothumanwork/pi-delta`. You need npm publish access to the
+`@nothumanwork` scope, Node.js 22.19.0 or newer, and Bun (to run the tests). Pi loads the
+TypeScript sources directly; no build step is needed.
+
+From a clean checkout:
+
+```sh
+npm ci
+npm pack --dry-run                   # inspect the release contents
+npm login
+npm whoami                          # confirm the publishing account
+npm publish                         # public access is configured in package.json
+```
+
+`npm publish` runs the type check and the full test suite through `prepublishOnly` and stops
+if either fails. Tests use a fake Delta CLI, never a real Delta account. npm may ask for
+second-factor authentication. The package includes only `index.ts`, `src/`, `README.md`,
+`LICENSE`, and npm\'s required `package.json`; tests and local credentials are not shipped.
+
+For subsequent releases, commit your changes, run `npm version patch` (or `minor` / `major`),
+then `npm publish` and `git push --follow-tags`. Published versions cannot be overwritten.
+After publishing, users install with `pi install npm:@nothumanwork/pi-delta` and update with
+`pi update npm:@nothumanwork/pi-delta`.
 
 ## License
 
