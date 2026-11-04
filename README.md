@@ -6,7 +6,7 @@ Anyone on your team can then open the thread and join it, from their own pi sess
 [delta.dev](https://delta.dev), or from the Delta app.
 
 It is a port of Zed Industries' [Delta plugin for Claude Code](https://github.com/zed-industries/delta-claude)
-(upstream commit `ac769c6`, plugin 0.1.32), following Delta's guide to
+(upstream commit `ac769c6`, plugin 0.1.32, pinned in [`UPSTREAM`](UPSTREAM)), following Delta's guide to
 [building a coding agent plugin](https://delta.dev/docs/cli/build-a-plugin). Everything goes through the
 `delta` CLI's recording contract (version 8, Delta 0.22.0 or newer).
 
@@ -140,7 +140,9 @@ holds each session's binding to its thread, `outbox/` the records not yet confir
 ## How it differs from the Claude Code plugin
 
 The recording, delivery, retry, watch, share, setup and sign-in logic is the plugin's, ported with
-its tests. What Claude Code's host provides differently is adapted:
+its tests. This section is the summary; [`docs/upstream/`](docs/upstream/README.md) is the complete,
+authoritative map of every upstream module to its counterpart here, built from the pinned commit.
+What Claude Code's host provides differently is adapted:
 
 | Claude Code plugin | This extension |
 | --- | --- |

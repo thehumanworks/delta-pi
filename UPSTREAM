@@ -1,0 +1,7 @@
+# The delta-claude commit this extension is a port of. The one place the pin lives: AGENTS.md,
+# README.md, docs/upstream/ and the delta-claude-parity skill refer to it, and test/upstream.test.ts
+# checks they agree. scripts/upstream-diff.sh compares it with the branch head.
+repository=https://github.com/zed-industries/delta-claude
+branch=main
+commit=ac769c681ba7a95ec7347b591f0858857a1a9e80
+version=0.1.32

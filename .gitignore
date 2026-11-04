@@ -3,3 +3,6 @@ node_modules/
 .DS_Store
 *.tgz
 credentials.json
+
+# scripts/upstream-diff.sh keeps its clone of delta-claude here.
+.upstream/
