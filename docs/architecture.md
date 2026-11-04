@@ -87,9 +87,15 @@ and what they are doing.
   conversation so far, attaches and mounts the checkout, and publishes to the chosen audience.
 - `/delta join` (`src/sharing/join.ts`) mounts a thread's worktrees for a new pi session in the thread's
   folder and switches pi to it; that session finishes the join (`completeJoinTransition`).
-- A recorded session exports its thread through `DELTA_PI_PARENT`; a pi process it starts records into
-  a child thread (`src/subagents/subagents.ts`), sharing the parent's worktrees or attaching its own
-  checkout.
+- Every session exports a link to itself through `DELTA_PI_PARENT`; a pi process it starts records into
+  a child thread once the session is recorded (`src/subagents/subagents.ts`), sharing the parent's
+  worktrees or attaching its own checkout, which it releases before its pi exits. A subagent's own
+  subagents nest under it.
+- `delta_thread` (`src/subagents/thread-runs.ts`, with the pure rules in `delta-threads.ts`) runs another
+  thread of the conversation as a child `pi --mode json` (`pi-child.ts`, the only part that speaks pi's
+  command line), whose binding the parent seeds so it records on that thread. A session's end stops its
+  thread runs and waits for them before it releases mounts, within one shutdown budget
+  (`subagents.ts`).
 
 ## Tests
 
