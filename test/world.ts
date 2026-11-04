@@ -93,7 +93,8 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
     },
     /**
      * Make `times` runs of `command`, such as `worktree list`, fail with Delta's error `code`, transient
-     * unless `retryable` is false, after letting `after` runs through.
+     * unless `retryable` is false, after letting `after` runs through. A `thread append` given `accept`
+     * fails only after Delta accepted and acknowledged that many of its leading records.
      */
     fail(
       command: string,
@@ -103,16 +104,33 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
         code = 'process_failed',
         retryable = true,
         reason,
-      }: { times?: number; after?: number; code?: string; retryable?: boolean; reason?: string } = {},
+        accept,
+      }: { times?: number; after?: number; code?: string; retryable?: boolean; reason?: string; accept?: number } = {},
     ) {
       writeFileSync(
         join(state, `fail-${command.replaceAll(' ', '-')}`),
-        JSON.stringify({ after, times, code, retryable, ...(reason ? { reason } : {}) }),
+        JSON.stringify({ after, times, code, retryable, ...(reason ? { reason } : {}), accept }),
       )
+    },
+    /**
+     * Supersede the producer turn `sequence` of `thread`, as another participant taking the thread does:
+     * Delta fences the records the turn appends from now on. The watch says so only when a test also
+     * reports it (`remote`).
+     */
+    supersede(thread: string, sequence: number) {
+      const path = join(state, `superseded-${thread}.json`)
+      const previous: number[] = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : []
+      writeFileSync(path, JSON.stringify([...previous, sequence]))
     },
     /** Let `command` run normally again after `fail`. */
     stopFailing(command: string) {
       rmSync(join(state, `fail-${command.replaceAll(' ', '-')}`), { force: true })
+    },
+    /** Make `thread status` report `thread`'s checkouts detached, or, with `false`, attached again. */
+    detach(thread: string, detached = true) {
+      const path = join(state, `detached-${thread}`)
+      if (detached) writeFileSync(path, '')
+      else rmSync(path, { force: true })
     },
     /** Make `thread watch` report `text` for `thread` as it is, such as a malformed or partial line. */
     remoteRaw(thread: string, text: string) {
@@ -211,6 +229,10 @@ export function world(options: { policy?: Record<string, unknown> } = {}) {
       writeFileSync(path, JSON.stringify({ after, ...(times === undefined ? {} : { times }) }))
       return () => rmSync(path, { force: true })
     },
+    /** Release every held run of `command`, as the function `hold` returned does. */
+    stopHolding(command: string) {
+      rmSync(join(state, `hold-${command.replaceAll(' ', '-')}`), { force: true })
+    },
     /** Make `thread invite` refuse these addresses, each with Delta's message for why. */
     inviteFailures(failures: Record<string, string>) {
       writeFileSync(join(state, 'invite-failures.json'), JSON.stringify(failures))
@@ -274,8 +296,8 @@ export const RECORDED_TURNS = [
   'state_update',
   'user_message',
   'agent_message',
-  'state_update',
   'session_info_update',
+  'state_update',
   'state_update',
   'user_message',
   'agent_message',

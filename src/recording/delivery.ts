@@ -12,6 +12,7 @@ import {
   type Binding,
   boundDirectory,
   digest,
+  drains,
   isPaused,
   load,
   pauseCheckout,
@@ -95,12 +96,19 @@ const LIVE_ACTIVITY_ORIGIN = {
   interaction_surface: 'cli',
 } as const
 type LiveActivityKind = 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'edit'
-let drainTask: Promise<void> | undefined
 /** A Fork & Restore or Discard the person started, so the two cannot both run at once. */
 let resolving = false
 /** The arguments of each recorded tool call and the file each write replaced, until its result is recorded. */
 const toolInputs = new Map<string, unknown>()
 const priorFiles = new Map<string, PriorFile>()
+/**
+ * The last write or edit to each file whose result is not yet recorded. pi prepares a reply's calls
+ * before running any and runs writes to one file in order, so a later write replaces what this one
+ * leaves, not what is on disk while the calls are prepared.
+ */
+const pendingWrites = new Map<string, { call: string; content?: string }>()
+/** The earlier call each later write's prior contents were taken from, should that call fail. */
+const writtenAfter = new Map<string, string>()
 /** Builds a unified patch between two texts; `index.ts` supplies pi's own, which its edit tool uses. */
 let unifiedPatch: Translation['patch']
 /** A write replacing a file larger than this records which file it changed, without its patch. */
@@ -563,8 +571,13 @@ export async function recoverExecution(host: Host, session: string) {
 
 export async function drain(host: Host, session: string): Promise<void> {
   if (activation.session !== session || isPaused(stateFor(session))) return
-  if (drainTask) {
-    await drainTask
+  // One delivery of a session runs at a time in the pi process, even when the runtime that started it
+  // has ended: two would each acknowledge the same records against a binding the other changed.
+  const running = drains.get(session)
+  if (running) {
+    // A delivery an ended runtime started reports its own failure, if any, where it can; this one
+    // only waits for it.
+    await (ownDrains.has(running) ? running : running.catch(() => undefined))
     if (activation.session !== session || isPaused(stateFor(session))) return
     if ((await serial(() => load(host, session))).pending.length) return drain(host, session)
     return
@@ -582,16 +595,19 @@ export async function drain(host: Host, session: string): Promise<void> {
     },
     (error: unknown) => failDelivery(host, session, error),
   )
-  drainTask = task
+  drains.set(session, task)
+  ownDrains.add(task)
   try {
     await task
   } finally {
-    if (drainTask === task) drainTask = undefined
+    if (drains.get(session) === task) drains.delete(session)
   }
 }
 
 /** What the band says while Delta refuses an offline session's recorded changes, beside the choice it offers. */
 export const OFFLINE_REFUSAL = "Delta couldn't publish this thread's offline changes."
+/** The deliveries this runtime started, as opposed to an ended runtime's still under way. */
+const ownDrains = new WeakSet<Promise<void>>()
 
 /**
  * Classify a failed drain, schedule its retry or pause sharing, and show the person why.
@@ -850,6 +866,8 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
   // Every call of the run has its result by now; what was kept for one that never reported is dropped.
   toolInputs.clear()
   priorFiles.clear()
+  pendingWrites.clear()
+  writtenAfter.clear()
   stopChildTurn()
   if (sequence !== undefined) {
     try {
@@ -867,13 +885,31 @@ export async function completeTurn(host: Host, stopReason: 'end_turn' | 'cancell
   }
 }
 
-/** Remember what a write call replaces, so its record carries the change as a patch. */
-export async function rememberPriorFile(host: Host, toolCallId: string, input: unknown) {
+/**
+ * Remember what a write call replaces, so its record carries the change as a patch, and which file an
+ * edit call changes, so a write after it in the same reply does not take the file from before it.
+ */
+export async function rememberPriorFile(host: Host, toolCallId: string, input: unknown, tool = 'write') {
   const path = isJsonObject(input) && typeof input.path === 'string' ? input.path : undefined
   if (!path) return
   const binding = stateFor(host.session.id()).binding
   if (!binding?.snapshot) return
   const absolute = absolutePath(path, host.session.cwd())
+  const earlier = pendingWrites.get(absolute)
+  const content = isJsonObject(input) && typeof input.content === 'string' ? input.content : undefined
+  pendingWrites.set(absolute, { call: toolCallId, ...(tool === 'write' && content !== undefined ? { content } : {}) })
+  if (tool !== 'write') return
+  if (earlier) {
+    // What an earlier write leaves is its content; what an earlier edit leaves is not known here.
+    writtenAfter.set(toolCallId, earlier.call)
+    priorFiles.set(
+      toolCallId,
+      earlier.content !== undefined && earlier.content.length <= PRIOR_FILE_LIMIT
+        ? { existed: true, text: earlier.content }
+        : { existed: true },
+    )
+    return
+  }
   try {
     if (!(await exists(absolute))) {
       priorFiles.set(toolCallId, { existed: false })
@@ -888,6 +924,24 @@ export async function rememberPriorFile(host: Host, toolCallId: string, input: u
   } catch {
     priorFiles.set(toolCallId, { existed: true })
   }
+}
+
+/**
+ * Forget what was kept for a call whose result is recorded. A write that failed left the file as it
+ * found it, so a later write to the file replaced that instead.
+ */
+function settleToolCall(toolCallId: string, failed: boolean) {
+  const prior = priorFiles.get(toolCallId)
+  for (const [later, earlier] of writtenAfter)
+    if (earlier === toolCallId) {
+      writtenAfter.delete(later)
+      if (failed && prior) priorFiles.set(later, prior)
+      else if (failed) priorFiles.delete(later)
+    }
+  writtenAfter.delete(toolCallId)
+  for (const [path, pending] of pendingWrites) if (pending.call === toolCallId) pendingWrites.delete(path)
+  toolInputs.delete(toolCallId)
+  priorFiles.delete(toolCallId)
 }
 
 /** The translation context for a binding's records. */
@@ -956,8 +1010,9 @@ export function recordFromStart(
  * Record, in order, each message pi committed to the session since the last call. Pi commits a message
  * once every extension's `message_end` has run, so this records what the session keeps, as any
  * extension redacted or replaced it, and the shell commands the person ran, which have no `message_end`.
+ * Resolves whether a reply was among them.
  */
-export function recordCommitted(host: Host): Promise<void> {
+export function recordCommitted(host: Host): Promise<boolean> {
   const step = recording.then(async () => {
     const committed = host.session.committed()
     const fresh = committed.slice(seenMessages)
@@ -970,8 +1025,12 @@ export function recordCommitted(host: Host): Promise<void> {
       } catch (error) {
         host.ui.debug(`Recording a message failed: ${errorText(error)}`)
       }
+    return fresh.some(({ message }) => message.role === 'assistant')
   })
-  recording = step.catch(() => {})
+  recording = step.then(
+    () => {},
+    () => {},
+  )
   return step
 }
 
@@ -1009,11 +1068,8 @@ export async function recordMessage(host: Host, message: AgentMessage, id: strin
     if (tool && !runtime.toolTurns.has(tool)) runtime.toolTurns.set(tool, turnSequence)
     await persistUpdates(host, session, [update], tool ? runtime.toolTurns.get(tool) : turnSequence)
   }
-  if (recorded.role === 'toolResult') {
-    toolInputs.delete(recorded.toolCallId)
-    priorFiles.delete(recorded.toolCallId)
-    runtime.toolTurns.delete(recorded.toolCallId)
-  }
+  if (recorded.role === 'toolResult') settleToolCall(recorded.toolCallId, recorded.isError)
+  if (recorded.role === 'toolResult') runtime.toolTurns.delete(recorded.toolCallId)
   if (!runtime.captureFailure && runtime.binding.thread)
     void drain(host, session).catch((error: unknown) => report(host, error))
 }

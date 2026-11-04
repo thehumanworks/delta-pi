@@ -34,9 +34,9 @@ import {
   activation,
   cancelRequestsOf,
   endActivationOf,
+  forgetRuntime,
   markEnded,
   resetRuntime,
-  sessions,
   stateFor,
 } from './src/core/session-state.ts'
 import { writeExclusive } from './src/core/files.ts'
@@ -437,7 +437,9 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   // pi commits without a message_end.
   const recordFrom = async (_event: unknown, ctx: ExtensionContext) => {
     context = ctx
-    await recordCommitted(host)
+    // A reply names an untitled session's thread once it is recorded, without waiting for its turn to
+    // end, as the plugin takes the title Claude chose at its first reply.
+    if (await recordCommitted(host)) await recordTitle(host, ctx.sessionManager.getSessionId())
   }
   pi.on('message_start', recordFrom)
   pi.on('message_end', recordFrom)
@@ -487,8 +489,8 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
   pi.on('tool_call', async (event, ctx) => {
     context = ctx
     // A call another tool made has no result in the transcript, so its record would never be released.
-    if (event.toolName === 'write' && event.parentToolCallId === undefined)
-      await rememberPriorFile(host, event.toolCallId, event.input)
+    if ((event.toolName === 'write' || event.toolName === 'edit') && event.parentToolCallId === undefined)
+      await rememberPriorFile(host, event.toolCallId, event.input, event.toolName)
   })
 
   pi.on('agent_settled', async (event, ctx) => {
@@ -552,7 +554,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     // A subagent's own checkout is released before its pi exits, so whatever started it may remove it.
     if (event.reason !== 'reload') await releaseChildCheckout(host, binding)
     await releaseOnEnd(host, session, event.reason)
-    sessions.delete(session)
+    forgetRuntime(session, runtime)
     tui = undefined
     context = undefined
   })

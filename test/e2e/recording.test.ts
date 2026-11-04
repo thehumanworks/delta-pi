@@ -221,8 +221,8 @@ test('a print-mode run in a repository that syncs automatically is recorded befo
     'state_update',
     'user_message',
     'agent_message',
-    'state_update',
     'session_info_update',
+    'state_update',
   ])
   // Nobody could sign in or answer setup, and the checkout's mount ended with pi.
   expect(w.calls().some((call) => call.argv.includes('login'))).toBe(false)

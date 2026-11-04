@@ -11,8 +11,11 @@ import type * as Files from '../../src/core/files.ts'
 
 /** What the extension does to a file: each of files.ts's operations is one of these. */
 export type DiskOperation = 'read' | 'write' | 'remove' | 'list'
-/** Which paths a fault applies to: those containing a text, matching a pattern, or a test's choice. */
-export type PathMatch = string | RegExp | ((path: string) => boolean)
+/**
+ * Which paths a fault applies to: those containing a text, matching a pattern, or a test's choice,
+ * which for a write also sees the text being written.
+ */
+export type PathMatch = string | RegExp | ((path: string, text?: string) => boolean)
 
 type Fault = {
   operation: DiskOperation
@@ -39,15 +42,15 @@ function state(): Registry {
   return (global[registry] ??= { faults: [], touched: [], contents: [] })
 }
 
-const matches = (match: PathMatch, path: string) =>
-  typeof match === 'string' ? path.includes(match) : match instanceof RegExp ? match.test(path) : match(path)
+const matches = (match: PathMatch, path: string, text?: string) =>
+  typeof match === 'string' ? path.includes(match) : match instanceof RegExp ? match.test(path) : match(path, text)
 
 /** Apply the faults the test set for this run of `operation` on `path`. */
-async function check(operation: DiskOperation, path: string) {
+async function check(operation: DiskOperation, path: string, text?: string) {
   const { faults, touched } = state()
   touched.push({ operation, path })
   for (const fault of [...faults]) {
-    if (fault.operation !== operation || !matches(fault.match, path)) continue
+    if (fault.operation !== operation || !matches(fault.match, path, text)) continue
     if (fault.after > 0) {
       fault.after--
       continue
@@ -124,9 +127,9 @@ export function faultyFiles(real: typeof Files): typeof Files {
     exists: async (path) => (await check('read', path), contentOf(path) !== undefined || real.exists(path)),
     readText: async (path) => (await check('read', path), contentOf(path) ?? real.readText(path)),
     readIfExists: async (path) => (await check('read', path), contentOf(path) ?? real.readIfExists(path)),
-    writePrivate: async (path, text) => (await check('write', path), real.writePrivate(path, text)),
-    writeExclusive: async (path, text) => (await check('write', path), real.writeExclusive(path, text)),
-    writeShared: async (path, text) => (await check('write', path), real.writeShared(path, text)),
+    writePrivate: async (path, text) => (await check('write', path, text), real.writePrivate(path, text)),
+    writeExclusive: async (path, text) => (await check('write', path, text), real.writeExclusive(path, text)),
+    writeShared: async (path, text) => (await check('write', path, text), real.writeShared(path, text)),
     list: async (path) => (await check('list', path), real.list(path)),
     size: async (path) => (await check('read', path), real.size(path)),
     remove: async (path) => (await check('remove', path), real.remove(path)),

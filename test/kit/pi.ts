@@ -19,8 +19,9 @@ import { type ExtensionAPI, initTheme, type Theme } from '@earendil-works/pi-cod
 import type { Component } from '@earendil-works/pi-tui'
 import type { Platform } from '../../src/core/host.ts'
 
-/** What the model answers: text, tool calls, and how its reply ended. */
+/** What the model answers: its thinking, text, tool calls, and how its reply ended. */
 export type Reply = {
+  thinking?: string
   text?: string
   /** Calls of pi's `bash` and `write`, or of a tool an extension registered. */
   calls?: { name: string; arguments: Record<string, unknown> }[]
@@ -163,6 +164,14 @@ export class FakePi {
    * reports such a failure on its own error channel, never to the extension.
    */
   failMessages = 0
+  /**
+   * How pi runs a reply's tool calls: `parallel`, pi's default, prepares every call (its
+   * `tool_execution_start` and `tool_call`) before running any, and adds their results once all have
+   * run; `sequential` prepares, runs and adds each call in turn.
+   */
+  toolExecution: 'parallel' | 'sequential' = 'parallel'
+  /** Other extensions' handlers, which pi runs after this extension's, by event. */
+  readonly others = new Map<string, Handler[]>()
   model: Model = echoModel
   /** The tools declared to the model, as `getActiveTools` reports them. */
   activeTools: string[] = ['read', 'bash', 'edit', 'write']
@@ -224,6 +233,7 @@ export class FakePi {
       this.steering.push(text)
       return 'steered'
     }
+    await this.entering?.()
     this.run = this.agentRun(user(text))
     await this.run
     return 'settled'
@@ -307,6 +317,12 @@ export class FakePi {
     this.session = outcome ? new FakeSession(session.id, outcome.cwd, file) : session
     await this.start(reason)
     return { cancelled: false }
+  }
+
+  /** Name the session, as `/name` does, and tell the extension. */
+  async rename(name: string) {
+    this.session.name = name
+    await this.emit('session_info_changed', { name })
   }
 
   /** Start a new empty session in `cwd`, as `/new` does. */
@@ -421,6 +437,12 @@ export class FakePi {
   }
 
   /**
+   * Awaited once the input handlers admitted a prompt and before pi starts its run, where pi checks the
+   * model's credentials: pi is still idle, and its run not yet under way.
+   */
+  entering: (() => Promise<void>) | undefined
+
+  /**
    * Awaited as a run starts, before agent_start, where pi runs other extensions' before_agent_start: a
    * prompt sent meanwhile is queued into the run.
    */
@@ -457,22 +479,7 @@ export class FakePi {
         : await this.model(this.messages(), this.controller.signal)
       const assistant = this.assistant(reply)
       await this.message(assistant)
-      const results: AgentMessage[] = []
-      for (const call of reply.calls && !this.aborted ? toolCalls(assistant) : []) {
-        const outcome = await this.emit('tool_call', {
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.arguments,
-        })
-        await this.emit('tool_execution_start', { toolCallId: call.id, toolName: call.name, args: call.arguments })
-        const result =
-          isObject(outcome) && outcome.block === true
-            ? toolResult(call, 'Blocked by an extension', true)
-            : await this.execute(call)
-        await this.emit('tool_execution_end', { toolCallId: call.id, toolName: call.name, result, isError: false })
-        await this.message(result)
-        results.push(result)
-      }
+      const results = reply.calls && !this.aborted ? await this.runTools(toolCalls(assistant)) : []
       await this.emit('turn_end', { turnIndex: turn, message: assistant, toolResults: results })
       // pi adds context messages sent during the turn once the turn has ended.
       for (const entry of this.pendingCustom.splice(0)) this.append(entry)
@@ -486,6 +493,35 @@ export class FakePi {
     // A follow-up the extension queued while the run went on starts the next run.
     const followUp = this.followUps.shift()
     if (followUp !== undefined) this.run = this.prompt(followUp, 'extension').then(() => {})
+  }
+
+  /** Run a reply's tool calls as pi's agent loop does (`toolExecution`), and add their results. */
+  private async runTools(calls: ToolCallBlock[]): Promise<AgentMessage[]> {
+    const prepare = async (call: ToolCallBlock) => {
+      await this.emit('tool_execution_start', { toolCallId: call.id, toolName: call.name, args: call.arguments })
+      const outcome = await this.emit('tool_call', { toolCallId: call.id, toolName: call.name, input: call.arguments })
+      return isObject(outcome) && outcome.block === true
+    }
+    const finish = async (call: ToolCallBlock, blocked: boolean) => {
+      const result = blocked ? toolResult(call, 'Blocked by an extension', true) : await this.execute(call)
+      await this.emit('tool_execution_end', { toolCallId: call.id, toolName: call.name, result, isError: false })
+      return result
+    }
+    const results: AgentMessage[] = []
+    if (this.toolExecution === 'sequential') {
+      for (const call of calls) {
+        const result = await finish(call, await prepare(call))
+        await this.message(result)
+        results.push(result)
+      }
+      return results
+    }
+    const blocked: boolean[] = []
+    for (const call of calls) blocked.push(await prepare(call))
+    // pi starts every prepared call at once; its file mutation queue runs writes to one file in order.
+    for (const [index, call] of calls.entries()) results.push(await finish(call, blocked[index]!))
+    for (const result of results) await this.message(result)
+    return results
   }
 
   /** A message's start and end; pi commits what the end handlers leave. */
@@ -506,6 +542,7 @@ export class FakePi {
 
   private assistant(reply: Reply): AgentMessage {
     const content = [
+      ...(reply.thinking ? [{ type: 'thinking', thinking: reply.thinking, thinkingSignature: 'signature' }] : []),
       ...(reply.text ? [{ type: 'text', text: reply.text }] : []),
       ...(reply.calls ?? []).map((call) => ({
         type: 'toolCall',
@@ -564,7 +601,7 @@ export class FakePi {
   private async emit(type: string, event: Record<string, unknown>): Promise<unknown> {
     for (const observe of this.observers) observe(type, event)
     let result: unknown
-    for (const handler of this.runtime?.handlers.get(type) ?? []) {
+    for (const handler of [...(this.runtime?.handlers.get(type) ?? []), ...(this.others.get(type) ?? [])]) {
       try {
         const answer = await handler({ type, ...event }, this.context())
         if (answer !== undefined) result = answer

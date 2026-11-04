@@ -26,6 +26,8 @@ export type FakeRecord = {
   sequence: number
   turnSequence?: number
   update: { sessionUpdate: string; [key: string]: any }
+  /** Set when Delta fenced the record: it took its sequence for a turn Delta had superseded. */
+  disposition?: 'fenced'
 }
 export type FakeThread = {
   thread_id: string
@@ -159,9 +161,23 @@ export async function fakeDelta(args: string[], io: FakeIo): Promise<number> {
     return code
   }
   if (answer.run) await runToExit(args, { ...io, write: () => {}, hold: async () => {} })
+  // A held command holds its answer too, so a test can deliver an answer it chose late.
+  else await waitWhileHeld(args, io)
   if (answer.stdout) io.write('stdout', answer.stdout)
   if (answer.stderr) io.write('stderr', answer.stderr)
   return answer.exitCode ?? 1
+}
+
+/** Wait while a test holds `args`'s command (`world().hold`), once its runs to let through have passed. */
+async function waitWhileHeld(args: string[], io: FakeIo) {
+  const root = io.env.FAKE_DELTA_STATE
+  if (!root) return
+  const [group, command] = args.filter((arg) => arg !== '--json')
+  const holding = join(root, `hold-${`${group} ${command ?? ''}`.trim().replaceAll(' ', '-')}`)
+  if (!existsSync(holding)) return
+  const value = JSON.parse(readFileSync(holding, 'utf8')) as { after: number }
+  if (value.after > 0) return writeFileSync(holding, JSON.stringify({ after: value.after - 1 }))
+  while (existsSync(holding)) await new Promise((resolve) => setTimeout(resolve, 20))
 }
 
 async function runToExit(args: string[], io: FakeIo): Promise<number> {
@@ -306,7 +322,14 @@ async function run(args: string[], io: FakeIo): Promise<void> {
   // `fail-<command>` counts down, each after letting `after` runs through: see world() in test/world.ts.
   const switchName = words.replaceAll(' ', '-')
   /** Whether this run is past the runs the switch lets through; counts them down meanwhile. */
-  type Switch = { after: number; times?: number; code?: string; retryable?: boolean; reason?: string }
+  type Switch = {
+    after: number
+    times?: number
+    code?: string
+    retryable?: boolean
+    reason?: string
+    accept?: number
+  }
   const reached = (path: string): Switch | undefined => {
     if (!existsSync(path)) return
     const value = JSON.parse(readFileSync(path, 'utf8')) as Switch
@@ -334,12 +357,14 @@ async function run(args: string[], io: FakeIo): Promise<void> {
     const left = (failure.times ?? 1) - 1
     if (left <= 0) rmSync(failing, { force: true })
     else writeFileSync(failing, JSON.stringify({ ...failure, after: 0, times: left }))
-    fail(
-      failure.code ?? 'process_failed',
-      `${words} failed as the test asked`,
-      failure.retryable ?? true,
-      failure.reason,
-    )
+    // An append can fail after Delta accepted its leading records; it fails once they are acknowledged.
+    if (failure.accept === undefined)
+      fail(
+        failure.code ?? 'process_failed',
+        `${words} failed as the test asked`,
+        failure.retryable ?? true,
+        failure.reason,
+      )
   }
 
   switch (words) {
@@ -523,6 +548,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
       const thread = known(state, locator)
       if (!thread) fail('invalid_reference', `no thread ${locator}`)
       const producer = state.producers[producerKey(source, external)]
+      // A test detaches the thread's checkouts (`world().detach`), as Delta reports a checkout it stopped syncing.
+      const detached = flag(`detached-${thread.thread_id}`)
       // Delta's background upload of a thread created with an upload organization, as a test sets it in
       // `upload.json` (`world().upload`); uploaded otherwise. Until Delta registers it, it has no link.
       const upload: FakeUpload =
@@ -557,8 +584,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
               .flatMap((tree) =>
                 tree.directories.map((entry) => ({
                   directory: entry.directory,
-                  state: 'attached',
-                  active: entry.state === 'mounted',
+                  state: detached ? 'detached' : 'attached',
+                  active: !detached && entry.state === 'mounted',
                 })),
               ),
           })),
@@ -624,8 +651,12 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         .split('\n')
         .filter(Boolean)
         .map((line) => JSON.parse(line))
+        .slice(0, failure?.accept)
       const receipts = update((state) => {
         const thread = known(state, locator)
+        // The turns a test superseded (`world().supersede`), whose later records Delta fences.
+        const supersededPath = join(root, `superseded-${thread.thread_id}.json`)
+        const superseded: number[] = existsSync(supersededPath) ? JSON.parse(readFileSync(supersededPath, 'utf8')) : []
         const producer =
           state.producers[producerKey(source, external)] ??
           (state.producers[producerKey(source, external)] = { thread: thread.thread_id, next: 1 })
@@ -655,10 +686,13 @@ async function run(args: string[], io: FakeIo): Promise<void> {
               turn_sequence: record.turnSequence ?? null,
               version: 'v1',
             }
+          // Delta fences what a superseded turn records: it takes the sequence, not the conversation.
+          const disposition = superseded.includes(record.turnSequence) ? 'fenced' : 'recorded'
           thread.records.push({
             producer: external,
             acknowledge: option(rest, '--acknowledge') ?? 'server',
             name: option(rest, '--producer-name'),
+            ...(disposition === 'fenced' ? { disposition } : {}),
             ...record,
           })
           if (record.update?.sessionUpdate === 'session_info_update') thread.title = record.update.title
@@ -668,7 +702,7 @@ async function run(args: string[], io: FakeIo): Promise<void> {
             sequence: record.sequence,
             next_sequence: producer.next,
             duplicate: false,
-            disposition: 'recorded',
+            disposition,
             turn_sequence: record.turnSequence ?? null,
             version: 'v1',
           }
@@ -678,6 +712,8 @@ async function run(args: string[], io: FakeIo): Promise<void> {
         if (receipt.gap) fail('sequence_gap', 'records out of order')
         out(receipt)
       }
+      if (failure?.accept !== undefined)
+        fail(failure.code ?? 'process_failed', `${words} failed as the test asked`, failure.retryable ?? true)
       break
     }
     case 'thread watch': {

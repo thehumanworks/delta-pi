@@ -220,3 +220,131 @@ describe('tool paths', () => {
 test("a malformed file URL is kept as written rather than failing the message's record", () => {
   expect(absolutePath('file://%ZZ', '/repo')).toBe('/repo/file:/%ZZ')
 })
+
+describe('content', () => {
+  test('backticks cannot close an output or command fence', () => {
+    expect(shellMarkdown('cat notes', '```\ntext\n````')).toBe('Ran `cat notes`\n\n`````\n```\ntext\n````\n`````')
+    expect(shellMarkdown('echo ```\npwd', '')).toBe('Ran\n\n````\necho ```\npwd\n````')
+  })
+
+  test('filters metadata by row provenance while preserving literal lookalike human messages', () => {
+    const content = [
+      { type: 'text', text: '<system-reminder>literal example</system-reminder>\n<command-name>/delta</command-name>' },
+      { type: 'text', text: '[Delta] Ada: remote context' },
+      { type: 'text', text: '<bash-input>ls</bash-input>' },
+    ]
+    // What the person typed, and what the model replied, are recorded as written, however they read.
+    expect(recordedMessage(message({ role: 'user', content, timestamp: 1 }))).toEqual({ role: 'user', content })
+    expect(messageUpdates(recordedMessage(message({ role: 'user', content, timestamp: 1 }))!, 'm')).toEqual([
+      { sessionUpdate: 'user_message', messageId: 'm:message:0', content },
+    ])
+    expect(recordedMessage(message({ role: 'assistant', content, timestamp: 1 }))).toEqual({
+      role: 'assistant',
+      content,
+    })
+    // pi's own framing and what extensions give the model are kept out by their role, not their text.
+    for (const role of ['custom', 'compactionSummary', 'branchSummary'])
+      expect(recordedMessage(message({ role, customType: 'other', content, summary: 'framing' }))).toBeUndefined()
+    expect(recordedMessage(message({ role: 'custom', customType: REMOTE_MESSAGE, content, display: true }))).toBe(
+      undefined,
+    )
+  })
+
+  test('skips blank text and signature-only thoughts while preserving redacted and nonblank content', () => {
+    for (const role of ['user', 'assistant'] as const)
+      expect(
+        messageUpdates(
+          {
+            role,
+            content: [
+              { type: 'text', text: '' },
+              { type: 'text', text: ' \n\t ' },
+            ],
+          },
+          'blank',
+        ),
+      ).toEqual([])
+    const redacted = { type: 'thinking', thinking: '', redacted: true, thinkingSignature: 'opaque-redacted' }
+    expect(
+      messageUpdates(
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: '', thinkingSignature: 'signature-only' },
+            { type: 'text', text: ' \n ' },
+            { type: 'thinking', thinking: '\t\n', thinkingSignature: 'whitespace-only' },
+            { type: 'text', text: ' kept ' },
+            { type: 'thinking', thinking: '', thinkingSignature: 'another-signature' },
+            { type: 'text', text: 'also kept' },
+            redacted,
+          ],
+        },
+        'm',
+      ),
+    ).toEqual([
+      {
+        sessionUpdate: 'agent_message',
+        messageId: 'm:message:3',
+        content: [
+          { type: 'text', text: ' kept ' },
+          { type: 'text', text: 'also kept' },
+        ],
+      },
+      {
+        sessionUpdate: 'agent_thought',
+        messageId: 'm:thought:6',
+        content: [{ type: 'text', text: '[redacted thinking]' }],
+        _meta: { pi: { block: redacted } },
+      },
+    ])
+  })
+
+  test('wraps MCP tool result content in ACP v2 variants and preserves payloads', () => {
+    // pi's tool results hold text and images; anything else, or an image whose data is not canonical
+    // base64, stays visible as its JSON rather than becoming invalid ACP.
+    const content = [
+      { type: 'text', text: 'changed' },
+      { type: 'image', data: 'AA==', mimeType: 'image/png' },
+      { type: 'image', data: 'AB==', mimeType: 'image/png' },
+      { type: 'image', data: 'AQ==' },
+      { type: 'audio', data: 'Ag==', mimeType: 'audio/wav' },
+    ]
+    const details = { server: 'linear', isError: false }
+    const result = recordedMessage(
+      message({ role: 'toolResult', toolCallId: 't1', toolName: 'linear_get_issue', content, details, isError: false }),
+    )!
+    expect(messageUpdates(result, 'm2')).toEqual([
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 't1',
+        status: 'completed',
+        rawOutput: { content, details },
+        content: [
+          { type: 'content', content: { type: 'text', text: 'changed' } },
+          { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } },
+          { type: 'content', content: { type: 'text', text: JSON.stringify(content[2]) } },
+          { type: 'content', content: { type: 'text', text: JSON.stringify(content[3]) } },
+          { type: 'content', content: { type: 'text', text: JSON.stringify(content[4]) } },
+        ],
+      },
+    ])
+    const failed = recordedMessage(
+      message({
+        role: 'toolResult',
+        toolCallId: 't1',
+        toolName: 'linear_get_issue',
+        content: [{ type: 'text', text: 'failed' }],
+        isError: true,
+      }),
+    )!
+    expect(messageUpdates(failed, 'm3')).toEqual([
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 't1',
+        status: 'failed',
+        rawOutput: { content: [{ type: 'text', text: 'failed' }] },
+        content: [{ type: 'content', content: { type: 'text', text: 'failed' } }],
+      },
+    ])
+  })
+})

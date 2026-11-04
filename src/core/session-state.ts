@@ -129,6 +129,24 @@ export function stillActive(session: string): () => boolean {
 }
 let queue: Promise<unknown> = Promise.resolve()
 /**
+ * Each session's delivery under way in this pi process, which a later one waits for (see `drain`). A
+ * runtime's delivery can outlast its session, as a slow append does, and two deliveries of one session
+ * would each acknowledge the same records against a binding the other changed. pi evaluates this
+ * module afresh for every runtime, so the registry lives on `globalThis`, as the plugin's one
+ * delivery lives in its one process.
+ */
+export const drains: Map<string, Promise<void>> = ((globalThis as Record<symbol, unknown>)[
+  Symbol.for('pi-delta.drains')
+] ??= new Map()) as never
+/**
+ * Records an ended session could not save, and why, for the life of the pi process, as the plugin
+ * keeps them for the life of its: a session resumed in this process still holds them, and a share or
+ * join saves them. On `globalThis`, since pi evaluates this module afresh for every runtime.
+ */
+const unsavedOfEnded: Map<string, Pick<SessionState, 'unsaved' | 'captureFailure'>> = ((
+  globalThis as Record<symbol, unknown>
+)[Symbol.for('pi-delta.unsaved')] ??= new Map()) as never
+/**
  * The join and the share running now, and a share asked for while the session's turn ran, with whom;
  * that one starts when the turn ends.
  */
@@ -202,9 +220,12 @@ export const sessions = new Map<string, SessionState>()
 export function stateFor(session: string): SessionState {
   let state = sessions.get(session)
   if (!state) {
+    const kept = unsavedOfEnded.get(session)
+    unsavedOfEnded.delete(session)
     state = {
       notes: [],
-      unsaved: [],
+      unsaved: kept?.unsaved ?? [],
+      ...(kept?.captureFailure ? { captureFailure: kept.captureFailure } : {}),
       pauses: new Map(),
       retryAttempts: 0,
       toolTurns: new Map(),
@@ -352,6 +373,14 @@ export function resetRuntime(runtime: SessionState) {
   runtime.currentTurnId = undefined
   runtime.promptEntering = false
   runtime.reminder = undefined
+}
+
+/** Forget an ended session's state, keeping the records it could not save for a resume in this process. */
+export function forgetRuntime(session: string, runtime: SessionState) {
+  if (sessions.get(session) !== runtime) return
+  sessions.delete(session)
+  if (runtime.unsaved.length)
+    unsavedOfEnded.set(session, { unsaved: runtime.unsaved, captureFailure: runtime.captureFailure })
 }
 
 /**
