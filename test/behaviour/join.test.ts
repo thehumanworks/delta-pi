@@ -780,6 +780,8 @@ test('terminal: repeated join aliases preserve the existing producer and pending
   kit.world.remote(thread, item)
   kit.world.endWatch(thread)
   await kit.until(() => shown(kit).includes('Connection interrupted'), 'the watch to drop')
+  // The dropped watch's last rows land before the baseline, however loaded the machine.
+  await kit.quiet()
   const commands = kit.commands().length
   const rows = kit.pi.contextMessages().length
   // Joining again by the thread's ID reconnects this session as it is, while Delta still cannot be reached.
