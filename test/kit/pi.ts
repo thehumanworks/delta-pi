@@ -737,7 +737,11 @@ export class FakePi {
   private async ask(dialog: Dialog): Promise<string | undefined> {
     this.dialogs.push(dialog)
     const answer = this.answers.length ? this.answers.shift() : this.respond
-    return typeof answer === 'function' ? answer(dialog) : answer
+    const value = await (typeof answer === 'function' ? answer(dialog) : answer)
+    // pi's terminal picks one of a selection's options; a test answering anything else is mistaken.
+    if (dialog.method === 'select' && value !== undefined && !dialog.options?.includes(value))
+      throw new Error(`"${value}" is not an option of the selection "${dialog.title}"`)
+    return value
   }
 
   /** The API pi hands the extension; like pi's, it throws once the runtime is replaced. */

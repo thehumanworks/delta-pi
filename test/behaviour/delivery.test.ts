@@ -81,19 +81,30 @@ test('a failure that lands after its session ended is neither retried nor shown'
   delta = await recording()
   await delta.pi.prompt('one')
   await delta.until(() => delivered(delta!, 'Echo: one'), 'the first turn')
-  const release = delta.world.hold('thread append')
-  delta.world.fail('thread append', { code: 'failed' })
+  await delta.quiet()
+  // Hold the in-flight turn's append, the next one; the new session's run as usual.
+  const release = delta.world.hold('thread append', { times: 1 })
+  const ended = delta.pi.session.id
+  const of = (session: string) => delta!.commands().filter((args) => args[1] === 'append' && args.includes(session))
+  const before = of(ended).length
   void delta.pi.submit('in flight')
-  await delta.until(() => appends(delta!) >= 2, 'the append to start')
+  await delta.until(() => of(ended).length > before, 'the append to start')
   const notices = delta.pi.notices.length
   await delta.whileTimePasses(delta.pi.newSessionIn())
+  await delta.quiet({ running: 1 })
+  const sent = of(ended).length
   const attempts = appends(delta)
+  // The failure lands on a held append of the ended session, as no other append runs meanwhile.
+  delta.world.fail('thread append', { code: 'failed' })
   release()
   await delta.settle()
   await delta.advance(120_000)
+  await delta.quiet()
   // Only the new session's own commands may run; the ended one's failure is not retried for it.
-  const ended = delta.pi.notices.slice(notices).filter((notice) => notice.text.includes('failed as the test asked'))
-  expect(ended).toEqual([])
+  const shown = delta.pi.notices.slice(notices).filter((notice) => notice.text.includes('failed as the test asked'))
+  expect(existsSync(join(delta.world.state, 'fail-thread-append')), 'the held append took the failure').toBe(false)
+  expect(shown).toEqual([])
+  expect(of(ended)).toHaveLength(sent)
   expect(appends(delta)).toBeLessThanOrEqual(attempts + 1)
 })
 

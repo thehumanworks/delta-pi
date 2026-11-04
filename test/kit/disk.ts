@@ -125,8 +125,7 @@ export const disk = {
     current.faults.length = 0
     current.touched.length = 0
     current.contents.length = 0
-    current.running = 0
-    current.held = 0
+    // What is under way is not forgotten: an operation an earlier test started still ends.
   },
 }
 
