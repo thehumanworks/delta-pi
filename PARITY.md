@@ -104,8 +104,7 @@ Where this port behaves differently from upstream on purpose or because pi makes
 - **A remote row whose session file write fails** stays in this process's context and is counted as added;
   it is offered again only when the session resumes. pi's `sendMessage` reports a failed write on pi's own
   error channel, not to the caller; a row pi did not add at all is offered again.
-- **A drawn remote row after a restart** shows its saved display until the watch is back, and nothing once
-  a complete snapshot lacks it, where upstream shows a placeholder.
+- **A drawn remote row after a restart** shows its saved display until the watch is back.
 - **Two shares cannot start in the same Windows session from different folders**: pi fixes a session's
   folder when it starts, so upstream's tests of a share whose folder changes during installation do not
   apply.

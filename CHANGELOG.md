@@ -52,6 +52,9 @@
 - Extension update checks keep to the session's clock, report a missing `pi` program usefully, tell a
   reload pi refused or that failed apart from an activated update, and offer a version already installed
   by another pi as a reload.
+- A teammate's row whose item is no longer in the thread shows "A Delta item that is not in this session."
+  (or comment), as the Claude Code plugin does.
+- A `!` shell command run while sharing refuses prompts is staged at once and delivered by the next share.
 
 ### Added
 
