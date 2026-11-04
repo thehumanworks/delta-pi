@@ -1693,7 +1693,7 @@
       "upstream": "register.test.ts > remote activity > the command output row draws its author and the item's own markdown",
       "status": "ported",
       "ours": ["test/behaviour/remote.test.ts > the command output row draws its author and the item's own markdown"],
-      "note": "The custom message's renderer draws the author bold in their person color with (person)/(agent), the item's own markdown rendered, a failed tool as one line with its flattened input and red status, and nothing once the message or tool is removed. Upstream's checks of another command's row and of a placeholder for an unknown id have no pi counterpart: pi draws only this extension's custom messages with it, each carrying its own details."
+      "note": "The renderer draws the author bold in their person color with (person)/(agent), the item's own markdown, a failed tool as one line, and nothing once the item is removed; a row whose item a complete snapshot no longer holds draws upstream's placeholder 'A Delta item that is not in this session.' (src/watch/rows.ts)."
     },
     {
       "upstream": "register.test.ts > remote activity > the internal show form is only answered for the plugin itself; typing it gets the usage text",
@@ -1854,7 +1854,7 @@
       "upstream": "register.test.ts > sharing > resume observes unshared setup without publishing or reattaching",
       "status": "ported",
       "ours": ["test/behaviour/lifecycle.test.ts > resume observes unshared setup without publishing or reattaching"],
-      "note": "Status reports the thread unpublished and access local only (patch); the resumed session refuses its prompt and runs no setup, and the explicit share publishes again with the same mount, after which prompts deliver. pi's shell command and prompts stand in for upstream's tool call."
+      "note": "Status reports the thread unpublished and access local only; the resumed session refuses its prompt and runs no setup, a shell command run before the refused prompt is staged (index.ts now records what pi committed before refusing), and the explicit share publishes again with the same mount and delivers it once, in its place. pi's shell command stands in for upstream's tool call."
     },
     {
       "upstream": "register.test.ts > sharing > resume takes prompts while its checkout mount waits for Delta, and delivers them once it is back",
@@ -2135,7 +2135,7 @@
       "ours": [
         "test/behaviour/watch.test.ts > readiness with lost acknowledged history fails closed without reset or reimport"
       ],
-      "note": "Delta's producer is set back to sequence 1 between sessions: on resume a shell command stays queued, a prompt is refused, /delta share does not succeed, and nothing is appended, exported again or set up."
+      "note": "Delta's producer is set back to sequence 1 between sessions: on resume a shell command stays queued, a prompt is refused, /delta share (keeping current sharing) fails naming the lost history, and nothing is appended or exported again; the share attaches and publishes the same thread again and creates none."
     },
     {
       "upstream": "register.test.ts > the watch > reconnection retries with capped backoff and session end stops the idle child",
@@ -2870,11 +2870,11 @@
     },
     {
       "upstream": "sharing/join.test.ts > joining > a thread with three worktrees is joined in a thread folder and every worktree is checked before a prompt",
-      "status": "ported",
+      "status": "covered",
       "ours": [
         "test/behaviour/join.test.ts > a thread with three worktrees is joined in a thread folder and every worktree is checked before a prompt"
       ],
-      "note": "The fake Delta now names worktrees and mounts several apart, in a folder of their own. A worktree reported inactive refuses the prompt naming only it, until it is active again, with no mount in between. The band did not name it for a client without pi's terminal; src/recording/prompt.ts now redraws the band. Upstream's Claude-outside-the-directory case has no pi counterpart (fixed session directory)."
+      "note": "A worktree reported inactive refuses the prompt naming only it, until it is active again. Not checked as upstream does: the Claude-outside-the-directory case (pi's session directory is fixed), the export count, and the number of mounts (ours runs thread mount with --join and again without; upstream mounts once)."
     },
     {
       "upstream": "sharing/join.test.ts > joining > a worktree added during a turn waits for the turn to end before telling Claude and moving it",
@@ -2964,11 +2964,11 @@
     },
     {
       "upstream": "sharing/join.test.ts > joining > resume mounts again, moves Claude from its launch directory, and records only new rows",
-      "status": "ported",
+      "status": "covered",
       "ours": [
         "test/behaviour/join.test.ts > resume mounts again, moves Claude from its launch directory, and records only new rows"
       ],
-      "note": "pi resumes the session in the folder its file names, so there is no move: a new pi process remounts without --join while prompts wait (band: restoring), the binding is unchanged, only the new turn is recorded, /delta share points to /delta-join, and resuming again mounts again. Resuming outside the folder is refused (see the Windows test)."
+      "note": "pi resumes the session in the folder its file names, so there is no move: a new pi process remounts without --join while prompts wait, the binding is unchanged, and only the new turn is recorded; that nothing is exported again is shown by comparing the delivered record prefix rather than by upstream's export count."
     },
     {
       "upstream": "sharing/join.test.ts > joining > same-thread recovery interrupted during status preserves the replacement session and its live watcher",

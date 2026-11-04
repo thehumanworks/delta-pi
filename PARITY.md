@@ -36,8 +36,8 @@ Each entry gives its reason. Three checks keep the record honest:
 <!-- parity-summary:start -->
 | Status | Upstream tests |
 | --- | --- |
-| ported | 363 |
-| covered | 78 |
+| ported | 361 |
+| covered | 80 |
 | unsupported | 1 |
 | not-applicable | 67 |
 <!-- parity-summary:end -->
