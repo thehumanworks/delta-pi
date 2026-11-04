@@ -162,6 +162,9 @@ export function spawn(init: SpawnInit): ProcessStream {
       wake()
     })
   })
+  /** The program itself exited, though its output may still be held open by a descendant. */
+  let programExited = false
+  child.on('exit', () => (programExited = true))
   child.on('error', (error) => {
     failure = error
     exit ??= { code: null, signal: null }
@@ -197,8 +200,20 @@ export function spawn(init: SpawnInit): ProcessStream {
     },
     terminate() {
       if (exit || closed || kill) return
+      // A descendant holding the output open would keep the stream from ever ending: once the program
+      // has exited, or been killed, what is left of its output is let go.
+      const letGo = () => {
+        child.stdout.destroy()
+        child.stderr.destroy()
+      }
+      const afterExit = () => setTimeout(letGo, KILL_GRACE_MS).unref()
+      if (programExited) afterExit()
+      else child.once('exit', afterExit)
       child.kill('SIGTERM')
-      kill = setTimeout(() => child.kill('SIGKILL'), TERMINATE_GRACE_MS)
+      kill = setTimeout(() => {
+        child.kill('SIGKILL')
+        letGo()
+      }, TERMINATE_GRACE_MS)
       kill.unref()
     },
     async return(): Promise<IteratorResult<Output, Exit>> {

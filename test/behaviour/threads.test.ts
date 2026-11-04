@@ -293,7 +293,7 @@ describe('Delta threads as subagents', () => {
     kit.world.remote(notes_.thread_id, { type: 'producer.turn', sequence: running.sequence, status: 'superseded' })
     await sending
     expect(reply(kit)).toBe(
-      `[Delta] Someone took over the thread "Release notes" in Delta, so pi stopped its run here. Delta's agent continues it in that thread; its reply is added here when Delta's turn ends. Send "Release notes" a message with delta_thread to run it here again.`,
+      `[Delta] Someone took over the thread "Release notes" in Delta, so pi stopped its run here. Delta's agent continues it in that thread; its reply is added here when Delta's turn ends. Send "Release notes" a message with delta_thread to run it here again.\n\nThe thread's pi reported:\nSomeone took this subagent's thread over in Delta; stopped pi's turn. Tool effects already performed are not rolled back.`,
     )
     // pi records only the end of the turn Delta took over, which Delta fences.
     expect(recordsOf(kit, notes_.thread_id, producer).slice(recorded).map(shape)).toEqual([['state_update', 'idle']])
@@ -340,7 +340,11 @@ describe('Delta threads as subagents', () => {
     kit.pi.abort()
     await sending
     expect(kit.pi.toolResults.at(-1)?.result.isError).toBe(true)
-    const last = recordsOf(kit, notes_.thread_id, child.pi.session.id).at(-1)
+    // Its pi recorded the turn's end on its way out, however long that delivery took.
+    const last = await kit.until(
+      () => recordsOf(kit, notes_.thread_id, child.pi.session.id).find((record: any) => record.update.state === 'idle'),
+      "the run's end",
+    )
     expect(last.update).toMatchObject({ sessionUpdate: 'state_update', state: 'idle', stopReason: 'cancelled' })
   })
 
@@ -359,4 +363,152 @@ describe('Delta threads as subagents', () => {
     })
     expect(outcome).toBe('Delta threads can be run only from an interactive pi session that Delta records.')
   })
+
+  test('two delta_thread calls to one thread in one reply start one pi', async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE, RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    program.model = () => ({ text: 'ok' })
+    // pi runs a reply's tool calls at once.
+    kit.pi.model = (history) =>
+      (history.at(-1) as { role: string }).role === 'toolResult'
+        ? { text: 'Done.' }
+        : {
+            calls: [
+              { name: 'delta_thread', arguments: { thread: 'Release notes', message: 'one' } },
+              { name: 'delta_thread', arguments: { thread: 'Release notes', message: 'two' } },
+            ],
+          }
+    await kit.pi.prompt('delegate')
+    expect(program.starts).toHaveLength(1)
+    expect(kit.pi.toolResults.map((result) => result.result.content[0]?.text)).toContain(
+      'pi is already running the Delta thread "Release notes"; its reply comes back to that call.',
+    )
+  })
+
+  test('a thread run its session ended is not reported as finished, and pi asks its model nothing more', async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    program.model = (_history, signal) =>
+      new Promise((resolve) => signal!.addEventListener('abort', () => resolve({ text: 'half done' })))
+    let asked = 0
+    kit.pi.model = (history) => {
+      asked++
+      return (history.at(-1) as { role: string }).role === 'toolResult'
+        ? { text: 'Great, the thread finished.' }
+        : { calls: [{ name: 'delta_thread', arguments: { thread: 'Release notes', message: 'go' } }] }
+    }
+    const sending = kit.pi.prompt('delegate')
+    await kit.until(
+      () => recordsOf(kit, notes_.thread_id).some((record: any) => record.update.state === 'running'),
+      "the thread's running turn",
+    )
+    await kit.stop()
+    await sending
+    expect(kit.pi.toolResults.at(-1)?.result).toMatchObject({
+      isError: true,
+      content: [{ text: 'The session ended, so pi stopped running the Delta thread "Release notes".' }],
+    })
+    expect(asked).toBe(1)
+  })
+
+  test('a session that ends while a thread run is being prepared starts no pi for it', async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    kit.pi.model = messages('Release notes', 'Write RELEASE.md')
+    // The thread's read holds, so the session ends before the run knows which thread it runs.
+    const release = kit.world.hold('thread watch')
+    const reads = () => kit.commands().filter((args) => args[1] === 'watch' && !args.includes('--source')).length
+    const before = reads()
+    const sending = kit.pi.prompt('delegate')
+    await kit.until(() => reads() > before, 'the thread to be read')
+    const stopping = kit.stop()
+    await kit.until(() => kit.pi.toolResults.length || program.starts.length || kit.clock.now() > 0, 'the end to start')
+    release()
+    await stopping
+    await sending
+    expect(program.starts).toEqual([])
+    expect(reply(kit)).toBe('The session ended, so pi stopped running the Delta thread "Release notes".')
+  })
+
+  test("a thread with worktrees of its own runs in their mount, which the session's end releases after its pi", async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = ownThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    program.model = () => ({ text: 'Wrote it' })
+    kit.pi.model = messages('Release notes', 'Write RELEASE.md')
+    await kit.pi.prompt('delegate')
+    expect(reply(kit)).toContain('finished its turn')
+    const mount = kit.commands().find((args) => args[0] === 'thread' && args[1] === 'mount')
+    expect(mount).toContain(notes_.reference)
+    expect(program.starts[0]!.cwd).toContain(notes_.thread_id)
+    expect(kit.running().some((args) => args[1] === 'mount')).toBe(true)
+    await kit.stop()
+    expect(kit.running().some((args) => args[1] === 'mount')).toBe(false)
+  })
+
+  test("a session ends even when a thread's pi will not exit", async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    program.next = 'deaf'
+    kit.pi.model = messages('Release notes', 'Write RELEASE.md')
+    void kit.pi.prompt('delegate')
+    await kit.until(() => program.starts.length, 'pi to be started')
+    await kit.stop()
+  })
+
+  test("a thread's pi that Delta would not record is stopped, not reported as finished", async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    // The thread's pi cannot verify its Delta CLI, so its recording never starts.
+    kit.world.fail('thread contract', { times: 10, retryable: false })
+    program.model = () => ({ text: 'Wrote it unrecorded' })
+    kit.pi.model = messages('Release notes', 'Write RELEASE.md')
+    await kit.pi.prompt('delegate')
+    expect(reply(kit)).toBe('pi started no subagent to run the Delta thread "Release notes".')
+    kit.world.stopFailing('thread contract')
+  })
+
+  test("what a thread's pi reports while it runs, such as Delta pausing its recording, comes back with its reply", async () => {
+    const { kit, program, root } = await parent({ answers: [RUN_HERE] })
+    const notes_ = teammateThread(kit, root)
+    listed(kit, root, notes_, 'inactive')
+    await kit.until(() => notes(kit).length, 'the threads note')
+    let answer!: () => void
+    program.model = () => new Promise((resolve) => (answer = () => resolve({ text: 'Wrote it' })))
+    kit.pi.model = messages('Release notes', 'Write RELEASE.md')
+    const sending = kit.pi.prompt('delegate')
+    const child = await program.child(0)
+    await kit.until(
+      () =>
+        recordsOf(kit, notes_.thread_id, child.pi.session.id).some((record: any) => record.update.state === 'running'),
+      "the thread's running turn",
+    )
+    kit.world.fail('thread append', { times: 1_000, code: 'invalid_reference', retryable: false })
+    answer()
+    await sending
+    kit.world.stopFailing('thread append')
+    expect(reply(kit)).toMatch(/finished its turn[\s\S]*\n\nThe thread's pi reported:\n.*Delta/)
+  })
 })
+
+/** A thread of the conversation someone else started with a worktree of its own. */
+function ownThread(kit: Kit, root: string) {
+  const created = kit.world.cli(
+    ...['thread', 'create', '--source', 'other', '--external-id', 'teammate', '--parent', root],
+    ...['--name', 'Release notes'],
+  )
+  const worktree = kit.world.cli('worktree', 'create', `${kit.world.base}/notes`)
+  kit.world.cli('worktree', 'attach', worktree.reference, '--thread', created.thread_id)
+  return { thread_id: created.thread_id as string, reference: created.reference as string, name: 'Release notes' }
+}

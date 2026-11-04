@@ -42,7 +42,7 @@ import {
 import { writeExclusive } from './src/core/files.ts'
 import { fileStore } from './src/core/store.ts'
 import { errorText } from './src/core/text.ts'
-import { forgetContract } from './src/cli/delta-cli.ts'
+import { forgetContract, verifiedContract } from './src/cli/delta-cli.ts'
 import { BandWidget, bandText, clearProgress } from './src/band/band.ts'
 import { type Note, renderNote, renderRemote } from './src/band/renderers.ts'
 import { REMOTE_MESSAGE } from './src/recording/content.ts'
@@ -92,6 +92,7 @@ import {
   endThreadRuns,
   forgetThreadNotes,
   messageThread,
+  noteForParent,
   takeHandoff,
 } from './src/subagents/thread-runs.ts'
 import { deliverNote } from './src/watch/rows.ts'
@@ -191,6 +192,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     // answer or its stream of events.
     if (context.hasUI && context.mode !== 'tui') context.ui.notify(text, tone)
     else if (!context.hasUI) platform.stderr(`${text}\n`)
+    noteForParent(host, context.sessionManager.getSessionId(), text)
   }
   const host: Host = {
     pi,
@@ -328,6 +330,7 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
         details: reply.details,
         ...(reply.usage ? { usage: reply.usage } : {}),
         ...(reply.isError ? { isError: true } : {}),
+        ...(reply.terminate ? { terminate: true } : {}),
       }
     },
   })
@@ -457,7 +460,10 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
       pi.setActiveTools(offered ? [...active, THREAD_TOOL] : active.filter((name) => name !== THREAD_TOOL))
     // A thread run by another session adds the thread's history its parent left for this run, which
     // pi places after the prompt; taking it also tells the parent this run is recorded.
-    if (!stateFor(session).binding?.child?.adopted) return
+    // A run Delta would not record, as when its CLI was refused, leaves the hand-off, which the parent
+    // sees, and stops it before it works in the thread's worktrees.
+    const runtime = stateFor(session)
+    if (!runtime.binding?.child?.adopted || verifiedContract(session) === undefined || runtime.captureFailure) return
     const handoff = await takeHandoff(host, session)
     if (!handoff?.note) return
     return {
@@ -527,7 +533,12 @@ export function createDelta(pi: ExtensionAPI, platform: Platform) {
     stopPluginUpdates()
     stopChildTurn()
     // The threads this session runs stop first, and their mounts go only once they have exited.
-    await endThreadRuns(host, session, stateFor(session).binding)
+    // A call that ran one answers that the session ended, which ends the turn that made it; the turn
+    // settles before the session's runtime goes.
+    if ((await endThreadRuns(host, session, stateFor(session).binding)) && !ctx.isIdle()) {
+      const settling = new Promise<void>((resolve) => settled.push(resolve))
+      await Promise.race([settling, host.clock.sleep(SUBAGENT_SETTLE_MS).catch(() => {})])
+    }
     forgetThreadNotes(session)
     // Records still queued get a bounded chance to reach Delta before pi switches or exits, once an
     // automatic activation still connecting the session has finished; the outbox keeps whatever is
