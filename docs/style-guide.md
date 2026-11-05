@@ -18,6 +18,8 @@ caller.
   checks its answer. *ast-grep `delta-commands-in-cli`; every behaviour test's `expectClean()`.*
 - Import statically, and import types with `type`. *ESLint `no-restricted-syntax`; TypeScript
   `verbatimModuleSyntax`.*
+- Import TypeBox (`Type`, `Static`, `TSchema`) from `typebox`, which pi supplies to extensions; pi-ai 1.5
+  and later do not export it. *ESLint `no-restricted-imports`.*
 
 ## State
 

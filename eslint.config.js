@@ -19,7 +19,13 @@ const boundaries = {
     message: 'Reach pi through the Host (src/core/host.ts); only index.ts binds it.',
   },
 }
-const restrict = (...paths) => ['error', { paths }]
+/** Pi supplies `typebox` to extensions; pi-ai 1.5 stopped re-exporting it, so importing it there fails tsc. */
+const typebox = {
+  name: '@earendil-works/pi-ai',
+  importNames: ['Type', 'Static', 'TSchema'],
+  message: "Import TypeBox from 'typebox': @earendil-works/pi-ai 1.5 and later do not export it.",
+}
+const restrict = (...paths) => ['error', { paths: [typebox, ...paths] }]
 
 export default tseslint.config(
   { ignores: ['node_modules/', 'test/fixtures/'] },
@@ -43,6 +49,7 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       // Every empty block says why it may be empty.
       'no-empty': ['error', { allowEmptyCatch: false }],
+      'no-restricted-imports': restrict(),
     },
   },
   {

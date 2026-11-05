@@ -18,7 +18,7 @@ import {
   SessionManager,
   VERSION,
 } from '@earendil-works/pi-coding-agent'
-import { Type } from '@earendil-works/pi-ai'
+import { Type } from 'typebox'
 import type { TUI } from '@earendil-works/pi-tui'
 import { systemClock } from './src/core/clock.ts'
 import { piVersionWarning } from './src/core/compatibility.ts'
