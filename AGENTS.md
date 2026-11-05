@@ -16,6 +16,11 @@ the conventions, and which of them lint, ast-grep and the tests check.
   save (`src/core/session-state.ts`).
 - Delta's recording contract: `delta --json thread contract`; the extension speaks version 8.
 
+When `nix` is available, run every project command (npm, npx, node, pi, tsc, the tests) inside the
+flake's development shell, from the checkout root: `nix develop -c <command>`. The shell pins Node,
+installs the locked dev dependencies and puts `node_modules/.bin` on `PATH`. Without `nix`, run the
+commands directly.
+
 Before finishing a change, run `npm run format`, then `npm run verify`: the format check, type check,
 ESLint, the ast-grep rules and their tests, and every test. `npm ci` supplies every tool they use, the
 pinned ast-grep included (`scripts/ast-grep.mjs` runs it through Node's loader on NixOS). Before a
